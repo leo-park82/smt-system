@@ -244,7 +244,7 @@ def append_data(data_dict, sheet_name):
     return False
 
 def update_inventory(code, name, change, reason, user):
-    """재고 수량 업데이트 (증가/감소 공통)"""
+    """재고 수량 업데이트"""
     df = load_data(SHEET_INVENTORY)
     
     if not df.empty and '현재고' in df.columns:
@@ -340,9 +340,9 @@ if menu == "🏭 생산관리":
                     
                     code = st.text_input("품목 코드", key="code_in", on_change=on_code)
                     name = st.text_input("제품명", key="name_in")
-                    qty = st.number_input("생산 수량", min_value=1, value=100)
+                    # [수정] 입력창 초기화를 위해 key 할당
+                    qty = st.number_input("생산 수량", min_value=1, value=100, key="prod_qty")
                     
-                    # [로직 변경] 후공정/외주는 차감(-), 그 외(생산)는 입고(+)
                     auto_deduct = False
                     if cat in ["후공정", "후공정 외주"]:
                         st.divider()
@@ -360,17 +360,20 @@ if menu == "🏭 생산관리":
                             }
                             with st.spinner("클라우드에 저장 중..."):
                                 if append_data(rec, SHEET_RECORDS):
-                                    # [수정 2 & 3] 재고 연동 로직 개선
                                     if cat in ["후공정", "후공정 외주"]:
                                         if auto_deduct:
-                                            # 후공정/외주는 재고 소진(차감)
                                             update_inventory(code, name, -qty, f"생산출고({cat})", get_user_id())
                                     else:
-                                        # 일반 생산은 재고 확보(증가)
                                         update_inventory(code, name, qty, f"생산입고({cat})", get_user_id())
                                         
                                     st.success("저장 완료!")
-                                    time.sleep(1); st.rerun()
+                                    
+                                    # [수정] 입력 필드 초기화
+                                    st.session_state.code_in = ""
+                                    st.session_state.name_in = ""
+                                    st.session_state.prod_qty = 100
+                                    
+                                    time.sleep(0.5); st.rerun()
                                 else: st.error("저장 실패 (네트워크 확인 필요)")
                         else: st.error("제품명을 입력해주세요.")
             else: st.warning("🔒 뷰어 모드입니다.")
@@ -379,33 +382,18 @@ if menu == "🏭 생산관리":
             st.markdown("#### 📋 최근 등록 내역 (삭제 가능)")
             df = load_data(SHEET_RECORDS)
             if not df.empty:
-                # [수정 1] 삭제 기능을 위해 data_editor 사용 (num_rows="dynamic")
                 df = df.sort_values("입력시간", ascending=False).head(50)
-                
                 if IS_EDITOR:
                     st.caption("💡 행을 선택하고 Del 키를 누르면 삭제됩니다.")
                     edited_df = st.data_editor(
                         df, 
                         use_container_width=True, 
                         hide_index=True,
-                        num_rows="dynamic", # 행 추가/삭제 허용
+                        num_rows="dynamic",
                         key="prod_editor"
                     )
                     
                     if st.button("변경사항 저장 (삭제 반영)", type="secondary"):
-                        # 주의: 전체 데이터를 덮어쓰지 않고, 여기 보이는 데이터가 전체라고 가정하면 안됨.
-                        # 하지만 최근 50개만 불러왔으므로, 이를 저장하면 과거 데이터가 날아갈 수 있음.
-                        # 안전한 삭제를 위해: 삭제된 행을 찾아 원본에서 지우는 방식이 가장 좋지만 복잡함.
-                        # 여기서는 '최근 50개 보기'가 아니라, '전체 보기' 상태에서 편집하거나
-                        # 또는 간단히: 화면에 보이는 것이 '전체'라고 가정하고 덮어쓰는 것은 위험함.
-                        # Streamlit data_editor의 한계로 인해, 여기서는 안전하게 '전체 데이터를 불러와서' 
-                        # 편집된 내용과 비교하거나, 
-                        # *간소화된 방법*: 최근 내역 편집은 '전체 데이터'를 대상으로 하되 필터링 없이 보여줌.
-                        
-                        # [안전 조치] 삭제 기능을 위해 전체 로드 후 편집
-                        full_df = load_data(SHEET_RECORDS)
-                        # 편집된 데이터프레임의 인덱스를 사용하여 원본 업데이트는 어려움 (인덱스 리셋됨)
-                        # 따라서, 전체 데이터를 에디터에 넣습니다. (속도 고려 1000개 제한 등 필요할 수 있음)
                         save_data(edited_df, SHEET_RECORDS) 
                         st.success("변경사항이 반영되었습니다.")
                         time.sleep(1); st.rerun()
@@ -471,7 +459,8 @@ if menu == "🏭 생산관리":
         else: st.warning("🔒 관리자 전용 메뉴입니다.")
 
 elif menu == "🛠️ 설비보전관리":
-    t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "⚙️ 설비 목록"])
+    # [수정] '📊 분석 및 리포트' 탭 추가
+    t1, t2, t3, t4 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트", "⚙️ 설비 목록"])
     
     with t1:
         c1, c2 = st.columns([1, 1.5], gap="large")
@@ -487,18 +476,19 @@ elif menu == "🛠️ 설비보전관리":
                     
                     eq_list = list(eq_map.keys())
                     
+                    # [수정] 입력 초기화를 위한 key 할당
                     f_date = st.date_input("작업 날짜", key="m_date")
                     
                     f_eq = st.selectbox(
                         "대상 설비", 
                         eq_list,
-                        format_func=lambda x: f"[{x}] {eq_map[x]}" if x in eq_map else x
+                        format_func=lambda x: f"[{x}] {eq_map[x]}" if x in eq_map else x,
+                        key="m_eq"
                     )
                     
-                    f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
-                    f_desc = st.text_area("작업 내용", height=80)
+                    f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"], key="m_type")
+                    f_desc = st.text_area("작업 내용", height=80, key="m_desc")
                     
-                    # [수정 5] 정비 내역(부품) 추가 기능 복구
                     st.markdown("---")
                     st.caption("🔩 교체 부품 / 상세 비용 추가")
                     
@@ -515,23 +505,20 @@ elif menu == "🛠️ 설비보전관리":
                         else:
                             st.toast("내역을 입력하세요.")
                     
-                    # 추가된 부품 리스트 표시
                     total_p_cost = 0
                     if st.session_state.parts_buffer:
                         p_df = pd.DataFrame(st.session_state.parts_buffer)
                         st.dataframe(p_df, use_container_width=True, hide_index=True)
                         total_p_cost = p_df['비용'].sum()
-                        # 삭제 버튼
                         if st.button("목록 초기화"):
                             st.session_state.parts_buffer = []
                             st.rerun()
 
                     st.markdown("---")
                     
-                    # 총 비용은 부품비용 합계 + 기타비용으로 계산 가능하지만, 
-                    # 여기서는 사용자가 최종 수정할 수 있도록 함 (초기값: 부품비 합계)
-                    f_cost = st.number_input("💰 총 소요 비용 (원)", value=total_p_cost, step=1000)
-                    f_down = st.number_input("⏱️ 비가동 시간 (분)", step=10)
+                    # [수정] key 할당
+                    f_cost = st.number_input("💰 총 소요 비용 (원)", value=total_p_cost, step=1000, key="m_cost")
+                    f_down = st.number_input("⏱️ 비가동 시간 (분)", step=10, key="m_down")
                     
                     if st.button("이력 저장", type="primary", use_container_width=True):
                         eq_name = ""
@@ -539,7 +526,6 @@ elif menu == "🛠️ 설비보전관리":
                             row = eq_df[eq_df['id'] == f_eq]
                             if not row.empty: eq_name = row.iloc[0]['name']
 
-                        # 부품 리스트 문자열 변환
                         parts_str = ""
                         if st.session_state.parts_buffer:
                             parts_str = ", ".join([f"{p['내역']}({p['비용']:,})" for p in st.session_state.parts_buffer])
@@ -547,25 +533,28 @@ elif menu == "🛠️ 설비보전관리":
                         rec = {
                             "날짜": str(f_date), "설비ID": f_eq, "설비명": eq_name,
                             "작업구분": f_type.split()[0], "작업내용": f_desc, 
-                            "교체부품": parts_str, # [반영]
+                            "교체부품": parts_str, 
                             "비용": f_cost, "작업자": get_user_id(), "비가동시간": f_down,
                             "입력시간": str(datetime.now()), "작성자": get_user_id()
                         }
                         with st.spinner("저장 중..."):
                             append_data(rec, SHEET_MAINTENANCE)
-                            st.session_state.parts_buffer = [] # 초기화
+                            
+                            # [수정] 입력값 및 버퍼 초기화
+                            st.session_state.parts_buffer = [] 
+                            st.session_state.m_desc = ""
+                            st.session_state.m_cost = 0
+                            st.session_state.m_down = 0
+                            
                             st.success("저장 완료")
-                            time.sleep(1); st.rerun()
+                            time.sleep(0.5); st.rerun()
             else: st.warning("입력 권한이 없습니다.")
 
         with c2:
             st.markdown("#### 📋 최근 정비 내역 (삭제 가능)")
             df_maint = load_data(SHEET_MAINTENANCE)
             if not df_maint.empty:
-                # [수정 4] 최근 정비 내역 삭제 기능 (data_editor 사용)
-                # 안전한 삭제를 위해 전체 데이터를 에디터에 로드 (속도 이슈 시 필터링 고려 필요)
-                df_maint = df_maint.sort_values("입력시간", ascending=False) # 전체 로드 및 정렬
-                
+                df_maint = df_maint.sort_values("입력시간", ascending=False)
                 if IS_EDITOR:
                     st.caption("💡 행을 선택하고 Del 키를 누르면 삭제됩니다.")
                     edited_maint = st.data_editor(
@@ -590,7 +579,71 @@ elif menu == "🛠️ 설비보전관리":
             st.dataframe(df_hist, use_container_width=True)
         else: st.info("데이터가 없습니다.")
 
+    # [수정] 분석 및 리포트 탭 구현 (복구)
     with t3:
+        st.markdown("#### 📊 설비 고장 및 정비 분석")
+        df = load_data(SHEET_MAINTENANCE)
+        
+        if not df.empty and '날짜' in df.columns:
+            # 전처리
+            df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
+            df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
+            df['비가동시간'] = pd.to_numeric(df['비가동시간'], errors='coerce').fillna(0)
+            df['Year'] = df['날짜'].dt.year
+            df['Month'] = df['날짜'].dt.month
+            
+            # 필터링
+            available_years = sorted(df['Year'].dropna().unique().astype(int), reverse=True)
+            if not available_years: available_years = [datetime.now().year]
+            
+            col_y, _ = st.columns([1, 4])
+            sel_year = col_y.selectbox("조회 연도", available_years)
+            
+            df_year = df[df['Year'] == sel_year]
+            
+            if not df_year.empty:
+                total_cost = df_year['비용'].sum()
+                total_down = df_year['비가동시간'].sum()
+                # BM(고장) 건수 계산
+                bm_cnt = 0
+                if '작업구분' in df_year.columns:
+                    bm_cnt = len(df_year[df_year['작업구분'].astype(str).str.contains("BM", na=False)])
+                
+                k1, k2, k3 = st.columns(3)
+                k1.metric("💰 연간 총 정비비용", f"{total_cost:,.0f} 원")
+                k2.metric("⏱️ 연간 총 비가동", f"{total_down:,} 분")
+                k3.metric("🔥 고장(BM) 발생", f"{bm_cnt} 건")
+                
+                st.divider()
+                
+                if HAS_ALTAIR:
+                    c1, c2 = st.columns([2, 1])
+                    with c1:
+                        st.markdown("##### 📉 월별 정비 비용 추이")
+                        chart_data = df_year.groupby('Month')['비용'].sum().reset_index()
+                        c = alt.Chart(chart_data).mark_bar().encode(
+                            x=alt.X('Month:O', title='월'), 
+                            y=alt.Y('비용', title='비용'),
+                            tooltip=['Month', '비용']
+                        )
+                        st.altair_chart(c, use_container_width=True)
+                    
+                    with c2:
+                        st.markdown("##### 🥧 작업 유형별 비율")
+                        if '작업구분' in df_year.columns:
+                            pie_data = df_year.groupby('작업구분')['비용'].sum().reset_index()
+                            pie = alt.Chart(pie_data).mark_arc(innerRadius=40).encode(
+                                theta=alt.Theta("비용", stack=True),
+                                color=alt.Color("작업구분"),
+                                tooltip=["작업구분", "비용"]
+                            )
+                            st.altair_chart(pie, use_container_width=True)
+            else:
+                st.info(f"{sel_year}년 데이터가 없습니다.")
+        else:
+            st.info("분석할 정비 이력 데이터가 없습니다.")
+
+    with t4:
         if IS_ADMIN:
             st.markdown("#### 설비 리스트 관리")
             df_eq = load_data(SHEET_EQUIPMENT)
