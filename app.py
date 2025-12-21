@@ -7,8 +7,11 @@ import hashlib
 import base64
 from fpdf import FPDF
 import streamlit.components.v1 as components
+
+# [추가] 구글 시트 연동 라이브러리
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
+from gspread_dataframe import set_with_dataframe
 
 # [안전 장치] 시각화 라이브러리(Altair) 로드 시도
 try:
@@ -16,274 +19,235 @@ try:
     HAS_ALTAIR = True
 except Exception as e:
     HAS_ALTAIR = False
+    print(f"Warning: 시각화 라이브러리(Altair) 로드 실패 - {e}")
 
 # ------------------------------------------------------------------
-# 1. 기본 설정 및 디자인 (app-기초.py 디자인 100% 복구)
+# 1. 기본 설정 및 디자인
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="SMT Dashboard", 
-    page_icon="🏭",
+    page_title="SMT Dashboard (Cloud)", 
+    page_icon="☁️",
     layout="wide",
     initial_sidebar_state="auto" 
 )
 
-# [CSS] 반응형 대시보드 스타일 (app-기초.py 원본)
 st.markdown("""
     <style>
-    /* 폰트 및 기본 배경 설정 */
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-    
-    html, body, [class*="css"] {
-        font-family: 'Pretendard', sans-serif !important;
-        color: #1e293b;
-    }
-    
-    /* 전체 앱 배경 */
-    .stApp {
-        background-color: #f8fafc;
-    }
-
-    /* 상단 헤더 감추기 및 여백 조정 */
+    html, body, [class*="css"] { font-family: 'Pretendard', sans-serif !important; color: #1e293b; }
+    .stApp { background-color: #f8fafc; }
     [data-testid="stHeader"] { background: rgba(0,0,0,0); }
-    [data-testid="stDecoration"] { display: none; }
-    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
-
-    /* 1. 스마트 카드 스타일 (공통) */
     .smart-card {
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-        border: 1px solid #f1f5f9;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        height: 100%;
+        background: #ffffff; border-radius: 16px; padding: 24px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #f1f5f9; height: 100%;
     }
-    .smart-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
-    }
-
-    /* 2. 대시보드 헤더 스타일 */
     .dashboard-header {
         background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
-        padding: 30px 40px;
-        border-radius: 20px;
-        color: white;
-        margin-bottom: 30px;
-        box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.3);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+        padding: 30px 40px; border-radius: 20px; color: white; margin-bottom: 30px;
+        display: flex; justify-content: space-between; align-items: center;
     }
-    .header-title { font-size: 2rem; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
-    .header-subtitle { font-size: 1rem; opacity: 0.9; margin-top: 5px; font-weight: 400; }
-
-    /* 3. KPI 메트릭 스타일 */
-    .kpi-title {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 8px;
-    }
-    .kpi-value {
-        font-size: 2.2rem;
-        font-weight: 800;
-        color: #0f172a;
-        margin-bottom: 4px;
-    }
-    .kpi-trend {
-        font-size: 0.9rem;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .trend-up { color: #10b981; background: #ecfdf5; padding: 2px 8px; border-radius: 12px; }
-    .trend-neutral { color: #64748b; background: #f1f5f9; padding: 2px 8px; border-radius: 12px; }
-
-    /* 4. 탭 스타일 */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        background-color: transparent;
-        padding-bottom: 10px;
-        flex-wrap: wrap; 
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        border-radius: 12px;
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        color: #64748b;
-        font-weight: 600;
-        padding: 0 24px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        flex-grow: 1; 
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #4f46e5 !important;
-        color: #ffffff !important;
-        border-color: #4f46e5 !important;
-        box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.3);
-    }
-
-    /* 5. 사이드바 스타일 */
-    section[data-testid="stSidebar"] {
-        background-color: #ffffff;
-        border-right: 1px solid #e2e8f0;
-    }
-    .sidebar-user-card {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-        margin-bottom: 20px;
-    }
-
-    /* 6. 로그인 화면 스타일 */
-    .login-spacer { height: 10vh; }
-    .login-card {
-        background: white;
-        border-radius: 24px;
-        padding: 40px 30px;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
-        border: 1px solid #e2e8f0;
-        text-align: center;
-    }
-    .login-icon {
-        background: linear-gradient(135deg, #4f46e5 0%, #818cf8 100%);
-        width: 70px;
-        height: 70px;
-        border-radius: 20px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 32px;
-        color: white;
-        margin: 0 auto 20px auto;
-        box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
-    }
-    .login-title {
-        font-size: 1.8rem;
-        font-weight: 800;
-        color: #1e293b;
-        margin-bottom: 5px;
-        letter-spacing: -0.5px;
-    }
-    .login-subtitle {
-        color: #64748b;
-        font-size: 0.95rem;
-        margin-bottom: 30px;
-    }
-    div[data-testid="stForm"] {
-        border: none;
-        padding: 0;
-        box-shadow: none;
-    }
-
-    @media (max-width: 768px) {
-        .dashboard-header {
-            padding: 20px;
-            flex-direction: column;
-            text-align: center;
-            gap: 15px;
-        }
-        .header-title { font-size: 1.5rem; }
-        .smart-card { padding: 15px; }
-        .kpi-value { font-size: 1.8rem; }
-        .login-card { padding: 30px 20px; }
-        div[data-testid="stDataFrame"] { font-size: 0.85rem; }
-    }
+    .kpi-value { font-size: 2.2rem; font-weight: 800; color: #0f172a; }
+    .trend-up { color: #10b981; background: #ecfdf5; padding: 2px 8px; border-radius: 12px; font-size: 0.9rem; }
     </style>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 2. 구글 시트 연결
+# [핵심] Google Sheets 연결 설정
 # ------------------------------------------------------------------
-try:
-    if "sheet_url" in st.secrets:
-        SHEET_URL = st.secrets["sheet_url"]
-    elif "gcp_service_account" in st.secrets and "sheet_url" in st.secrets["gcp_service_account"]:
-        SHEET_URL = st.secrets["gcp_service_account"]["sheet_url"]
-    else:
-        st.error("🚨 Secrets 설정 오류: sheet_url을 찾을 수 없습니다.")
-        st.stop()
+# 구글 시트 파일 이름 (구글 드라이브에 생성한 시트 이름과 일치해야 함)
+GOOGLE_SHEET_NAME = "SMT_Database" 
 
-    if "gcp_service_account" in st.secrets:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        if "sheet_url" in creds_dict: del creds_dict["sheet_url"]
-    else:
-        st.error("🚨 Secrets 설정 오류: 인증 정보가 없습니다.")
-        st.stop()
-except Exception as e:
-    st.error(f"🚨 설정 로드 오류: {e}")
-    st.stop()
+# 시트 탭(Worksheet) 이름 정의
+SHEET_RECORDS = "production_data"
+SHEET_ITEMS = "item_codes"
+SHEET_INVENTORY = "inventory_data"
+SHEET_INV_HISTORY = "inventory_history"
+SHEET_MAINTENANCE = "maintenance_data"
+SHEET_EQUIPMENT = "equipment_list"
 
 @st.cache_resource
-def get_gspread_client():
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    return gspread.authorize(creds)
-
-def get_worksheet(name):
-    client = get_gspread_client()
-    sh = client.open_by_url(SHEET_URL)
+def get_gs_connection():
+    """Google Sheets API 연결 객체 생성 (캐싱 사용)"""
     try:
-        return sh.worksheet(name)
-    except:
-        # 시트 자동 생성
-        headers = {
-            "records": ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자"],
-            "items": ["품목코드", "제품명", "규격"],
-            "inventory": ["품목코드", "제품명", "현재고"],
-            "maintenance": ["날짜", "설비명", "작업구분", "내용", "비용", "비가동시간", "작업자"],
-            "equipment": ["설비ID", "설비명", "공정", "상태"]
-        }
-        new_ws = sh.add_worksheet(title=name, rows="1000", cols="20")
-        if name in headers: new_ws.append_row(headers[name])
-        return new_ws
+        # st.secrets에서 인증 정보 가져오기
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        
+        # .streamlit/secrets.toml 파일에 [gcp_service_account] 섹션이 있어야 함
+        creds_dict = dict(st.session_state.get('gcp_creds', st.secrets["gcp_service_account"]))
+        credentials = Credentials.from_service_account_info(
+            creds_dict,
+            scopes=scopes,
+        )
+        client = gspread.authorize(credentials)
+        return client
+    except Exception as e:
+        st.error(f"⚠️ Google Cloud 연결 실패: {e}")
+        st.info("Tip: .streamlit/secrets.toml 파일에 서비스 계정 키가 올바르게 설정되었는지 확인하세요.")
+        return None
 
-def load_sheet_data(name):
+def get_worksheet(sheet_name, worksheet_name, create_if_missing=False, columns=None):
+    """특정 워크시트를 가져오거나 없으면 생성"""
+    client = get_gs_connection()
+    if not client: return None
+    
     try:
-        ws = get_worksheet(name)
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-        if df.empty:
-            headers = {
-                "records": ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자"],
-                "items": ["품목코드", "제품명", "규격"],
-                "inventory": ["품목코드", "제품명", "현재고"],
-                "maintenance": ["날짜", "설비명", "작업구분", "내용", "비용", "비가동시간", "작업자"],
-                "equipment": ["설비ID", "설비명", "공정", "상태"]
-            }
-            if name in headers: return pd.DataFrame(columns=headers[name])
-        return df
-    except: return pd.DataFrame()
+        sh = client.open(sheet_name)
+    except gspread.SpreadsheetNotFound:
+        st.error(f"⚠️ 구글 시트 '{sheet_name}'를 찾을 수 없습니다. 구글 드라이브에서 시트를 생성하고 서비스 계정에 공유해주세요.")
+        return None
 
-def save_sheet_data(df, name):
-    ws = get_worksheet(name)
-    ws.clear()
-    df_clean = df.fillna("").astype(str)
-    data = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
-    ws.update(data)
-    return True
+    try:
+        ws = sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        if create_if_missing:
+            ws = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
+            if columns:
+                ws.append_row(columns) # 헤더 추가
+        else:
+            return None
+    return ws
 
-def append_sheet_row(row_list, name):
-    ws = get_worksheet(name)
-    ws.append_row(row_list)
+# ------------------------------------------------------------------
+# 2. 로그인 및 보안 로직
+# ------------------------------------------------------------------
+def make_hash(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
-# 재고 업데이트 함수
-def update_inventory(code, name, change):
-    df = load_sheet_data("inventory")
-    code = str(code).strip()
+# (데모용) 사용자 정보는 코드 내에 하드코딩 (보안 강화 시 이것도 시트로 뺄 수 있음)
+USERS = {
+    "park": {"name": "Park", "password_hash": make_hash("1083"), "role": "admin", "desc": "System Administrator"},
+    "suk": {"name": "Suk", "password_hash": make_hash("1734"), "role": "editor", "desc": "Production Manager"},
+    "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor", "desc": "Equipment Engineer"}
+}
+
+def check_password():
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
     
-    if not df.empty and '품목코드' in df.columns:
-        df['품목코드'] = df['품목코드'].astype(str).str.strip()
-        if '현재고' in df.columns:
-            df['현재고'] = pd.to_numeric(df['현재고'], errors='coerce').fillna(0).astype(int)
+    if st.session_state.logged_in: return True
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.markdown("<br><br><h1 style='text-align:center;'>🏭 SMT Cloud System</h1>", unsafe_allow_html=True)
+        with st.form(key="login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+            
+            if submitted:
+                if username in USERS and make_hash(password) == USERS[username]["password_hash"]:
+                    st.session_state.logged_in = True
+                    st.session_state.user_info = USERS[username]
+                    st.session_state.user_info["id"] = username
+                    st.rerun()
+                else:
+                    st.error("아이디 또는 비밀번호가 잘못되었습니다.")
+            
+            if st.form_submit_button("Guest Access (Viewer)"):
+                st.session_state.logged_in = True
+                st.session_state.user_info = {"id": "viewer", "name": "Guest", "role": "viewer", "desc": "Viewer Mode"}
+                st.rerun()
+    return False
+
+if not check_password(): st.stop()
+CURRENT_USER = st.session_state.user_info
+IS_ADMIN, IS_EDITOR = (CURRENT_USER["role"] == "admin"), (CURRENT_USER["role"] in ["admin", "editor"])
+
+# ------------------------------------------------------------------
+# 3. 데이터 로드 및 저장 (Google Sheets 버전)
+# ------------------------------------------------------------------
+# 기본 컬럼 정의
+COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
+COLS_ITEMS = ["품목코드", "제품명"]
+COLS_INVENTORY = ["품목코드", "제품명", "현재고"]
+COLS_INV_HISTORY = ["날짜", "품목코드", "구분", "수량", "비고", "작성자", "입력시간"]
+COLS_MAINTENANCE = ["날짜", "설비ID", "설비명", "작업구분", "작업내용", "교체부품", "비용", "작업자", "비가동시간", "입력시간", "작성자", "수정자", "수정시간"]
+COLS_EQUIPMENT = ["id", "name", "func"]
+
+# 설비 초기 데이터
+DEFAULT_EQUIPMENT = [
+    {"id": "CIMON-SMT34", "name": "Loader (SLD-120Y)", "func": "메거진 로딩"},
+    {"id": "CIMON-SMT03", "name": "Screen Printer", "func": "솔더링 설비"},
+    {"id": "CIMON-SMT08", "name": "REFLOW(1809MKⅢ)", "func": "리플로우 오븐"},
+    {"id": "CIMON-SMT29", "name": "AOI검사(ZENITH)", "func": "비젼 검사"}
+]
+
+def init_sheets():
+    """필요한 시트 탭이 없으면 생성"""
+    defaults = {
+        SHEET_RECORDS: COLS_RECORDS,
+        SHEET_ITEMS: COLS_ITEMS,
+        SHEET_INVENTORY: COLS_INVENTORY,
+        SHEET_INV_HISTORY: COLS_INV_HISTORY,
+        SHEET_MAINTENANCE: COLS_MAINTENANCE,
+        SHEET_EQUIPMENT: COLS_EQUIPMENT
+    }
     
+    for s_name, cols in defaults.items():
+        ws = get_worksheet(GOOGLE_SHEET_NAME, s_name, create_if_missing=True, columns=cols)
+        # 설비 목록이 비어있으면 초기값 주입
+        if s_name == SHEET_EQUIPMENT and len(ws.get_all_values()) <= 1:
+            df_def = pd.DataFrame(DEFAULT_EQUIPMENT)
+            set_with_dataframe(ws, df_def)
+
+# 앱 시작 시 시트 초기화 확인 (속도 저하 방지를 위해 session_state 체크)
+if 'sheets_initialized' not in st.session_state:
+    init_sheets()
+    st.session_state.sheets_initialized = True
+
+def load_data(sheet_name):
+    """구글 시트에서 데이터를 읽어와 DataFrame으로 반환"""
+    ws = get_worksheet(GOOGLE_SHEET_NAME, sheet_name)
+    if not ws: return pd.DataFrame()
+    
+    data = ws.get_all_records()
+    df = pd.DataFrame(data)
+    
+    # 모든 컬럼을 문자열로 변환 (안전성 확보) 후 숫자 변환 필요한 곳만 처리
+    # (여기서는 간단하게 반환)
+    return df
+
+def save_data(df, sheet_name):
+    """DataFrame 전체를 구글 시트에 덮어쓰기 (가장 단순하고 확실한 방법)"""
+    ws = get_worksheet(GOOGLE_SHEET_NAME, sheet_name)
+    if ws:
+        ws.clear() # 기존 데이터 삭제
+        set_with_dataframe(ws, df) # 새 데이터 쓰기
+        return True
+    return False
+
+def append_data(data_dict, sheet_name):
+    """행 추가"""
+    ws = get_worksheet(GOOGLE_SHEET_NAME, sheet_name)
+    if ws:
+        # 딕셔너리의 값들만 추출하여 리스트로 변환 (헤더 순서 보장 필요)
+        # 여기서는 DataFrame을 통해 순서를 맞춤
+        df_new = pd.DataFrame([data_dict])
+        
+        # 기존 시트의 헤더를 읽어서 순서 맞추기
+        headers = ws.row_values(1)
+        row_to_add = []
+        for h in headers:
+            row_to_add.append(str(data_dict.get(h, ""))) # 문자열로 변환하여 저장
+            
+        ws.append_row(row_to_add)
+        return True
+    return False
+
+def update_inventory(code, name, change, reason, user):
+    """재고 수량 업데이트"""
+    df = load_data(SHEET_INVENTORY)
+    
+    # 데이터 타입 정리
+    if not df.empty and '현재고' in df.columns:
+        df['현재고'] = pd.to_numeric(df['현재고'], errors='coerce').fillna(0).astype(int)
+    else:
+        df = pd.DataFrame(columns=COLS_INVENTORY)
+
+    # 로직 수행
     if code in df['품목코드'].values:
         idx = df[df['품목코드'] == code].index[0]
         df.at[idx, '현재고'] = df.at[idx, '현재고'] + change
@@ -291,414 +255,173 @@ def update_inventory(code, name, change):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
-    save_sheet_data(df, "inventory")
+    save_data(df, SHEET_INVENTORY)
+    
+    # 이력 저장
+    hist = {
+        "날짜": datetime.now().strftime("%Y-%m-%d"), 
+        "품목코드": code, "구분": "입고" if change > 0 else "출고", 
+        "수량": change, "비고": reason, 
+        "작성자": user, "입력시간": str(datetime.now())
+    }
+    append_data(hist, SHEET_INV_HISTORY)
+
+def get_user_id():
+    return st.session_state.user_info["name"]
 
 # ------------------------------------------------------------------
-# 3. 로그인
-# ------------------------------------------------------------------
-def make_hash(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
-USERS = {
-    "park": {"name": "Park", "password_hash": make_hash("1083"), "role": "admin", "desc": "System Admin"},
-    "suk": {"name": "Suk", "password_hash": make_hash("1734"), "role": "editor", "desc": "Production Manager"},
-    "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor", "desc": "Equipment Engineer"}
-}
-
-def check_password():
-    if "logged_in" not in st.session_state: st.session_state.logged_in = False
-    if st.session_state.logged_in: return True
-
-    c1, c2, c3 = st.columns([1, 10, 1]) 
-    with c2:
-        sc1, sc2, sc3 = st.columns([1, 1.2, 1])
-        if st.sidebar.empty: sc1, sc2, sc3 = st.columns([0.1, 1, 0.1])
-        with sc2:
-            st.markdown("<div style='height: 10vh'></div>", unsafe_allow_html=True)
-            logo_html = '<div style="text-align:center; font-size:32px; margin-bottom:20px;">🏭</div>'
-            if os.path.exists("logo.png"):
-                with open("logo.png", "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                    logo_html = f'<div style="text-align:center; margin-bottom:20px;"><img src="data:image/png;base64,{b64}" width="150"></div>'
-
-            st.markdown(f"""
-                <div class="smart-card" style="text-align:center;">
-                    {logo_html}
-                    <div style="font-size:1.8rem; font-weight:800; margin-bottom:5px;">SMT System</div>
-                    <div style="color:#64748b; margin-bottom:30px;">Smart Manufacturing System</div>
-            """, unsafe_allow_html=True)
-            
-            with st.form("login_form"):
-                u = st.text_input("Username", placeholder="Enter ID")
-                p = st.text_input("Password", type="password", placeholder="Enter Password")
-                st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
-                if st.form_submit_button("Sign In", type="primary", use_container_width=True):
-                    if u in USERS and make_hash(p) == USERS[u]["password_hash"]:
-                        st.session_state.logged_in = True
-                        st.session_state.user_info = USERS[u]
-                        st.rerun()
-                    else: st.toast("로그인 실패", icon="🔒")
-            st.markdown("</div>", unsafe_allow_html=True)
-    return False
-
-if not check_password(): st.stop()
-
-CURRENT_USER = st.session_state.user_info
-IS_ADMIN = (CURRENT_USER["role"] == "admin")
-IS_EDITOR = (CURRENT_USER["role"] in ["admin", "editor"])
-
-def get_user_id(): return CURRENT_USER["name"]
-
-# ------------------------------------------------------------------
-# 4. 메뉴 구성 (오전 버전 완벽 복구)
+# 4. UI 구성 (Smart Layout)
 # ------------------------------------------------------------------
 with st.sidebar:
-    if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
-    st.markdown("<h2 style='text-align:center; color:#1e293b; margin-top:0;'>SMT System</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center;'>Cloud SMT</h2>", unsafe_allow_html=True)
+    if st.session_state.logged_in:
+        u_info = st.session_state.user_info
+        st.info(f"👤 {u_info['name']} ({u_info['role']})")
     
-    role_badge = "👑 Admin" if IS_ADMIN else "👤 User"
-    st.markdown(f"""
-        <div class="sidebar-user-card">
-            <div style="font-size:1.2rem; font-weight:bold;">{CURRENT_USER['name']}</div>
-            <div style="font-size:0.8rem; color:#64748b; margin-bottom:8px;">{CURRENT_USER['desc']}</div>
-            <span style="font-size:0.75rem; padding:4px 10px; border-radius:12px; background:#dbeafe; color:#1d4ed8;">{role_badge}</span>
-        </div>
-    """, unsafe_allow_html=True)
+    menu = st.radio("메뉴", ["🏭 생산관리", "🛠️ 설비보전관리"])
     
-    # 메뉴 스타일 복구 (라디오 버튼)
-    menu = st.radio("Navigation", ["🏭 생산관리", "🛠️ 설비보전관리"], label_visibility="collapsed")
-    st.markdown("---")
-    if st.button("Sign Out", type="secondary", use_container_width=True):
+    if st.button("로그아웃", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.user_info = None
         st.rerun()
 
-titles = {
-    "🏭 생산관리": {"t": "Production Management", "d": "실시간 생산 실적 및 재고 통합 관리", "c": "linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)"},
-    "🛠️ 설비보전관리": {"t": "Maintenance System", "d": "설비 예방 정비 및 고장 이력 분석", "c": "linear-gradient(135deg, #059669 0%, #10b981 100%)"}
-}
-info = titles.get(menu, titles["🏭 생산관리"])
+# 메인 헤더
 st.markdown(f"""
-    <div class="dashboard-header" style="background: {info['c']};">
-        <div><h2 class="header-title">{info['t']}</h2><div class="header-subtitle">{info['d']}</div></div>
-        <div style="font-size: 2.5rem; opacity: 0.8;">📊</div>
+    <div class="dashboard-header">
+        <div>
+            <h2 style="margin:0;">{menu}</h2>
+            <div style="opacity:0.8;">Google Sheets 연동 모드</div>
+        </div>
     </div>
 """, unsafe_allow_html=True)
 
-CATEGORIES = ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "외주공정"]
-
 # ------------------------------------------------------------------
-# 5. 메인 기능 구현
+# 5. 메뉴별 로직
 # ------------------------------------------------------------------
 
-# [1] 생산관리 메뉴
 if menu == "🏭 생산관리":
-    tab_prod, tab_inv, tab_dash, tab_rpt, tab_std = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 대시보드", "📑 보고서", "⚙️ 기준정보"])
-
-    # 1-1. 실적 등록
-    with tab_prod:
-        item_df = load_sheet_data("items")
-        
-        c1, c2 = st.columns([1, 1.6], gap="large")
+    t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 대시보드", "⚙️ 기준정보"])
+    
+    # 1. 실적 등록
+    with t1:
+        c1, c2 = st.columns([1, 1.5])
         with c1:
             if IS_EDITOR:
-                with st.container():
-                    st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-                    st.markdown("#### ✏️ 신규 생산 등록")
-                    st.markdown("<br>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.markdown("#### 신규 생산 등록")
+                    date = st.date_input("작업 일자")
+                    cat = st.selectbox("공정", ["PC", "CM1", "CM3", "후공정", "후공정 외주"])
+                    code = st.text_input("품목 코드")
+                    name = st.text_input("제품명")
+                    qty = st.number_input("수량", min_value=1, value=100)
                     
-                    date = st.date_input("작업 일자", datetime.now())
-                    cat = st.selectbox("공정 구분", CATEGORIES)
-                    
-                    code_input = st.text_input("품목 코드", placeholder="바코드 스캔 또는 입력")
-                    
-                    auto_name = ""
-                    if code_input:
-                        clean_code = code_input.strip()
-                        if not item_df.empty and '품목코드' in item_df.columns:
-                             match = item_df[item_df['품목코드'].astype(str).str.strip() == str(clean_code)]
-                             if not match.empty:
-                                 auto_name = match['제품명'].values[0]
-                    
-                    name = st.text_input("제품명", value=auto_name)
-                    if auto_name:
-                        st.caption(f"✅ 확인된 제품: {auto_name}")
-                    
-                    qty = st.number_input("생산 수량", min_value=1, value=100)
-                    writer = st.text_input("작성자", value=get_user_id(), disabled=True)
-                    
-                    if cat in ["후공정", "외주공정", "후공정 외주"]:
-                        st.info("ℹ️ 해당 공정은 재고 수량이 '차감(마이너스)' 됩니다.")
-                    
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("저장하기", type="primary", use_container_width=True):
-                        if name:
-                            rec = [str(date), cat, code_input, name, qty, str(datetime.now()), writer]
-                            append_sheet_row(rec, "records")
-                            
-                            if cat in ["후공정", "외주공정", "후공정 외주"]:
-                                update_inventory(code_input, name, -qty)
-                                st.toast(f"저장 및 재고 차감 완료! (-{qty}EA)", icon="✅")
-                            else:
-                                update_inventory(code_input, name, qty)
-                                st.toast(f"저장 및 재고 증가 완료! (+{qty}EA)", icon="✅")
-                                
-                            time.sleep(0.5); st.rerun()
-                        else: st.error("제품명을 입력해주세요.")
-                    st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.warning("🔒 뷰어 모드에서는 데이터를 입력할 수 없습니다.")
-
-        with c2:
-            st.markdown("""<div class="smart-card" style="height:auto;">""", unsafe_allow_html=True)
-            # [수정] "최근 등록 내역" 및 삭제 기능 복구 (data_editor 사용)
-            st.markdown("#### 📋 최근 등록 내역 (수정/삭제 가능)")
-            df = load_sheet_data("records")
-            
-            if not df.empty and '입력시간' in df.columns:
-                df = df.sort_values("입력시간", ascending=False)
-                
-                if IS_EDITOR:
-                    # 삭제/수정 가능한 에디터
-                    edited_df = st.data_editor(
-                        df, 
-                        use_container_width=True, 
-                        hide_index=True, 
-                        num_rows="dynamic", # 행 추가/삭제 가능
-                        height=600,
-                        key="editor_records"
-                    )
-                    
-                    # 변경사항 저장 버튼
-                    if st.button("💾 수정사항 구글 시트에 반영", type="primary"):
-                        save_sheet_data(edited_df, "records")
-                        st.success("구글 시트에 수정/삭제 내용이 반영되었습니다.")
-                        time.sleep(1); st.rerun()
-                else:
-                    st.dataframe(df, use_container_width=True, hide_index=True, height=600)
-            else:
-                st.info("데이터가 없습니다.")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    # 1-2. 재고 현황
-    with tab_inv:
-        st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-        c_search, c_dummy = st.columns([1, 2])
-        search = c_search.text_input("🔍 재고 검색", placeholder="품목명 또는 코드")
-        
-        df = load_sheet_data("inventory")
-        if not df.empty:
-            if search:
-                mask = df['품목코드'].astype(str).str.contains(search, case=False) | df['제품명'].astype(str).str.contains(search, case=False)
-                df = df[mask]
-            st.dataframe(df, use_container_width=True, hide_index=True, height=600)
-        else: st.info("등록된 재고 데이터가 없습니다.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # 1-3. 통합 대시보드
-    with tab_dash:
-        df = load_sheet_data("records")
-        if not df.empty:
-            if '구분' in df.columns: df['구분'] = df['구분'].astype(str).str.strip()
-            if '수량' in df.columns: df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-            
-            unique_cats = df['구분'].unique().tolist()
-            combined_cats = sorted(list(set(CATEGORIES + unique_cats)))
-
-            with st.container():
-                st.markdown("""<div class="smart-card" style="padding: 15px 24px; margin-bottom: 20px;">""", unsafe_allow_html=True)
-                c_f1, c_f2 = st.columns([1, 2])
-                d_range = c_f1.date_input("조회 기간", (datetime.now().replace(day=1), datetime.now()), label_visibility="collapsed")
-                cats = c_f2.multiselect("공정 필터", combined_cats, default=combined_cats, key="dash_filter", label_visibility="collapsed")
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            if len(d_range) == 2:
-                mask = (pd.to_datetime(df['날짜']).dt.date >= d_range[0]) & (pd.to_datetime(df['날짜']).dt.date <= d_range[1]) & (df['구분'].isin(cats))
-                df_filtered = df[mask]
-                
-                if not df_filtered.empty:
-                    total_qty = df_filtered['수량'].sum()
-                    days = (d_range[1] - d_range[0]).days + 1
-                    avg_qty = int(total_qty / days) if days > 0 else 0
-                    top_proc = df_filtered.groupby('구분')['수량'].sum().idxmax() if not df_filtered['구분'].empty else "-"
-                    
-                    # Smart KPI Cards
-                    k1, k2, k3 = st.columns(3)
-                    k1.markdown(f"""<div class="smart-card"><div class="kpi-title">Total Production</div><div class="kpi-value">{total_qty:,}</div><div class="kpi-trend trend-up">📅 {days}일간 누적</div></div>""", unsafe_allow_html=True)
-                    k2.markdown(f"""<div class="smart-card"><div class="kpi-title">Daily Average</div><div class="kpi-value">{avg_qty:,}</div><div class="kpi-trend trend-neutral">📈 일평균 생산</div></div>""", unsafe_allow_html=True)
-                    k3.markdown(f"""<div class="smart-card"><div class="kpi-title">Top Process</div><div class="kpi-value" style="font-size: 1.8rem; margin-top: 5px;">{top_proc}</div><div class="kpi-trend trend-up">🏆 최다 생산</div></div>""", unsafe_allow_html=True)
-                    
-                    st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
-                    
-                    if HAS_ALTAIR:
-                        cc1, cc2 = st.columns([2, 1])
-                        with cc1:
-                            st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-                            st.markdown("##### 📈 일별 생산 추이")
-                            daily_trend = df_filtered.groupby('날짜')['수량'].sum().reset_index()
-                            daily_trend['날짜'] = pd.to_datetime(daily_trend['날짜'])
-                            line = alt.Chart(daily_trend).mark_line(point=True, color='#4f46e5', strokeWidth=3).encode(
-                                x=alt.X('날짜:T', axis=alt.Axis(format='%m-%d', title=None)),
-                                y=alt.Y('수량', title=None),
-                                tooltip=[alt.Tooltip('날짜', format='%Y-%m-%d'), '수량']
-                            ).interactive()
-                            st.altair_chart(line, use_container_width=True)
-                            st.markdown("</div>", unsafe_allow_html=True)
+                    auto_deduct = False
+                    if cat in ["후공정", "후공정 외주"]:
+                        auto_deduct = st.checkbox("반제품 재고 자동 차감", value=True)
                         
-                        with cc2:
-                            st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-                            st.markdown("##### 🍰 공정 점유율")
-                            dist = df_filtered.groupby('구분')['수량'].sum().reset_index()
-                            pie = alt.Chart(dist).mark_arc(innerRadius=60).encode(
-                                theta=alt.Theta("수량", stack=True),
-                                color=alt.Color("구분", scale=alt.Scale(scheme='tableau10'), legend=None),
-                                tooltip=["구분", "수량"]
-                            )
-                            st.altair_chart(pie, use_container_width=True)
-                            st.markdown("</div>", unsafe_allow_html=True)
-                    else: st.warning("⚠️ 차트 기능을 사용할 수 없습니다.")
-                else: st.warning("조건에 맞는 데이터가 없습니다.")
-        else: st.info("데이터가 없습니다.")
+                    if st.button("저장하기", type="primary", use_container_width=True):
+                        rec = {
+                            "날짜":str(date), "구분":cat, "품목코드":code, "제품명":name, 
+                            "수량":qty, "입력시간":str(datetime.now()), 
+                            "작성자":get_user_id(), "수정자":"", "수정시간":""
+                        }
+                        if append_data(rec, SHEET_RECORDS):
+                            if auto_deduct:
+                                update_inventory(code, name, -qty, f"생산출고({cat})", get_user_id())
+                            st.success("Cloud 저장 완료!")
+                            time.sleep(1); st.rerun()
+                        else: st.error("저장 실패")
+            else: st.warning("뷰어 모드")
 
-    # 1-4. 보고서 출력
-    with tab_rpt:
-        if IS_ADMIN:
-            st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-            t_d, t_p = st.tabs(["📅 일일 보고서 (PDF)", "📆 기간별 보고서 (CSV)"])
-            with t_d:
-                if st.button("📄 PDF 리포트 생성"):
-                    st.info("PDF 생성 기능은 서버 설정이 필요할 수 있습니다.")
-            with t_p:
-                if st.button("📊 CSV 다운로드"):
-                    df = load_sheet_data("records")
-                    st.download_button("Download CSV", df.to_csv().encode('utf-8-sig'), "production_data.csv")
-            st.markdown("</div>", unsafe_allow_html=True)
+        with c2:
+            st.markdown("#### 최근 등록 내역")
+            df = load_data(SHEET_RECORDS)
+            if not df.empty:
+                df = df.sort_values("입력시간", ascending=False).head(50)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            else: st.info("데이터 없음")
 
-    # 1-5. 기준정보 관리
-    with tab_std:
-        if IS_ADMIN:
-            st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-            st.markdown("#### ⚙️ 기준정보 관리")
-            st.info("💡 구글 시트('items')에서 품목 코드를 관리하세요.")
-            it_df = load_sheet_data("items")
+    # 2. 재고 현황
+    with t2:
+        df_inv = load_data(SHEET_INVENTORY)
+        if not df_inv.empty:
+            # 숫자형 변환
+            df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0)
+            st.dataframe(df_inv, use_container_width=True)
+        else: st.info("재고 없음")
+
+    # 3. 대시보드
+    with t3:
+        df = load_data(SHEET_RECORDS)
+        if not df.empty:
+            df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
+            total = df['수량'].sum()
+            st.metric("총 생산량", f"{total:,} EA")
             
-            edited_it = st.data_editor(it_df, num_rows="dynamic", use_container_width=True)
-            if st.button("💾 품목 정보 저장 (구글 시트)"):
-                save_sheet_data(edited_it, "items")
-                st.success("저장되었습니다!")
-                time.sleep(1); st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-        else: st.warning("⚠️ 관리자 권한 필요")
+            if HAS_ALTAIR:
+                chart_data = df.groupby('날짜')['수량'].sum().reset_index()
+                c = alt.Chart(chart_data).mark_line(point=True).encode(x='날짜', y='수량').interactive()
+                st.altair_chart(c, use_container_width=True)
+        else: st.info("데이터 없음")
 
-# 2. 설비보전관리
+    # 4. 기준정보
+    with t4:
+        if IS_ADMIN:
+            st.warning("주의: 데이터 수정 시 구글 시트에 즉시 반영됩니다.")
+            df_items = load_data(SHEET_ITEMS)
+            edited = st.data_editor(df_items, num_rows="dynamic", use_container_width=True)
+            if st.button("품목 기준정보 저장"):
+                save_data(edited, SHEET_ITEMS)
+                st.success("저장 완료")
+
 elif menu == "🛠️ 설비보전관리":
-    tab_reg, tab_hist, tab_dash, tab_set = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 히트맵", "⚙️ 설비 관리"])
+    t1, t2 = st.tabs(["📝 정비 이력", "⚙️ 설비 목록"])
     
-    equip_df = load_sheet_data("equipment")
-    maint_df = load_sheet_data("maintenance")
-    
-    # 2-1. 이력 등록
-    with tab_reg:
-        c1, c2 = st.columns([1, 1.6], gap="large") 
+    with t1:
+        c1, c2 = st.columns([1, 2])
         with c1:
             if IS_EDITOR:
-                with st.container():
-                    st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-                    st.markdown("##### 📝 신규 이력 작성")
+                with st.container(border=True):
+                    st.markdown("#### 정비 이력 등록")
+                    # 설비 목록 로드
+                    eq_df = load_data(SHEET_EQUIPMENT)
+                    eq_list = eq_df['id'].tolist() if not eq_df.empty else []
                     
-                    f_date = st.date_input("📅 작업 일자")
+                    f_date = st.date_input("날짜", key="m_date")
+                    f_eq = st.selectbox("설비", eq_list)
+                    f_type = st.selectbox("구분", ["PM", "BM", "CM"])
+                    f_desc = st.text_area("내용")
+                    f_cost = st.number_input("비용", step=1000)
+                    f_down = st.number_input("비가동(분)", step=10)
                     
-                    eq_list = []
-                    if not equip_df.empty:
-                        if 'name' in equip_df.columns:
-                            eq_list = equip_df['name'].tolist()
-                        elif '설비명' in equip_df.columns:
-                            eq_list = equip_df['설비명'].tolist()
-                    
-                    f_eq_select = st.selectbox("설비 선택", ["직접 입력"] + eq_list)
-                    
-                    if f_eq_select == "직접 입력":
-                        f_eq_final = st.text_input("설비명 직접 입력")
-                    else:
-                        f_eq_final = f_eq_select
-                    
-                    f_type = st.selectbox("🔧 구분", ["PM (예방정비)", "BM (고장수리)", "CM (개조/개선)"])
-                    f_desc = st.text_area("📝 작업 내용", placeholder="고장 증상 및 조치 내용", height=100)
-                    
-                    st.markdown("---")
-                    f_cost = st.number_input("💰 총 비용 (원)", min_value=0, step=1000, format="%d")
-                    f_down = st.number_input("⏱️ 비가동 시간 (분)", min_value=0, step=10)
-                    f_worker = st.text_input("👷 작업자", value=get_user_id(), disabled=True)
-                    
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("💾 이력 저장", type="primary", use_container_width=True):
-                        if f_eq_final:
-                            new_rec = [str(f_date), f_eq_final, f_type.split()[0], f_desc, f_cost, f_down, f_worker]
-                            append_sheet_row(new_rec, "maintenance")
-                            st.toast("저장 완료!", icon="✅")
-                            time.sleep(0.5); st.rerun()
-                        else:
-                            st.error("설비명을 입력하세요.")
-                    st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.warning("관리자만 입력할 수 있습니다.")
-                
-        with c2:
-            st.markdown("""<div class="smart-card" style="height:auto;">""", unsafe_allow_html=True)
-            st.markdown("#### 🚀 최근 등록 내역")
-            if not maint_df.empty:
-                maint_df = maint_df.sort_values("입력시간", ascending=False) if '입력시간' in maint_df.columns else maint_df
-                
-                # 설비 보전에서도 삭제 가능하도록 수정
-                if IS_EDITOR:
-                    edited_maint = st.data_editor(
-                        maint_df, 
-                        use_container_width=True, 
-                        hide_index=True,
-                        num_rows="dynamic",
-                        key="editor_maint"
-                    )
-                    if st.button("💾 이력 수정/삭제 저장"):
-                        save_sheet_data(edited_maint, "maintenance")
-                        st.success("반영되었습니다.")
+                    if st.button("이력 저장", type="primary", use_container_width=True):
+                        # 설비명 찾기
+                        eq_name = ""
+                        if not eq_df.empty:
+                            row = eq_df[eq_df['id'] == f_eq]
+                            if not row.empty: eq_name = row.iloc[0]['name']
+
+                        rec = {
+                            "날짜": str(f_date), "설비ID": f_eq, "설비명": eq_name,
+                            "작업구분": f_type, "작업내용": f_desc, "교체부품": "",
+                            "비용": f_cost, "작업자": get_user_id(), "비가동시간": f_down,
+                            "입력시간": str(datetime.now()), "작성자": get_user_id()
+                        }
+                        append_data(rec, SHEET_MAINTENANCE)
+                        st.success("저장 완료")
                         time.sleep(1); st.rerun()
-                else:
-                    st.dataframe(maint_df, use_container_width=True, hide_index=True)
-            else: st.info("등록된 이력이 없습니다.")
-            st.markdown("</div>", unsafe_allow_html=True)
 
-    # 2-2. 이력 조회
-    with tab_hist:
-        st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-        st.markdown("#### 🔍 설비 이력 전체 조회")
-        if not maint_df.empty:
-            st.dataframe(maint_df, use_container_width=True)
-        else: st.info("데이터가 없습니다.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        with c2:
+            df_maint = load_data(SHEET_MAINTENANCE)
+            if not df_maint.empty:
+                st.dataframe(df_maint.sort_values("입력시간", ascending=False), use_container_width=True)
+            else: st.info("이력 없음")
 
-    # 2-3. 분석 및 히트맵
-    with tab_dash:
-        if not maint_df.empty and '날짜' in maint_df.columns:
-            maint_df['날짜'] = pd.to_datetime(maint_df['날짜'], errors='coerce')
-            
-            total_cost = pd.to_numeric(maint_df['비용'], errors='coerce').fillna(0).sum()
-            total_down = pd.to_numeric(maint_df['비가동시간'], errors='coerce').fillna(0).sum()
-            
-            c1, c2 = st.columns(2)
-            c1.markdown(f"""<div class="smart-card"><div class="kpi-title">Total Maint Cost</div><div class="kpi-value">{int(total_cost):,}</div></div>""", unsafe_allow_html=True)
-            c2.markdown(f"""<div class="smart-card"><div class="kpi-title">Total Downtime</div><div class="kpi-value">{int(total_down):,} min</div></div>""", unsafe_allow_html=True)
-        else:
-            st.info("데이터가 없습니다.")
-
-    # 2-4. 설비 관리
-    with tab_set:
-        st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
-        st.markdown("#### ⚙️ 설비 기준정보 관리")
+    with t2:
         if IS_ADMIN:
-            edited_equip = st.data_editor(equip_df, num_rows="dynamic", use_container_width=True)
-            if st.button("설비 목록 저장", type="primary"):
-                save_sheet_data(edited_equip, "equipment")
-                st.success("설비 목록이 갱신되었습니다.")
-                time.sleep(0.5); st.rerun()
-        else: st.error("🔒 이 메뉴는 관리자만 접근할 수 있습니다.")
-        st.markdown("</div>", unsafe_allow_html=True)
+            df_eq = load_data(SHEET_EQUIPMENT)
+            edited_eq = st.data_editor(df_eq, num_rows="dynamic", use_container_width=True)
+            if st.button("설비 목록 저장"):
+                save_data(edited_eq, SHEET_EQUIPMENT)
+                st.success("저장됨")
+        else:
+            st.dataframe(load_data(SHEET_EQUIPMENT))
