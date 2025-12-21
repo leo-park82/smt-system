@@ -460,10 +460,23 @@ elif menu == "🛠️ 설비보전관리":
                 with st.container(border=True):
                     st.markdown("#### 🔧 정비 이력 등록")
                     eq_df = load_data(SHEET_EQUIPMENT)
-                    eq_list = eq_df['id'].tolist() if not eq_df.empty else []
+                    
+                    # [수정] 설비 선택 시 ID와 이름을 같이 표시하기 위한 매핑
+                    eq_map = {}
+                    if not eq_df.empty:
+                        eq_map = dict(zip(eq_df['id'], eq_df['name']))
+                    
+                    eq_list = list(eq_map.keys())
                     
                     f_date = st.date_input("작업 날짜", key="m_date")
-                    f_eq = st.selectbox("대상 설비", eq_list)
+                    
+                    # [수정] format_func를 사용하여 드롭다운 표시 형식 변경 ([ID] 설비명)
+                    f_eq = st.selectbox(
+                        "대상 설비", 
+                        eq_list,
+                        format_func=lambda x: f"[{x}] {eq_map[x]}" if x in eq_map else x
+                    )
+                    
                     f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                     f_desc = st.text_area("작업 내용", height=100)
                     f_cost = st.number_input("소요 비용 (원)", step=1000)
