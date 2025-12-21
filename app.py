@@ -21,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (원본 데이터 100% 복구)
+# [핵심] SMT 일일점검표 HTML 코드
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -29,7 +29,7 @@ DAILY_CHECK_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 스마트 설비 점검 시스템 Pro (v6.1 Mixer Fix)</title>
+    <title>SMT 스마트 설비 점검 시스템 Pro</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -105,6 +105,12 @@ DAILY_CHECK_HTML = """
             </div>
             
             <div class="flex items-center gap-2">
+                <!-- [수정] 일괄합격 버튼을 상단 헤더로 이동 -->
+                <button onclick="checkAllGood()" class="flex items-center bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-1.5 border border-green-500 transition-colors shadow-sm active:scale-95 mr-2" title="현재 라인 일괄 합격">
+                    <i data-lucide="check-check" class="w-4 h-4 mr-1"></i>
+                    <span class="text-sm font-bold hidden sm:inline">일괄합격</span>
+                </button>
+
                 <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer group relative">
                     <!-- Calendar Toggle Button -->
                     <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors" title="달력 보기">
@@ -175,14 +181,8 @@ DAILY_CHECK_HTML = """
         <div class="h-20"></div>
     </main>
 
-    <div class="fixed bottom-6 right-6 z-30" id="fab-container">
-        <button onclick="checkAllGood()" class="group bg-green-500 hover:bg-green-600 text-white p-4 rounded-full shadow-xl shadow-green-500/30 flex items-center justify-center transition-all hover:scale-110 active:scale-90">
-            <i data-lucide="check-check" class="w-6 h-6"></i>
-            <span class="absolute right-full mr-3 bg-slate-800 text-white text-xs font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                현재 라인 일괄 합격
-            </span>
-        </button>
-    </div>
+    <!-- [수정] 하단 플로팅 버튼(FAB) 제거 -->
+    <!-- <div class="fixed bottom-6 right-6 z-30" id="fab-container"> ... </div> -->
 
     <!-- Hidden File Input for Camera -->
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
@@ -654,7 +654,9 @@ DAILY_CHECK_HTML = """
                 addBtn.onclick = () => addEquipment();
                 container.appendChild(addBtn);
             } else {
-                document.getElementById('fab-container').style.display = 'block';
+                // [수정] fab-container 대신 헤더로 버튼을 옮겼으므로 여기서는 숨김
+                if(document.getElementById('fab-container')) document.getElementById('fab-container').style.display = 'none';
+                
                 equipments.forEach((eq, eqIdx) => {
                     const card = document.createElement('div');
                     card.className = "bg-white rounded-2xl shadow-sm border border-slate-100 mb-6 overflow-hidden animate-fade-in";
@@ -1495,14 +1497,21 @@ with st.sidebar:
             </div>
         """, unsafe_allow_html=True)
     
-    # [수정] 메뉴 분리: '일일점검'을 독립 메뉴로 생성
-    menu = st.radio("Navigation", ["🏭 생산관리", "🛠️ 설비보전관리", "📱 일일점검 (Tablet)"])
+    # [수정] 메뉴명에서 (Tablet) 제거
+    menu = st.radio("Navigation", ["🏭 생산관리", "🛠️ 설비보전관리", "📱 일일점검"])
     st.markdown("---")
     if st.button("로그아웃", use_container_width=True):
         st.session_state.logged_in = False
         st.rerun()
 
-st.markdown(f"""<div class="dashboard-header"><div><h2 style="margin:0;">{menu}</h2><div style="opacity:0.8; margin-top:5px;">Real-time Management System</div></div></div>""", unsafe_allow_html=True)
+# [수정] 메인 헤더에서 'Real-time Management System' 문구 제거 (심플하게)
+st.markdown(f"""
+    <div class="dashboard-header">
+        <div>
+            <h2 style="margin:0;">{menu}</h2>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 # 5. [메뉴 1] 생산관리
@@ -1809,7 +1818,7 @@ elif menu == "🛠️ 설비보전관리":
 # ------------------------------------------------------------------
 # 7. [메뉴 3] 일일점검 (Tablet) - 독립 메뉴
 # ------------------------------------------------------------------
-elif menu == "📱 일일점검 (Tablet)":
+elif menu == "📱 일일점검": # [수정] (Tablet) 글씨 삭제
     st.markdown("##### 👆 태블릿 터치용 일일점검 시스템")
     st.caption("※ 이 화면의 데이터는 태블릿 기기 내부에 자동 저장됩니다.")
     # HTML 삽입 (높이 충분히 확보)
