@@ -377,9 +377,14 @@ if menu == "🏭 생산관리":
             if HAS_ALTAIR:
                 c1, c2 = st.columns([2, 1])
                 with c1:
-                    st.markdown("##### 📈 일별 생산 추이")
+                    st.markdown("##### 📉 일별 생산 추이")
                     chart_data = df.groupby('날짜')['수량'].sum().reset_index()
-                    c = alt.Chart(chart_data).mark_line(point=True).encode(x=alt.X('날짜', axis=alt.Axis(format='%m-%d')), y='수량', tooltip=['날짜', '수량']).interactive()
+                    # [수정] X축, Y축 라벨 각도를 0도로 설정하여 읽기 편하게 변경
+                    c = alt.Chart(chart_data).mark_line(point=True).encode(
+                        x=alt.X('날짜', axis=alt.Axis(format='%m-%d', labelAngle=0)), 
+                        y=alt.Y('수량', axis=alt.Axis(labelAngle=0)),
+                        tooltip=['날짜', '수량']
+                    ).interactive()
                     st.altair_chart(c, use_container_width=True)
                 with c2:
                     st.markdown("##### 🍰 공정별 비중")
@@ -533,10 +538,10 @@ elif menu == "🛠️ 설비보전관리":
                     c1, c2 = st.columns([2, 1])
                     with c1:
                         st.markdown("##### 📉 월별 비용 추이")
-                        # [수정 3] X축 글씨 각도 0도로 수정 (axis=alt.Axis(labelAngle=0))
+                        # [수정 3] X축과 Y축 글씨 각도 모두 0도로 수정
                         chart = alt.Chart(df_year.groupby('Month')['비용'].sum().reset_index()).mark_bar().encode(
                             x=alt.X('Month:O', title='월', axis=alt.Axis(labelAngle=0)), 
-                            y=alt.Y('비용', title='비용')
+                            y=alt.Y('비용', title='비용', axis=alt.Axis(labelAngle=0))
                         )
                         st.altair_chart(chart, use_container_width=True)
                     with c2:
