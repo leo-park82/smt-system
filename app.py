@@ -6,7 +6,7 @@ import hashlib
 import base64
 import os
 import streamlit.components.v1 as components
-from fpdf import FPDF  # [복구] 생산관리 보고서용 FPDF 라이브러리 재추가
+from fpdf import FPDF  # [수정] FPDF 라이브러리 재확인 (생산관리 보고서용)
 
 # 구글 시트 연동 라이브러리
 import gspread
@@ -21,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (JS 방식 유지)
+# [핵심] SMT 일일점검표 HTML 코드
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -29,6 +29,7 @@ DAILY_CHECK_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- [수정] 타이틀 Pro 삭제 -->
     <title>SMT Daily Check</title>
     
     <!-- Tailwind CSS -->
@@ -76,6 +77,7 @@ DAILY_CHECK_HTML = """
     <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
         <div class="px-4 sm:px-6 py-3 flex justify-between items-center bg-slate-900 text-white">
             <div class="flex items-center gap-4">
+                <!-- [수정] CIMON 삭제, SMT Daily Check만 남김 -->
                 <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">SMT Daily Check</span>
             </div>
             <div class="flex items-center gap-2">
@@ -83,13 +85,17 @@ DAILY_CHECK_HTML = """
                     <i data-lucide="check-check" class="w-4 h-4 mr-1"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
                 </button>
                 <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer group relative">
-                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors"><i data-lucide="calendar-days" class="w-5 h-5"></i></button>
+                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors" title="달력 보기">
+                        <i data-lucide="calendar-days" class="w-5 h-5"></i>
+                    </button>
                     <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-slate-200 focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onclick="this.showPicker()">
                 </div>
                 <button onclick="openSignatureModal()" class="flex items-center bg-slate-800 hover:bg-slate-700 rounded-lg px-3 py-1.5 border border-slate-700 transition-colors" id="btn-signature">
                     <i data-lucide="pen-tool" class="w-4 h-4 text-slate-400 mr-2"></i><span class="text-sm text-slate-300 font-bold hidden sm:inline" id="sign-status">서명</span>
                 </button>
-                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white"><i data-lucide="settings" class="w-5 h-5"></i></button>
+                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white" title="설정">
+                    <i data-lucide="settings" class="w-5 h-5"></i>
+                </button>
             </div>
         </div>
         <div class="px-4 sm:px-6 py-3 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
@@ -120,29 +126,27 @@ DAILY_CHECK_HTML = """
         <div class="h-20"></div>
     </main>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
-    <!-- Calendar Modal -->
+    
+    <!-- 모달 등은 동일하게 유지 -->
     <div id="calendar-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
             <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
             <div class="p-6 bg-white"><div class="flex justify-between items-center mb-6"><button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-left" class="w-5 h-5"></i></button><span class="text-lg font-bold text-slate-800" id="calendar-title">2023년 10월</span><button onclick="changeMonth(1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-right" class="w-5 h-5"></i></button></div><div class="grid grid-cols-7 gap-1 mb-2 text-center text-xs font-bold text-slate-400"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div><div id="calendar-grid" class="calendar-grid"></div><div class="flex justify-center gap-4 mt-6 text-xs font-bold text-slate-600"><div class="flex items-center gap-1"><div class="dot dot-green"></div> 완료(양호)</div><div class="flex items-center gap-1"><div class="dot dot-red"></div> NG 발생</div><div class="flex items-center gap-1"><div class="dot dot-gray"></div> 미실시</div></div></div>
         </div>
     </div>
-    <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="settings-content">
             <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-slate-300"><i data-lucide="x" class="w-5 h-5"></i></button></div>
-            <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div><div class="text-xs text-amber-700 mt-1">장비 및 점검 항목을 추가/삭제/수정합니다.</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><div class="space-y-3 pt-4 border-t border-slate-100"><label class="block text-sm font-bold text-slate-700">데이터 관리</label><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 현재 날짜 데이터 초기화</button><button onclick="resetConfigToDefault()" class="w-full py-3 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="rotate-ccw" class="w-4 h-4"></i> 점검 항목(양식) 초기화</button></div></div>
+            <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div><div class="text-xs text-amber-700 mt-1">장비 및 점검 항목을 추가/삭제/수정합니다.</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 데이터 초기화</button></div></div>
         </div>
     </div>
-    <!-- Signature Modal -->
     <div id="signature-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
             <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="pen-tool" class="w-5 h-5"></i> 전자 서명</h3><button onclick="closeSignatureModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
-            <div class="p-4 bg-slate-100"><canvas id="signature-pad" class="w-full h-48 rounded-xl shadow-inner border border-slate-300 touch-none bg-white"></canvas><div class="text-xs text-slate-500 mt-2 text-center">서명란 안에 정자로 서명해주세요.</div></div>
+            <div class="p-4 bg-slate-100"><canvas id="signature-pad" class="w-full h-48 rounded-xl shadow-inner border border-slate-300 touch-none bg-white"></canvas></div>
             <div class="p-4 bg-white flex gap-3 justify-end border-t border-slate-100"><button onclick="clearSignature()" class="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-bold">지우기</button><button onclick="saveSignature()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/30">서명 완료</button></div>
         </div>
     </div>
-    <!-- Add Item Modal -->
     <div id="add-item-modal" class="fixed inset-0 bg-black/50 z-[60] hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6">
             <h3 class="text-lg font-bold mb-4 text-slate-800">새 점검 항목 추가</h3>
@@ -150,7 +154,6 @@ DAILY_CHECK_HTML = """
             <div class="flex justify-end gap-2 mt-6"><button onclick="document.getElementById('add-item-modal').classList.add('hidden')" class="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-lg font-bold">취소</button><button onclick="confirmAddItem()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">추가</button></div>
         </div>
     </div>
-    <!-- NumPad Modal -->
     <div id="numpad-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] hidden flex items-end sm:items-center justify-center transition-opacity duration-200">
         <div class="bg-white w-full sm:w-[320px] sm:rounded-2xl rounded-t-2xl shadow-2xl overflow-hidden transform transition-transform duration-300 translate-y-full sm:translate-y-0 scale-95" id="numpad-content">
             <div class="bg-slate-900 p-4 flex justify-between items-center text-white"><span class="font-bold text-lg flex items-center gap-2"><i data-lucide="calculator" width="20"></i> 값 입력</span><button onclick="closeNumPad()" class="p-1 hover:bg-slate-700 rounded transition-colors"><i data-lucide="x"></i></button></div>
@@ -274,15 +277,16 @@ DAILY_CHECK_HTML = """
             const d=document.getElementById('inputDate').value;
             const {jsPDF}=window.jspdf;
             const pdf=new jsPDF('p','mm','a4');
-            const pageWidth=210;
-            const pageHeight=297;
-            const margin=10;
+            
+            // 임시 컨테이너
             const container=document.createElement('div');
-            container.style.width='794px';
+            container.style.width='794px'; 
             container.style.position='absolute';
             container.style.left='-9999px';
             container.style.background='white';
             document.body.appendChild(container);
+
+            // 헤더 생성 함수
             function createHeader(showTitle) {
                 const h=document.createElement('div');
                 h.style.padding='20px';
@@ -295,6 +299,8 @@ DAILY_CHECK_HTML = """
                 }
                 return h;
             }
+
+            // 설비 카드 HTML 생성 함수
             const createEquipCard = (l, e, ei) => {
                 const card = document.createElement('div');
                 card.className = "mb-4 border border-slate-200 rounded-lg overflow-hidden shadow-sm bg-white break-inside-avoid";
@@ -331,94 +337,91 @@ DAILY_CHECK_HTML = """
                 card.innerHTML = h;
                 return card;
             };
-            const createNgReportCard = (ngList) => {
-                const card = document.createElement('div');
-                card.className = "mt-8 border-2 border-red-500 rounded-xl overflow-hidden shadow-sm bg-white break-inside-avoid";
-                let h = `<div class="bg-red-600 px-4 py-3 font-black text-lg text-white flex items-center gap-2"><span>NG 통합 관리 Report</span><span class="text-xs bg-white/20 px-2 py-0.5 rounded font-normal text-white">Total: ${ngList.length}건</span></div><div class="p-4 bg-red-50 text-xs text-red-700 mb-0 border-b border-red-100">※ 아래 항목은 점검 중 부적합(NG) 판정을 받은 항목입니다. 조치 내역을 확인하십시오.</div><table class="w-full text-xs text-left"><tr class="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold"><th class="px-4 py-2 w-1/5">위치/설비</th><th class="px-4 py-2 w-1/5">점검 항목</th><th class="px-4 py-2 w-1/5">내용/기준</th><th class="px-4 py-2">현장 사진 / 조치 메모</th></tr>`;
-                ngList.forEach(item => {
-                    const nv = checkResults[`${item.uid}_num`];
-                    const photo = checkResults[`${item.uid}_photo`];
-                    const valDisplay = nv ? `<span class="block mt-1 font-mono font-bold text-red-600">${nv} ${item.unit||''}</span>` : '';
-                    h += `<tr class="border-b border-slate-200 bg-white"><td class="px-4 py-3 align-top"><div class="font-bold text-slate-800">${item.line}</div><div class="text-slate-500 text-[10px]">${item.equip}</div></td><td class="px-4 py-3 align-top font-bold text-slate-700">${item.name}</td><td class="px-4 py-3 align-top"><div class="text-slate-600">${item.content}</div><div class="text-[10px] text-blue-500 mt-1">기준: ${item.standard}</div>${valDisplay}</td><td class="px-4 py-3 align-top">${photo ? `<img src="${photo}" class="h-24 rounded border border-slate-300 mb-2 object-contain">` : ''}<div class="border border-slate-200 rounded p-2 bg-slate-50 h-16"><span class="text-[10px] text-slate-400">조치 사항(수기 작성):</span></div></td></tr>`;
-                });
-                h += `</table>`;
-                card.innerHTML = h;
-                return card;
-            };
-            const createPage = () => {
-                const page = document.createElement('div');
-                Object.assign(page.style, { width: `${A4_WIDTH}px`, height: `${A4_HEIGHT}px`, padding: `${MARGIN}px`, background: 'white', marginBottom: '20px', boxSizing: 'border-box', overflow: 'hidden', position: 'relative' });
-                return page;
-            };
+
+            // 페이지 분할 로직 (단순화)
             try {
-                const tempRender = document.createElement('div');
-                Object.assign(tempRender.style, { width: `${A4_WIDTH - (MARGIN*2)}px`, position: 'absolute', visibility: 'hidden' });
-                document.body.appendChild(tempRender);
-                const pages = [];
-                let currentPage = createPage();
-                let currentContentHeight = 0;
+                const PAGE_H = 1123; // A4 Height
+                const MARGIN = 40;
+                let currentH = 0;
+                
+                // 첫 페이지
+                let pageDiv = document.createElement('div');
+                pageDiv.style.width = '794px';
+                pageDiv.style.height = '1123px';
+                pageDiv.style.padding = '40px';
+                pageDiv.style.background = 'white';
+                pageDiv.style.boxSizing = 'border-box';
+                pageDiv.style.position = 'relative';
+                pageDiv.style.marginBottom = '20px';
+                
                 const header = createHeader(true);
-                tempRender.appendChild(header);
-                const headerHeight = header.offsetHeight;
-                const realHeader = createHeader(true);
-                currentPage.appendChild(realHeader);
-                currentContentHeight += headerHeight;
-                pages.push(currentPage);
-                for (const line of Object.keys(appConfig)) {
-                    for (let i = 0; i < appConfig[line].length; i++) {
+                pageDiv.appendChild(header);
+                container.appendChild(pageDiv); // DOM에 추가해야 높이 계산됨
+                
+                currentH = header.offsetHeight + MARGIN;
+                let pageList = [pageDiv];
+
+                // 항목 순회
+                for(const line of Object.keys(appConfig)) {
+                    for(let i=0; i<appConfig[line].length; i++) {
                         const equip = appConfig[line][i];
                         const card = createEquipCard(line, equip, i);
-                        tempRender.appendChild(card);
-                        const cardHeight = card.offsetHeight + 16; 
-                        if (currentContentHeight + cardHeight > CONTENT_HEIGHT - 50) {
-                            currentPage = createPage();
-                            pages.push(currentPage);
-                            const newHeader = createHeader(false);
-                            currentPage.appendChild(newHeader);
-                            tempRender.appendChild(newHeader);
-                            currentContentHeight = newHeader.offsetHeight;
-                            tempRender.removeChild(newHeader); 
+                        
+                        // 높이 측정을 위해 임시 추가
+                        pageDiv.appendChild(card);
+                        const cardH = card.offsetHeight + 16; 
+                        
+                        if (currentH + cardH > PAGE_H - MARGIN) {
+                            // 페이지 넘김
+                            pageDiv.removeChild(card); // 다시 뺌
+                            
+                            // 새 페이지 생성
+                            pageDiv = document.createElement('div');
+                            pageDiv.style.width = '794px';
+                            pageDiv.style.height = '1123px';
+                            pageDiv.style.padding = '40px';
+                            pageDiv.style.background = 'white';
+                            pageDiv.style.boxSizing = 'border-box';
+                            pageDiv.style.position = 'relative';
+                            pageDiv.style.marginBottom = '20px';
+                            
+                            const subHeader = createHeader(false);
+                            pageDiv.appendChild(subHeader);
+                            container.appendChild(pageDiv);
+                            
+                            currentH = subHeader.offsetHeight + MARGIN;
+                            
+                            // 카드 다시 추가
+                            pageDiv.appendChild(card);
+                            currentH += cardH;
+                            pageList.push(pageDiv);
+                        } else {
+                            currentH += cardH;
                         }
-                        const realCard = createEquipCard(line, equip, i);
-                        currentPage.appendChild(realCard);
-                        currentContentHeight += cardHeight;
-                        tempRender.removeChild(card);
                     }
                 }
-                const ngList = [];
-                Object.keys(appConfig).forEach(line => {
-                    appConfig[line].forEach((eq, eqIdx) => {
-                        eq.items.forEach((item, itemIdx) => {
-                            const uid = `${line}-${eqIdx}-${itemIdx}`;
-                            if (checkResults[uId] === 'NG') {
-                                ngList.push({ line: line, equip: eq.equip, name: item.name, content: item.content, standard: item.standard, unit: item.unit, uid: uid });
-                            }
-                        });
-                    });
-                });
-                if (ngList.length > 0) {
-                    currentPage = createPage();
-                    pages.push(currentPage);
-                    const newHeader = createHeader(false);
-                    currentPage.appendChild(newHeader);
-                    const realNgCard = createNgReportCard(ngList);
-                    currentPage.appendChild(realNgCard);
-                }
-                document.body.removeChild(tempRender);
-                pages.forEach(p => root.appendChild(p));
-                const { jsPDF } = window.jspdf;
+
+                // PDF 생성
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfW = pdf.internal.pageSize.getWidth();
                 const pdfH = pdf.internal.pageSize.getHeight();
-                for (let i = 0; i < pages.length; i++) {
-                    if (i > 0) pdf.addPage();
-                    const canvas = await html2canvas(pages[i], { scale: 2, useCORS: true, logging: false });
-                    const imgData = canvas.toDataURL('image/png');
-                    pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
+
+                for(let i=0; i<pageList.length; i++) {
+                    if(i>0) pdf.addPage();
+                    const canvas = await html2canvas(pageList[i], { scale: 2, useCORS: true, logging: false });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
                 }
+
                 pdf.save(`CIMON-SMT_Checklist_${d}.pdf`);
-                showToast("PDF 다운로드 완료", "success");
-            } catch(e) { console.error(e); showToast("오류 발생", "error"); } finally { document.body.removeChild(root); }
+                showToast("PDF 저장 완료", "success");
+
+            } catch(e) {
+                console.error(e);
+                showToast("PDF 생성 실패", "error");
+            } finally {
+                document.body.removeChild(container);
+            }
         }
     </script>
 </body>
@@ -631,8 +634,6 @@ def create_daily_pdf(daily_df, report_date):
     daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] 
     
     custom_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정"]
-    # 카테고리 순서 정렬을 위한 임시 컬럼
-    # daily_df['구분']을 category 타입으로 변환하여 정렬
     daily_df['구분'] = pd.Categorical(daily_df['구분'], categories=custom_order, ordered=True)
     daily_df = daily_df.sort_values(by=['구분', '제품명'])
 
@@ -676,7 +677,7 @@ def create_daily_pdf(daily_df, report_date):
         return pdf.output(dest='S').encode('latin-1', errors='ignore')
 
 # ------------------------------------------------------------------
-# 3. 로그인 및 사용자 관리 (무한로딩 수정)
+# 3. 로그인 및 사용자 관리
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -898,7 +899,9 @@ if menu == "🏭 생산관리":
         with c1:
             report_date = st.date_input("보고서 날짜 선택", datetime.now())
         
+        # [수정] JS 기반 PDF 생성 버튼
         df = load_data(SHEET_RECORDS)
+        
         if not df.empty:
             mask_date = pd.to_datetime(df['날짜']).dt.date == report_date
             daily_df = df[mask_date].copy()
@@ -906,13 +909,114 @@ if menu == "🏭 생산관리":
             
             if not daily_df.empty:
                 st.info(f"{report_date} : 총 {len(daily_df)}건의 생산 실적 (외주 제외)")
+                
+                # 데이터 정렬 및 표시
+                daily_df = daily_df.sort_values(by=['구분', '제품명'])
                 st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
                 
-                if st.button("📄 PDF 보고서 생성", type="primary"):
-                    try:
-                        pdf_bytes = create_daily_pdf(daily_df, report_date)
-                        st.download_button(label="📥 PDF 다운로드", data=pdf_bytes, file_name=f"SMT_Daily_Report_{report_date}.pdf", mime="application/pdf")
-                    except Exception as e: st.error(f"오류: {e}")
+                # ---------------------------------------------------------
+                # JS 기반 PDF 생성용 숨겨진 HTML 테이블 생성
+                # ---------------------------------------------------------
+                pdf_style = """
+                <style>
+                    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+                    #pdf-content {
+                        font-family: 'Noto Sans KR', sans-serif;
+                        width: 210mm;
+                        padding: 20mm;
+                        background: white;
+                        display: none; /* 화면엔 안보임 */
+                    }
+                    .pdf-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+                    .pdf-title { font-size: 24px; font-weight: bold; margin: 0; }
+                    .pdf-date { font-size: 14px; color: #666; margin-top: 5px; }
+                    .pdf-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+                    .pdf-table th, .pdf-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    .pdf-table th { background-color: #f2f2f2; text-align: center; font-weight: bold; }
+                    .pdf-table td.qty { text-align: right; }
+                    .pdf-footer { margin-top: 30px; text-align: right; font-size: 12px; font-weight: bold; }
+                </style>
+                """
+                
+                table_rows = ""
+                total_q = 0
+                for _, row in daily_df.iterrows():
+                    table_rows += f"<tr><td>{row['구분']}</td><td>{row['품목코드']}</td><td>{row['제품명']}</td><td class='qty'>{row['수량']:,}</td></tr>"
+                    total_q += row['수량']
+                
+                html_content = f"""
+                {pdf_style}
+                <div id="pdf-content">
+                    <div class="pdf-header">
+                        <h1 class="pdf-title">SMT 일일 생산현황</h1>
+                        <p class="pdf-date">날짜: {report_date.strftime("%Y-%m-%d")}</p>
+                    </div>
+                    <table class="pdf-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%">구분</th>
+                                <th style="width: 20%">품목코드</th>
+                                <th style="width: 50%">제품명</th>
+                                <th style="width: 15%">수량</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {table_rows}
+                        </tbody>
+                    </table>
+                    <div class="pdf-footer">
+                        총 생산량 : {total_q:,} EA
+                    </div>
+                </div>
+                
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+                <script>
+                    async function generatePDF() {{
+                        const {{ jsPDF }} = window.jspdf;
+                        const element = document.getElementById('pdf-content');
+                        
+                        element.style.display = 'block';
+                        element.style.position = 'absolute';
+                        element.style.top = '-9999px';
+                        
+                        try {{
+                            const canvas = await html2canvas(element, {{ scale: 2 }});
+                            const imgData = canvas.toDataURL('image/png');
+                            
+                            const pdf = new jsPDF('p', 'mm', 'a4');
+                            const pdfWidth = pdf.internal.pageSize.getWidth();
+                            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                            
+                            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                            pdf.save("SMT_Daily_Report_{report_date.strftime('%Y%m%d')}.pdf");
+                        }} catch (err) {{
+                            console.error("PDF 생성 오류:", err);
+                            alert("PDF 생성 중 오류가 발생했습니다.");
+                        }} finally {{
+                            element.style.display = 'none';
+                        }}
+                    }}
+                </script>
+                <div style="margin-top: 20px;">
+                    <button onclick="generatePDF()" style="
+                        background-color: #ef4444; 
+                        color: white; 
+                        padding: 10px 20px; 
+                        border: none; 
+                        border-radius: 5px; 
+                        cursor: pointer; 
+                        font-weight: bold;
+                        font-size: 14px;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    ">
+                        📄 PDF 다운로드 (JS)
+                    </button>
+                </div>
+                """
+                
+                components.html(html_content, height=100)
+                
             else: st.warning(f"해당 날짜({report_date})에 '외주'를 제외한 생산 실적이 없습니다.")
         else: st.info("데이터가 없습니다.")
 
