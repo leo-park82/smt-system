@@ -6,6 +6,7 @@ import hashlib
 import base64
 import os
 import streamlit.components.v1 as components
+from fpdf import FPDF  # [복구] 생산관리 보고서용 FPDF 라이브러리 재추가
 
 # 구글 시트 연동 라이브러리
 import gspread
@@ -20,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드
+# [핵심] SMT 일일점검표 HTML 코드 (JS 방식 유지)
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -44,12 +45,9 @@ DAILY_CHECK_HTML = """
             theme: { extend: { colors: { brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' } }, fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] } } }
         }
     </script>
-
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
-        
         body { font-family: 'Noto Sans KR', sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; }
-        
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
@@ -272,35 +270,31 @@ DAILY_CHECK_HTML = """
         function clearSignature(){ctx.clearRect(0,0,cvs.width,cvs.height);}
         function saveSignature(){signatureData=cvs.toDataURL();saveData();updateSignatureStatus();closeSignatureModal();}
         function updateSignatureStatus(){const b=document.getElementById('btn-signature'),s=document.getElementById('sign-status');if(signatureData){s.innerText="서명 완료";s.className="text-green-400 font-bold";b.classList.add('border-green-500')}else{s.innerText="서명";s.className="text-slate-300";b.classList.remove('border-green-500')}}
-        
-        // [수정: PDF 출력 문제 해결]
         window.saveAndDownloadPDF=async function(){
             const d=document.getElementById('inputDate').value;
             const {jsPDF}=window.jspdf;
-            
-            // 임시 컨테이너
+            const pdf=new jsPDF('p','mm','a4');
+            const pageWidth=210;
+            const pageHeight=297;
+            const margin=10;
             const container=document.createElement('div');
-            container.style.width='794px'; 
+            container.style.width='794px';
             container.style.position='absolute';
             container.style.left='-9999px';
             container.style.background='white';
             document.body.appendChild(container);
-
-            // 헤더 생성 함수
             function createHeader(showTitle) {
                 const h=document.createElement('div');
                 h.style.padding='20px';
                 h.style.borderBottom='2px solid #333';
                 h.style.marginBottom='20px';
                 if(showTitle) {
-                    h.innerHTML=`<h1 class='text-3xl font-black'>SMT 설비 일일 점검표</h1><div class='flex justify-between mt-4'><span>점검일자: ${d}</span><span>서명: ${signatureData ? '완료' : '미서명'}</span></div>`;
+                    h.innerHTML=`<h1 class='text-3xl font-black'>SMT Daily Check</h1><div class='flex justify-between mt-4'><span>점검일자: ${d}</span><span>서명: ${signatureData ? '완료' : '미서명'}</span></div>`;
                 } else {
-                    h.innerHTML=`<div class='flex justify-between text-sm text-gray-500'><span>SMT 설비 일일 점검표 (계속)</span><span>${d}</span></div>`;
+                    h.innerHTML=`<div class='flex justify-between text-sm text-gray-500'><span>SMT Daily Check (계속)</span><span>${d}</span></div>`;
                 }
                 return h;
             }
-
-            // 설비 카드 HTML 생성 함수
             const createEquipCard = (l, e, ei) => {
                 const card = document.createElement('div');
                 card.className = "mb-4 border border-slate-200 rounded-lg overflow-hidden shadow-sm bg-white break-inside-avoid";
@@ -337,93 +331,94 @@ DAILY_CHECK_HTML = """
                 card.innerHTML = h;
                 return card;
             };
-
-            // 페이지 분할 로직 (단순화)
-            // 전체를 한 번에 캡처하는 대신, 페이지별로 나누어 캡처 후 병합
+            const createNgReportCard = (ngList) => {
+                const card = document.createElement('div');
+                card.className = "mt-8 border-2 border-red-500 rounded-xl overflow-hidden shadow-sm bg-white break-inside-avoid";
+                let h = `<div class="bg-red-600 px-4 py-3 font-black text-lg text-white flex items-center gap-2"><span>NG 통합 관리 Report</span><span class="text-xs bg-white/20 px-2 py-0.5 rounded font-normal text-white">Total: ${ngList.length}건</span></div><div class="p-4 bg-red-50 text-xs text-red-700 mb-0 border-b border-red-100">※ 아래 항목은 점검 중 부적합(NG) 판정을 받은 항목입니다. 조치 내역을 확인하십시오.</div><table class="w-full text-xs text-left"><tr class="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold"><th class="px-4 py-2 w-1/5">위치/설비</th><th class="px-4 py-2 w-1/5">점검 항목</th><th class="px-4 py-2 w-1/5">내용/기준</th><th class="px-4 py-2">현장 사진 / 조치 메모</th></tr>`;
+                ngList.forEach(item => {
+                    const nv = checkResults[`${item.uid}_num`];
+                    const photo = checkResults[`${item.uid}_photo`];
+                    const valDisplay = nv ? `<span class="block mt-1 font-mono font-bold text-red-600">${nv} ${item.unit||''}</span>` : '';
+                    h += `<tr class="border-b border-slate-200 bg-white"><td class="px-4 py-3 align-top"><div class="font-bold text-slate-800">${item.line}</div><div class="text-slate-500 text-[10px]">${item.equip}</div></td><td class="px-4 py-3 align-top font-bold text-slate-700">${item.name}</td><td class="px-4 py-3 align-top"><div class="text-slate-600">${item.content}</div><div class="text-[10px] text-blue-500 mt-1">기준: ${item.standard}</div>${valDisplay}</td><td class="px-4 py-3 align-top">${photo ? `<img src="${photo}" class="h-24 rounded border border-slate-300 mb-2 object-contain">` : ''}<div class="border border-slate-200 rounded p-2 bg-slate-50 h-16"><span class="text-[10px] text-slate-400">조치 사항(수기 작성):</span></div></td></tr>`;
+                });
+                h += `</table>`;
+                card.innerHTML = h;
+                return card;
+            };
+            const createPage = () => {
+                const page = document.createElement('div');
+                Object.assign(page.style, { width: `${A4_WIDTH}px`, height: `${A4_HEIGHT}px`, padding: `${MARGIN}px`, background: 'white', marginBottom: '20px', boxSizing: 'border-box', overflow: 'hidden', position: 'relative' });
+                return page;
+            };
             try {
-                // A4 Height ~ 1123px. Margin ~ 40px top/bottom. Content ~ 1043px.
-                const PAGE_H = 1123;
-                const MARGIN = 40;
-                let currentH = 0;
-                
-                // 첫 페이지
-                let pageDiv = document.createElement('div');
-                pageDiv.style.width = '794px';
-                pageDiv.style.height = '1123px';
-                pageDiv.style.padding = '40px';
-                pageDiv.style.background = 'white';
-                pageDiv.style.boxSizing = 'border-box';
-                pageDiv.style.position = 'relative';
-                pageDiv.style.marginBottom = '20px';
-                
+                const tempRender = document.createElement('div');
+                Object.assign(tempRender.style, { width: `${A4_WIDTH - (MARGIN*2)}px`, position: 'absolute', visibility: 'hidden' });
+                document.body.appendChild(tempRender);
+                const pages = [];
+                let currentPage = createPage();
+                let currentContentHeight = 0;
                 const header = createHeader(true);
-                pageDiv.appendChild(header);
-                container.appendChild(pageDiv); // DOM에 추가해야 높이 계산됨
-                
-                currentH = header.offsetHeight + MARGIN;
-                let pageList = [pageDiv];
-
-                // 항목 순회
-                for(const line of Object.keys(appConfig)) {
-                    for(let i=0; i<appConfig[line].length; i++) {
+                tempRender.appendChild(header);
+                const headerHeight = header.offsetHeight;
+                const realHeader = createHeader(true);
+                currentPage.appendChild(realHeader);
+                currentContentHeight += headerHeight;
+                pages.push(currentPage);
+                for (const line of Object.keys(appConfig)) {
+                    for (let i = 0; i < appConfig[line].length; i++) {
                         const equip = appConfig[line][i];
                         const card = createEquipCard(line, equip, i);
-                        
-                        // 높이 측정을 위해 임시 추가
-                        pageDiv.appendChild(card);
-                        const cardH = card.offsetHeight + 16; // margin bottom 고려
-                        
-                        if (currentH + cardH > PAGE_H - MARGIN) {
-                            // 페이지 넘김
-                            pageDiv.removeChild(card); // 다시 뺌
-                            
-                            // 새 페이지 생성
-                            pageDiv = document.createElement('div');
-                            pageDiv.style.width = '794px';
-                            pageDiv.style.height = '1123px';
-                            pageDiv.style.padding = '40px';
-                            pageDiv.style.background = 'white';
-                            pageDiv.style.boxSizing = 'border-box';
-                            pageDiv.style.position = 'relative';
-                            pageDiv.style.marginBottom = '20px';
-                            
-                            const subHeader = createHeader(false);
-                            pageDiv.appendChild(subHeader);
-                            container.appendChild(pageDiv);
-                            
-                            currentH = subHeader.offsetHeight + MARGIN;
-                            
-                            // 카드 다시 추가
-                            pageDiv.appendChild(card);
-                            currentH += cardH;
-                            pageList.push(pageDiv);
-                        } else {
-                            currentH += cardH;
+                        tempRender.appendChild(card);
+                        const cardHeight = card.offsetHeight + 16; 
+                        if (currentContentHeight + cardHeight > CONTENT_HEIGHT - 50) {
+                            currentPage = createPage();
+                            pages.push(currentPage);
+                            const newHeader = createHeader(false);
+                            currentPage.appendChild(newHeader);
+                            tempRender.appendChild(newHeader);
+                            currentContentHeight = newHeader.offsetHeight;
+                            tempRender.removeChild(newHeader); 
                         }
+                        const realCard = createEquipCard(line, equip, i);
+                        currentPage.appendChild(realCard);
+                        currentContentHeight += cardHeight;
+                        tempRender.removeChild(card);
                     }
                 }
-
-                // PDF 생성
+                const ngList = [];
+                Object.keys(appConfig).forEach(line => {
+                    appConfig[line].forEach((eq, eqIdx) => {
+                        eq.items.forEach((item, itemIdx) => {
+                            const uid = `${line}-${eqIdx}-${itemIdx}`;
+                            if (checkResults[uId] === 'NG') {
+                                ngList.push({ line: line, equip: eq.equip, name: item.name, content: item.content, standard: item.standard, unit: item.unit, uid: uid });
+                            }
+                        });
+                    });
+                });
+                if (ngList.length > 0) {
+                    currentPage = createPage();
+                    pages.push(currentPage);
+                    const newHeader = createHeader(false);
+                    currentPage.appendChild(newHeader);
+                    const realNgCard = createNgReportCard(ngList);
+                    currentPage.appendChild(realNgCard);
+                }
+                document.body.removeChild(tempRender);
+                pages.forEach(p => root.appendChild(p));
+                const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfW = pdf.internal.pageSize.getWidth();
                 const pdfH = pdf.internal.pageSize.getHeight();
-
-                for(let i=0; i<pageList.length; i++) {
-                    if(i>0) pdf.addPage();
-                    const canvas = await html2canvas(pageList[i], { scale: 2, useCORS: true, logging: false });
-                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+                for (let i = 0; i < pages.length; i++) {
+                    if (i > 0) pdf.addPage();
+                    const canvas = await html2canvas(pages[i], { scale: 2, useCORS: true, logging: false });
+                    const imgData = canvas.toDataURL('image/png');
+                    pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
                 }
-
                 pdf.save(`CIMON-SMT_Checklist_${d}.pdf`);
-                showToast("PDF 저장 완료", "success");
-
-            } catch(e) {
-                console.error(e);
-                showToast("PDF 생성 실패", "error");
-            } finally {
-                document.body.removeChild(container);
-            }
+                showToast("PDF 다운로드 완료", "success");
+            } catch(e) { console.error(e); showToast("오류 발생", "error"); } finally { document.body.removeChild(root); }
         }
     </script>
 </body>
