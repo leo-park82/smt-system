@@ -28,7 +28,7 @@ DAILY_CHECK_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 스마트 설비 점검 시스템 Pro</title>
+    <title>SMT Daily Check</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -75,21 +75,28 @@ DAILY_CHECK_HTML = """
     <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
         <div class="px-4 sm:px-6 py-3 flex justify-between items-center bg-slate-900 text-white">
             <div class="flex items-center gap-4">
-                <!-- [수정됨] 사장님 요청대로 CIMON 글씨만 남김 -->
-                <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">CIMON</span>
+                <!-- [수정됨] CIMON 삭제하고 SMT Daily Check 남김 -->
+                <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">SMT Daily Check</span>
             </div>
             <div class="flex items-center gap-2">
+                <!-- 일괄합격 버튼 -->
                 <button onclick="checkAllGood()" class="flex items-center bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-1.5 border border-green-500 transition-colors shadow-sm active:scale-95 mr-2" title="일괄 합격">
                     <i data-lucide="check-check" class="w-4 h-4 mr-1"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
                 </button>
                 <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer group relative">
-                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors"><i data-lucide="calendar-days" class="w-5 h-5"></i></button>
+                    <!-- Calendar Toggle Button -->
+                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors" title="달력 보기">
+                        <i data-lucide="calendar-days" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Date Picker -->
                     <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-slate-200 focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onclick="this.showPicker()">
                 </div>
                 <button onclick="openSignatureModal()" class="flex items-center bg-slate-800 hover:bg-slate-700 rounded-lg px-3 py-1.5 border border-slate-700 transition-colors" id="btn-signature">
                     <i data-lucide="pen-tool" class="w-4 h-4 text-slate-400 mr-2"></i><span class="text-sm text-slate-300 font-bold hidden sm:inline" id="sign-status">서명</span>
                 </button>
-                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white"><i data-lucide="settings" class="w-5 h-5"></i></button>
+                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white" title="설정">
+                    <i data-lucide="settings" class="w-5 h-5"></i>
+                </button>
             </div>
         </div>
         <div class="px-4 sm:px-6 py-3 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
@@ -160,10 +167,9 @@ DAILY_CHECK_HTML = """
     <div id="toast-container" class="fixed bottom-20 right-6 z-50 flex flex-col gap-2"></div>
     <script>
         window.onerror = null;
-        const DATA_PREFIX = "SMT_DATA_V3_"; 
-        const CONFIG_KEY = "SMT_CONFIG_V6.1_SYNTAX_FIXED"; 
+        const DATA_PREFIX="SMT_DATA_V3_",CONFIG_KEY="SMT_CONFIG_V6.1_SYNTAX_FIXED";
         
-        // [데이터 100% 보존] 사장님께서 주신 원본 데이터
+        // [중요] 모든 데이터 원복
         const defaultLineData = {
             "1 LINE": [
                 { equip: "IN LOADER (SML-120Y)", items: [{ name: "AIR 압력", content: "압력 게이지 지침 확인", standard: "0.5 MPa ± 0.1", type: "OX" }, { name: "수/자동 전환", content: "MODE 전환 스위치 작동", standard: "정상 동작", type: "OX" }, { name: "각 구동부", content: "작동 이상음 및 소음 상태", standard: "정상 동작", type: "OX" }, { name: "매거진 상태", content: "Locking 마모, 휨, 흔들림", standard: "마모/휨 없을 것", type: "OX" }] },
@@ -273,7 +279,7 @@ DAILY_CHECK_HTML = """
         function saveSignature(){signatureData=cvs.toDataURL();saveData();updateSignatureStatus();closeSignatureModal();}
         function updateSignatureStatus(){const b=document.getElementById('btn-signature'),s=document.getElementById('sign-status');if(signatureData){s.innerText="서명 완료";s.className="text-green-400 font-bold";b.classList.add('border-green-500')}else{s.innerText="서명";s.className="text-slate-300";b.classList.remove('border-green-500')}}
         
-        // [수정: PDF 출력 문제 해결]
+        // [수정: PDF 출력 개선: 헤더 제어 및 페이지 넘김]
         window.saveAndDownloadPDF=async function(){
             const d=document.getElementById('inputDate').value;
             const {jsPDF}=window.jspdf;
@@ -338,81 +344,162 @@ DAILY_CHECK_HTML = """
                 return card;
             };
 
-            // 페이지 분할 로직 (단순화)
-            // 전체를 한 번에 캡처하는 대신, 페이지별로 나누어 캡처 후 병합
-            try {
-                // A4 Height ~ 1123px. Margin ~ 40px top/bottom. Content ~ 1043px.
-                const PAGE_H = 1123;
-                const MARGIN = 40;
-                let currentH = 0;
+            const createNgReportCard = (ngList) => {
+                const card = document.createElement('div');
+                card.className = "mt-8 border-2 border-red-500 rounded-xl overflow-hidden shadow-sm bg-white break-inside-avoid";
                 
-                // 첫 페이지
-                let pageDiv = document.createElement('div');
-                pageDiv.style.width = '794px';
-                pageDiv.style.height = '1123px';
-                pageDiv.style.padding = '40px';
-                pageDiv.style.background = 'white';
-                pageDiv.style.boxSizing = 'border-box';
-                pageDiv.style.position = 'relative';
-                pageDiv.style.marginBottom = '20px';
+                let h = `<div class="bg-red-600 px-4 py-3 font-black text-lg text-white flex items-center gap-2">
+                            <span>NG 통합 관리 Report</span>
+                            <span class="text-xs bg-white/20 px-2 py-0.5 rounded font-normal text-white">Total: ${ngList.length}건</span>
+                         </div>
+                         <div class="p-4 bg-red-50 text-xs text-red-700 mb-0 border-b border-red-100">
+                            ※ 아래 항목은 점검 중 부적합(NG) 판정을 받은 항목입니다. 조치 내역을 확인하십시오.
+                         </div>
+                         <table class="w-full text-xs text-left">
+                            <tr class="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold">
+                                <th class="px-4 py-2 w-1/5">위치/설비</th>
+                                <th class="px-4 py-2 w-1/5">점검 항목</th>
+                                <th class="px-4 py-2 w-1/5">내용/기준</th>
+                                <th class="px-4 py-2">현장 사진 / 조치 메모</th>
+                            </tr>`;
                 
-                const header = createHeader(true);
-                pageDiv.appendChild(header);
-                container.appendChild(pageDiv); // DOM에 추가해야 높이 계산됨
-                
-                currentH = header.offsetHeight + MARGIN;
-                let pageList = [pageDiv];
+                ngList.forEach(item => {
+                    const nv = checkResults[`${item.uid}_num`];
+                    const photo = checkResults[`${item.uid}_photo`];
+                    const valDisplay = nv ? `<span class="block mt-1 font-mono font-bold text-red-600">${nv} ${item.unit||''}</span>` : '';
 
-                // 항목 순회
-                for(const line of Object.keys(appConfig)) {
-                    for(let i=0; i<appConfig[line].length; i++) {
+                    h += `<tr class="border-b border-slate-200 bg-white">
+                            <td class="px-4 py-3 align-top">
+                                <div class="font-bold text-slate-800">${item.line}</div>
+                                <div class="text-slate-500 text-[10px]">${item.equip}</div>
+                            </td>
+                            <td class="px-4 py-3 align-top font-bold text-slate-700">
+                                ${item.name}
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="text-slate-600">${item.content}</div>
+                                <div class="text-[10px] text-blue-500 mt-1">기준: ${item.standard}</div>
+                                ${valDisplay}
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                ${photo ? `<img src="${photo}" class="h-24 rounded border border-slate-300 mb-2 object-contain">` : ''}
+                                <div class="border border-slate-200 rounded p-2 bg-slate-50 h-16">
+                                    <span class="text-[10px] text-slate-400">조치 사항(수기 작성):</span>
+                                </div>
+                            </td>
+                          </tr>`;
+                });
+                h += `</table>`;
+                card.innerHTML = h;
+                return card;
+            };
+
+            const createPage = () => {
+                const page = document.createElement('div');
+                Object.assign(page.style, {
+                    width: `${A4_WIDTH}px`,
+                    height: `${A4_HEIGHT}px`,
+                    padding: `${MARGIN}px`,
+                    background: 'white',
+                    marginBottom: '20px', 
+                    boxSizing: 'border-box',
+                    overflow: 'hidden', 
+                    position: 'relative'
+                });
+                return page;
+            };
+
+            try {
+                const tempRender = document.createElement('div');
+                Object.assign(tempRender.style, { width: `${A4_WIDTH - (MARGIN*2)}px`, position: 'absolute', visibility: 'hidden' });
+                document.body.appendChild(tempRender);
+
+                const pages = [];
+                let currentPage = createPage();
+                let currentContentHeight = 0;
+                
+                // 첫 페이지 헤더
+                const header = createHeader(true);
+                tempRender.appendChild(header);
+                const headerHeight = header.offsetHeight;
+                
+                const realHeader = createHeader(true);
+                currentPage.appendChild(realHeader);
+                currentContentHeight += headerHeight;
+                pages.push(currentPage);
+
+                for (const line of Object.keys(appConfig)) {
+                    for (let i = 0; i < appConfig[line].length; i++) {
                         const equip = appConfig[line][i];
                         const card = createEquipCard(line, equip, i);
                         
-                        // 높이 측정을 위해 임시 추가
-                        pageDiv.appendChild(card);
-                        const cardH = card.offsetHeight + 16; // margin bottom 고려
+                        tempRender.appendChild(card);
+                        const cardHeight = card.offsetHeight + 16; 
                         
-                        if (currentH + cardH > PAGE_H - MARGIN) {
-                            // 페이지 넘김
-                            pageDiv.removeChild(card); // 다시 뺌
+                        // 페이지 넘김 최적화 (여유 공간 50px 확보)
+                        if (currentContentHeight + cardHeight > CONTENT_HEIGHT - 50) {
+                            currentPage = createPage();
+                            pages.push(currentPage);
                             
-                            // 새 페이지 생성
-                            pageDiv = document.createElement('div');
-                            pageDiv.style.width = '794px';
-                            pageDiv.style.height = '1123px';
-                            pageDiv.style.padding = '40px';
-                            pageDiv.style.background = 'white';
-                            pageDiv.style.boxSizing = 'border-box';
-                            pageDiv.style.position = 'relative';
-                            pageDiv.style.marginBottom = '20px';
-                            
-                            const subHeader = createHeader(false);
-                            pageDiv.appendChild(subHeader);
-                            container.appendChild(pageDiv);
-                            
-                            currentH = subHeader.offsetHeight + MARGIN;
-                            
-                            // 카드 다시 추가
-                            pageDiv.appendChild(card);
-                            currentH += cardH;
-                            pageList.push(pageDiv);
-                        } else {
-                            currentH += cardH;
+                            // 다음 페이지부터는 간략 헤더 사용
+                            const newHeader = createHeader(false);
+                            currentPage.appendChild(newHeader);
+                            // 새 페이지에서는 헤더 높이만큼 초기 높이 설정
+                            // 간략 헤더 높이 계산을 위해 임시 렌더링에 추가
+                            tempRender.appendChild(newHeader);
+                            currentContentHeight = newHeader.offsetHeight;
+                            tempRender.removeChild(newHeader); // 측정 후 제거
                         }
+
+                        const realCard = createEquipCard(line, equip, i);
+                        currentPage.appendChild(realCard);
+                        currentContentHeight += cardHeight;
+                        tempRender.removeChild(card);
                     }
                 }
 
-                // PDF 생성
+                const ngList = [];
+                Object.keys(appConfig).forEach(line => {
+                    appConfig[line].forEach((eq, eqIdx) => {
+                        eq.items.forEach((item, itemIdx) => {
+                            const uid = `${line}-${eqIdx}-${itemIdx}`;
+                            if (checkResults[uId] === 'NG') {
+                                ngList.push({
+                                    line: line,
+                                    equip: eq.equip,
+                                    name: item.name,
+                                    content: item.content,
+                                    standard: item.standard,
+                                    unit: item.unit,
+                                    uid: uid
+                                });
+                            }
+                        });
+                    });
+                });
+
+                if (ngList.length > 0) {
+                    currentPage = createPage();
+                    pages.push(currentPage);
+                    const newHeader = createHeader(false);
+                    currentPage.appendChild(newHeader);
+                    const realNgCard = createNgReportCard(ngList);
+                    currentPage.appendChild(realNgCard);
+                }
+                
+                document.body.removeChild(tempRender);
+                pages.forEach(p => root.appendChild(p));
+
+                const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfW = pdf.internal.pageSize.getWidth();
                 const pdfH = pdf.internal.pageSize.getHeight();
 
-                for(let i=0; i<pageList.length; i++) {
-                    if(i>0) pdf.addPage();
-                    const canvas = await html2canvas(pageList[i], { scale: 2, useCORS: true, logging: false });
-                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+                for (let i = 0; i < pages.length; i++) {
+                    if (i > 0) pdf.addPage();
+                    const canvas = await html2canvas(pages[i], { scale: 2, useCORS: true, logging: false });
+                    const imgData = canvas.toDataURL('image/png');
+                    pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
                 }
 
                 pdf.save(`CIMON-SMT_Checklist_${d}.pdf`);
@@ -827,6 +914,7 @@ if menu == "🏭 생산관리":
         with c1:
             report_date = st.date_input("보고서 날짜 선택", datetime.now())
         
+        # [수정] JS 기반 PDF 생성 버튼
         df = load_data(SHEET_RECORDS)
         
         if not df.empty:
@@ -896,6 +984,7 @@ if menu == "🏭 생산관리":
                     </div>
                 </div>
                 
+                <!-- PDF 생성 스크립트 -->
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
                 <script>
@@ -903,6 +992,7 @@ if menu == "🏭 생산관리":
                         const {{ jsPDF }} = window.jspdf;
                         const element = document.getElementById('pdf-content');
                         
+                        // 임시로 보이게 설정 (캡처 위해)
                         element.style.display = 'block';
                         element.style.position = 'absolute';
                         element.style.top = '-9999px';
@@ -921,6 +1011,7 @@ if menu == "🏭 생산관리":
                             console.error("PDF 생성 오류:", err);
                             alert("PDF 생성 중 오류가 발생했습니다.");
                         }} finally {{
+                            // 다시 숨김
                             element.style.display = 'none';
                         }}
                     }}
@@ -942,7 +1033,8 @@ if menu == "🏭 생산관리":
                 </div>
                 """
                 
-                components.html(html_content, height=100)
+                # HTML 컴포넌트로 삽입
+                components.html(html_content, height=200) # 버튼 높이만큼만
                 
             else: st.warning(f"해당 날짜({report_date})에 '외주'를 제외한 생산 실적이 없습니다.")
         else: st.info("데이터가 없습니다.")
