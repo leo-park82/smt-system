@@ -28,6 +28,7 @@ DAILY_CHECK_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- [수정 1] 타이틀에서 Pro 삭제 -->
     <title>SMT Daily Check</title>
     
     <!-- Tailwind CSS -->
@@ -75,7 +76,7 @@ DAILY_CHECK_HTML = """
     <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
         <div class="px-4 sm:px-6 py-3 flex justify-between items-center bg-slate-900 text-white">
             <div class="flex items-center gap-4">
-                <!-- [수정됨] CIMON 삭제하고 SMT Daily Check 남김 -->
+                <!-- [수정 2] CIMON 삭제하고 SMT Daily Check만 남김 -->
                 <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">SMT Daily Check</span>
             </div>
             <div class="flex items-center gap-2">
@@ -167,7 +168,8 @@ DAILY_CHECK_HTML = """
     <div id="toast-container" class="fixed bottom-20 right-6 z-50 flex flex-col gap-2"></div>
     <script>
         window.onerror = null;
-        const DATA_PREFIX="SMT_DATA_V3_",CONFIG_KEY="SMT_CONFIG_V6.1_SYNTAX_FIXED";
+        const DATA_PREFIX = "SMT_DATA_V3_"; 
+        const CONFIG_KEY = "SMT_CONFIG_V6.1_SYNTAX_FIXED"; 
         
         // [중요] 모든 데이터 원복
         const defaultLineData = {
@@ -299,9 +301,10 @@ DAILY_CHECK_HTML = """
                 h.style.borderBottom='2px solid #333';
                 h.style.marginBottom='20px';
                 if(showTitle) {
-                    h.innerHTML=`<h1 class='text-3xl font-black'>SMT 설비 일일 점검표</h1><div class='flex justify-between mt-4'><span>점검일자: ${d}</span><span>서명: ${signatureData ? '완료' : '미서명'}</span></div>`;
+                    // [수정] CIMON 삭제, SMT Daily Check만 표시
+                    h.innerHTML=`<h1 class='text-3xl font-black'>SMT Daily Check</h1><div class='flex justify-between mt-4'><span>점검일자: ${d}</span><span>서명: ${signatureData ? '완료' : '미서명'}</span></div>`;
                 } else {
-                    h.innerHTML=`<div class='flex justify-between text-sm text-gray-500'><span>SMT 설비 일일 점검표 (계속)</span><span>${d}</span></div>`;
+                    h.innerHTML=`<div class='flex justify-between text-sm text-gray-500'><span>SMT Daily Check (계속)</span><span>${d}</span></div>`;
                 }
                 return h;
             }
@@ -692,7 +695,78 @@ def get_user_id():
     return st.session_state.user_info["name"]
 
 # ------------------------------------------------------------------
-# 3. 로그인 및 사용자 관리 (무한로딩 수정)
+# [신규] PDF 보고서 생성 함수 (한글 인코딩 오류 수정)
+# ------------------------------------------------------------------
+def create_daily_pdf(daily_df, report_date):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # 1. 폰트 설정 (가장 중요)
+    font_path = 'NanumGothic.ttf'
+    if not os.path.exists(font_path):
+        font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
+    
+    has_korean_font = False
+    if os.path.exists(font_path):
+        try:
+            pdf.add_font('Korean', '', font_path, uni=True)
+            pdf.set_font('Korean', '', 11)
+            has_korean_font = True
+        except:
+            pdf.set_font('Arial', '', 11)
+    else:
+        pdf.set_font('Arial', '', 11)
+
+    # 2. 타이틀 출력
+    title_text = f'일일 생산 보고서 ({report_date.strftime("%Y-%m-%d")})' if has_korean_font else f'Daily Production Report ({report_date.strftime("%Y-%m-%d")})'
+    pdf.cell(0, 10, title_text, ln=True, align='C')
+    pdf.ln(5)
+
+    # 3. 데이터 필터링 (외주 제외)
+    daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] 
+    
+    custom_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정"]
+    daily_df['구분'] = pd.Categorical(daily_df['구분'], categories=custom_order, ordered=True)
+    daily_df = daily_df.sort_values(by=['구분', '제품명'])
+
+    # 4. 헤더 출력
+    pdf.set_font_size(10)
+    pdf.set_fill_color(220, 230, 241) 
+    
+    w_cat = 30; w_code = 40; w_name = 80; w_qty = 30
+    
+    pdf.cell(w_cat, 10, "Category", border=1, align='C', fill=True)
+    pdf.cell(w_code, 10, "Item Code", border=1, align='C', fill=True)
+    pdf.cell(w_name, 10, "Item Name", border=1, align='C', fill=True)
+    pdf.cell(w_qty, 10, "Q'ty", border=1, align='C', fill=True)
+    pdf.ln()
+
+    # 5. 본문 출력
+    total_qty = 0
+    for _, row in daily_df.iterrows():
+        pdf.cell(w_cat, 8, str(row['구분']), border=1, align='C')
+        pdf.cell(w_code, 8, str(row['품목코드']), border=1, align='C')
+        p_name = str(row['제품명'])
+        if len(p_name) > 30: p_name = p_name[:28] + ".."
+        pdf.cell(w_name, 8, p_name, border=1, align='L')
+        pdf.cell(w_qty, 8, f"{row['수량']:,}", border=1, align='R')
+        pdf.ln()
+        total_qty += row['수량']
+
+    # 6. 합계 출력
+    pdf.ln(5)
+    pdf.set_font_size(12)
+    pdf.set_fill_color(255, 255, 200) 
+    pdf.cell(w_cat + w_code + w_name, 10, "Total Production Quantity : ", border=1, align='R', fill=True)
+    pdf.cell(w_qty, 10, f"{total_qty:,} EA", border=1, align='R', fill=True)
+    
+    try:
+        return pdf.output(dest='S').encode('latin-1') 
+    except UnicodeEncodeError:
+        return pdf.output(dest='S').encode('latin-1', errors='ignore')
+
+# ------------------------------------------------------------------
+# 3. 로그인 및 사용자 관리
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -914,7 +988,6 @@ if menu == "🏭 생산관리":
         with c1:
             report_date = st.date_input("보고서 날짜 선택", datetime.now())
         
-        # [수정] JS 기반 PDF 생성 버튼
         df = load_data(SHEET_RECORDS)
         
         if not df.empty:
@@ -984,7 +1057,6 @@ if menu == "🏭 생산관리":
                     </div>
                 </div>
                 
-                <!-- PDF 생성 스크립트 -->
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
                 <script>
@@ -992,7 +1064,6 @@ if menu == "🏭 생산관리":
                         const {{ jsPDF }} = window.jspdf;
                         const element = document.getElementById('pdf-content');
                         
-                        // 임시로 보이게 설정 (캡처 위해)
                         element.style.display = 'block';
                         element.style.position = 'absolute';
                         element.style.top = '-9999px';
@@ -1011,7 +1082,6 @@ if menu == "🏭 생산관리":
                             console.error("PDF 생성 오류:", err);
                             alert("PDF 생성 중 오류가 발생했습니다.");
                         }} finally {{
-                            // 다시 숨김
                             element.style.display = 'none';
                         }}
                     }}
@@ -1033,8 +1103,7 @@ if menu == "🏭 생산관리":
                 </div>
                 """
                 
-                # HTML 컴포넌트로 삽입
-                components.html(html_content, height=200) # 버튼 높이만큼만
+                components.html(html_content, height=100)
                 
             else: st.warning(f"해당 날짜({report_date})에 '외주'를 제외한 생산 실적이 없습니다.")
         else: st.info("데이터가 없습니다.")
