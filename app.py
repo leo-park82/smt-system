@@ -18,7 +18,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# 1. 기본 설정 및 디자인 (오전 기초 버전 완벽 복구)
+# 1. 기본 설정 및 디자인 (app-기초.py 디자인 100% 복구)
 # ------------------------------------------------------------------
 st.set_page_config(
     page_title="SMT Dashboard", 
@@ -27,29 +27,43 @@ st.set_page_config(
     initial_sidebar_state="auto" 
 )
 
-# [CSS] 스타일 적용
+# [CSS] 반응형 대시보드 스타일 (app-기초.py 원본)
 st.markdown("""
     <style>
+    /* 폰트 및 기본 배경 설정 */
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
     
     html, body, [class*="css"] {
         font-family: 'Pretendard', sans-serif !important;
         color: #1e293b;
     }
-    .stApp { background-color: #f8fafc; }
+    
+    /* 전체 앱 배경 */
+    .stApp {
+        background-color: #f8fafc;
+    }
+
+    /* 상단 헤더 감추기 및 여백 조정 */
     [data-testid="stHeader"] { background: rgba(0,0,0,0); }
+    [data-testid="stDecoration"] { display: none; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
 
-    /* 카드 스타일 */
+    /* 1. 스마트 카드 스타일 (공통) */
     .smart-card {
         background: #ffffff;
         border-radius: 16px;
         padding: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         border: 1px solid #f1f5f9;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        height: 100%;
     }
-    
-    /* 헤더 스타일 */
+    .smart-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+    }
+
+    /* 2. 대시보드 헤더 스타일 */
     .dashboard-header {
         background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
         padding: 30px 40px;
@@ -57,26 +71,130 @@ st.markdown("""
         color: white;
         margin-bottom: 30px;
         box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.3);
-        display: flex; justify-content: space-between; align-items: center;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
-    .header-title { font-size: 2rem; font-weight: 800; margin: 0; }
-    .header-subtitle { font-size: 1rem; opacity: 0.9; margin-top: 5px; }
+    .header-title { font-size: 2rem; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
+    .header-subtitle { font-size: 1rem; opacity: 0.9; margin-top: 5px; font-weight: 400; }
 
-    /* KPI 스타일 */
-    .kpi-title { font-size: 0.85rem; font-weight: 600; color: #64748b; margin-bottom: 8px; }
-    .kpi-value { font-size: 2.2rem; font-weight: 800; color: #0f172a; margin-bottom: 4px; }
-    
-    /* 탭 및 사이드바 스타일 */
+    /* 3. KPI 메트릭 스타일 */
+    .kpi-title {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 8px;
+    }
+    .kpi-value {
+        font-size: 2.2rem;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: 4px;
+    }
+    .kpi-trend {
+        font-size: 0.9rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .trend-up { color: #10b981; background: #ecfdf5; padding: 2px 8px; border-radius: 12px; }
+    .trend-neutral { color: #64748b; background: #f1f5f9; padding: 2px 8px; border-radius: 12px; }
+
+    /* 4. 탭 스타일 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: transparent;
+        padding-bottom: 10px;
+        flex-wrap: wrap; 
+    }
     .stTabs [data-baseweb="tab"] {
-        height: 45px; border-radius: 12px; background-color: #ffffff;
-        border: 1px solid #e2e8f0; font-weight: 600;
+        height: 45px;
+        border-radius: 12px;
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        color: #64748b;
+        font-weight: 600;
+        padding: 0 24px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        flex-grow: 1; 
     }
     .stTabs [aria-selected="true"] {
-        background-color: #4f46e5 !important; color: #ffffff !important; border-color: #4f46e5 !important;
+        background-color: #4f46e5 !important;
+        color: #ffffff !important;
+        border-color: #4f46e5 !important;
+        box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.3);
+    }
+
+    /* 5. 사이드바 스타일 */
+    section[data-testid="stSidebar"] {
+        background-color: #ffffff;
+        border-right: 1px solid #e2e8f0;
     }
     .sidebar-user-card {
-        background-color: #f8fafc; border: 1px solid #e2e8f0;
-        border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 20px;
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+
+    /* 6. 로그인 화면 스타일 */
+    .login-spacer { height: 10vh; }
+    .login-card {
+        background: white;
+        border-radius: 24px;
+        padding: 40px 30px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e2e8f0;
+        text-align: center;
+    }
+    .login-icon {
+        background: linear-gradient(135deg, #4f46e5 0%, #818cf8 100%);
+        width: 70px;
+        height: 70px;
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+        color: white;
+        margin: 0 auto 20px auto;
+        box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
+    }
+    .login-title {
+        font-size: 1.8rem;
+        font-weight: 800;
+        color: #1e293b;
+        margin-bottom: 5px;
+        letter-spacing: -0.5px;
+    }
+    .login-subtitle {
+        color: #64748b;
+        font-size: 0.95rem;
+        margin-bottom: 30px;
+    }
+    div[data-testid="stForm"] {
+        border: none;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    @media (max-width: 768px) {
+        .dashboard-header {
+            padding: 20px;
+            flex-direction: column;
+            text-align: center;
+            gap: 15px;
+        }
+        .header-title { font-size: 1.5rem; }
+        .smart-card { padding: 15px; }
+        .kpi-value { font-size: 1.8rem; }
+        .login-card { padding: 30px 20px; }
+        div[data-testid="stDataFrame"] { font-size: 0.85rem; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -156,10 +274,9 @@ def append_sheet_row(row_list, name):
     ws = get_worksheet(name)
     ws.append_row(row_list)
 
-# 재고 업데이트 함수 (수정됨: 마이너스 처리 포함)
+# 재고 업데이트 함수
 def update_inventory(code, name, change):
     df = load_sheet_data("inventory")
-    # 문자열 통일
     code = str(code).strip()
     
     if not df.empty and '품목코드' in df.columns:
@@ -169,10 +286,8 @@ def update_inventory(code, name, change):
     
     if code in df['품목코드'].values:
         idx = df[df['품목코드'] == code].index[0]
-        # 기존 재고에 더하기 (차감이면 change가 음수)
         df.at[idx, '현재고'] = df.at[idx, '현재고'] + change
     else:
-        # 신규 품목 추가
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
@@ -239,7 +354,7 @@ def get_user_id(): return CURRENT_USER["name"]
 # ------------------------------------------------------------------
 with st.sidebar:
     if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
-    st.markdown("<h2 style='text-align:center;'>SMT System</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:#1e293b; margin-top:0;'>SMT System</h2>", unsafe_allow_html=True)
     
     role_badge = "👑 Admin" if IS_ADMIN else "👤 User"
     st.markdown(f"""
@@ -282,7 +397,6 @@ if menu == "🏭 생산관리":
 
     # 1-1. 실적 등록
     with tab_prod:
-        # 품목 정보 로드 (자동완성용)
         item_df = load_sheet_data("items")
         
         c1, c2 = st.columns([1, 1.6], gap="large")
@@ -296,10 +410,8 @@ if menu == "🏭 생산관리":
                     date = st.date_input("작업 일자", datetime.now())
                     cat = st.selectbox("공정 구분", CATEGORIES)
                     
-                    # 품목 코드 직접 입력
                     code_input = st.text_input("품목 코드", placeholder="바코드 스캔 또는 입력")
                     
-                    # 제품명 자동 기입
                     auto_name = ""
                     if code_input:
                         clean_code = code_input.strip()
@@ -315,23 +427,20 @@ if menu == "🏭 생산관리":
                     qty = st.number_input("생산 수량", min_value=1, value=100)
                     writer = st.text_input("작성자", value=get_user_id(), disabled=True)
                     
-                    # 재고 차감 안내 메시지
                     if cat in ["후공정", "외주공정", "후공정 외주"]:
                         st.info("ℹ️ 해당 공정은 재고 수량이 '차감(마이너스)' 됩니다.")
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("저장하기", type="primary", use_container_width=True):
                         if name:
-                            # 1. 실적 저장 (항상 저장)
                             rec = [str(date), cat, code_input, name, qty, str(datetime.now()), writer]
                             append_sheet_row(rec, "records")
                             
-                            # 2. 재고 연동 (후공정/외주는 차감, 나머지는 증가)
                             if cat in ["후공정", "외주공정", "후공정 외주"]:
-                                update_inventory(code_input, name, -qty) # 마이너스 차감
+                                update_inventory(code_input, name, -qty)
                                 st.toast(f"저장 및 재고 차감 완료! (-{qty}EA)", icon="✅")
                             else:
-                                update_inventory(code_input, name, qty) # 플러스 증가
+                                update_inventory(code_input, name, qty)
                                 st.toast(f"저장 및 재고 증가 완료! (+{qty}EA)", icon="✅")
                                 
                             time.sleep(0.5); st.rerun()
@@ -342,12 +451,31 @@ if menu == "🏭 생산관리":
 
         with c2:
             st.markdown("""<div class="smart-card" style="height:auto;">""", unsafe_allow_html=True)
-            # [수정] 텍스트 "최근 등록 내역"으로 완벽하게 복구
-            st.markdown("#### 📋 최근 등록 내역")
+            # [수정] "최근 등록 내역" 및 삭제 기능 복구 (data_editor 사용)
+            st.markdown("#### 📋 최근 등록 내역 (수정/삭제 가능)")
             df = load_sheet_data("records")
+            
             if not df.empty and '입력시간' in df.columns:
                 df = df.sort_values("입력시간", ascending=False)
-                st.dataframe(df, use_container_width=True, hide_index=True, height=600)
+                
+                if IS_EDITOR:
+                    # 삭제/수정 가능한 에디터
+                    edited_df = st.data_editor(
+                        df, 
+                        use_container_width=True, 
+                        hide_index=True, 
+                        num_rows="dynamic", # 행 추가/삭제 가능
+                        height=600,
+                        key="editor_records"
+                    )
+                    
+                    # 변경사항 저장 버튼
+                    if st.button("💾 수정사항 구글 시트에 반영", type="primary"):
+                        save_sheet_data(edited_df, "records")
+                        st.success("구글 시트에 수정/삭제 내용이 반영되었습니다.")
+                        time.sleep(1); st.rerun()
+                else:
+                    st.dataframe(df, use_container_width=True, hide_index=True, height=600)
             else:
                 st.info("데이터가 없습니다.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -454,7 +582,6 @@ if menu == "🏭 생산관리":
             st.info("💡 구글 시트('items')에서 품목 코드를 관리하세요.")
             it_df = load_sheet_data("items")
             
-            # 구글 시트 저장을 위한 에디터
             edited_it = st.data_editor(it_df, num_rows="dynamic", use_container_width=True)
             if st.button("💾 품목 정보 저장 (구글 시트)"):
                 save_sheet_data(edited_it, "items")
@@ -481,16 +608,13 @@ elif menu == "🛠️ 설비보전관리":
                     
                     f_date = st.date_input("📅 작업 일자")
                     
-                    # [수정] 설비 리스트 불러오기 (equipment 시트에서 'name' 또는 '설비명' 컬럼 사용)
                     eq_list = []
                     if not equip_df.empty:
-                        # 컬럼명 자동 감지 (영문 'name' 또는 한글 '설비명')
                         if 'name' in equip_df.columns:
                             eq_list = equip_df['name'].tolist()
                         elif '설비명' in equip_df.columns:
                             eq_list = equip_df['설비명'].tolist()
                     
-                    # [수정] 리스트 선택 박스로 확실하게 고정 (직접 입력 옵션 포함)
                     f_eq_select = st.selectbox("설비 선택", ["직접 입력"] + eq_list)
                     
                     if f_eq_select == "직접 입력":
@@ -509,7 +633,6 @@ elif menu == "🛠️ 설비보전관리":
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("💾 이력 저장", type="primary", use_container_width=True):
                         if f_eq_final:
-                            # 구글 시트 저장
                             new_rec = [str(f_date), f_eq_final, f_type.split()[0], f_desc, f_cost, f_down, f_worker]
                             append_sheet_row(new_rec, "maintenance")
                             st.toast("저장 완료!", icon="✅")
@@ -525,7 +648,22 @@ elif menu == "🛠️ 설비보전관리":
             st.markdown("#### 🚀 최근 등록 내역")
             if not maint_df.empty:
                 maint_df = maint_df.sort_values("입력시간", ascending=False) if '입력시간' in maint_df.columns else maint_df
-                st.dataframe(maint_df, use_container_width=True, hide_index=True)
+                
+                # 설비 보전에서도 삭제 가능하도록 수정
+                if IS_EDITOR:
+                    edited_maint = st.data_editor(
+                        maint_df, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        num_rows="dynamic",
+                        key="editor_maint"
+                    )
+                    if st.button("💾 이력 수정/삭제 저장"):
+                        save_sheet_data(edited_maint, "maintenance")
+                        st.success("반영되었습니다.")
+                        time.sleep(1); st.rerun()
+                else:
+                    st.dataframe(maint_df, use_container_width=True, hide_index=True)
             else: st.info("등록된 이력이 없습니다.")
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -543,7 +681,6 @@ elif menu == "🛠️ 설비보전관리":
         if not maint_df.empty and '날짜' in maint_df.columns:
             maint_df['날짜'] = pd.to_datetime(maint_df['날짜'], errors='coerce')
             
-            # 간단 KPI 표시
             total_cost = pd.to_numeric(maint_df['비용'], errors='coerce').fillna(0).sum()
             total_down = pd.to_numeric(maint_df['비가동시간'], errors='coerce').fillna(0).sum()
             
