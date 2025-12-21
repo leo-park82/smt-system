@@ -117,7 +117,6 @@ DAILY_CHECK_HTML = """
         <div class="h-20"></div>
     </main>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
-    <!-- Modals omitted for brevity, logic same as provided HTML -->
     <div id="calendar-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
             <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
@@ -127,7 +126,7 @@ DAILY_CHECK_HTML = """
     <div id="settings-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="settings-content">
             <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-slate-300"><i data-lucide="x" class="w-5 h-5"></i></button></div>
-            <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 데이터 초기화</button></div>
+            <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><div class="space-y-3 pt-4 border-t border-slate-100"><label class="block text-sm font-bold text-slate-700">데이터 관리</label><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 현재 날짜 데이터 초기화</button><button onclick="resetConfigToDefault()" class="w-full py-3 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="rotate-ccw" class="w-4 h-4"></i> 점검 항목(양식) 초기화</button></div></div>
         </div>
     </div>
     <div id="signature-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
@@ -503,12 +502,13 @@ def get_user_id():
     return st.session_state.user_info["name"]
 
 # ------------------------------------------------------------------
-# [신규] PDF 보고서 생성 함수
+# [신규] PDF 보고서 생성 함수 (한글 인코딩 오류 수정)
 # ------------------------------------------------------------------
 def create_daily_pdf(daily_df, report_date):
     pdf = FPDF()
     pdf.add_page()
     
+    # 1. 폰트 설정 (가장 중요)
     font_path = 'NanumGothic.ttf'
     if not os.path.exists(font_path):
         font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
@@ -524,6 +524,7 @@ def create_daily_pdf(daily_df, report_date):
     else:
         pdf.set_font('Arial', '', 12)
 
+    # 2. 타이틀 출력
     pdf.set_font_size(18)
     title_text = f'SMT Daily Report ({report_date.strftime("%Y-%m-%d")})'
     if has_korean_font:
@@ -531,12 +532,16 @@ def create_daily_pdf(daily_df, report_date):
     pdf.cell(0, 15, title_text, ln=True, align='C')
     pdf.ln(5)
 
-    daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] # 외주 제외
+    # 3. 데이터 필터링 (외주 제외)
+    daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] 
     
     custom_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정"]
+    # 카테고리 순서 정렬을 위한 임시 컬럼
+    # daily_df['구분']을 category 타입으로 변환하여 정렬
     daily_df['구분'] = pd.Categorical(daily_df['구분'], categories=custom_order, ordered=True)
     daily_df = daily_df.sort_values(by=['구분', '제품명'])
 
+    # 4. 헤더 출력
     pdf.set_font_size(10)
     pdf.set_fill_color(220, 230, 241) 
     
@@ -548,26 +553,32 @@ def create_daily_pdf(daily_df, report_date):
     pdf.cell(w_qty, 10, "Q'ty", border=1, align='C', fill=True)
     pdf.ln()
 
+    # 5. 본문 출력
     total_qty = 0
     for _, row in daily_df.iterrows():
         pdf.cell(w_cat, 8, str(row['구분']), border=1, align='C')
         pdf.cell(w_code, 8, str(row['품목코드']), border=1, align='C')
+        
         p_name = str(row['제품명'])
         if len(p_name) > 30: p_name = p_name[:28] + ".."
         pdf.cell(w_name, 8, p_name, border=1, align='L')
+        
         pdf.cell(w_qty, 8, f"{row['수량']:,}", border=1, align='R')
         pdf.ln()
         total_qty += row['수량']
 
+    # 6. 합계 출력
     pdf.ln(5)
     pdf.set_font_size(12)
     pdf.set_fill_color(255, 255, 200) 
     pdf.cell(w_cat + w_code + w_name, 10, "Total Production Quantity : ", border=1, align='R', fill=True)
     pdf.cell(w_qty, 10, f"{total_qty:,} EA", border=1, align='R', fill=True)
     
+    # [수정] PDF 바이트 데이터 반환 방식 변경 (인코딩 오류 방지)
     try:
         return pdf.output(dest='S').encode('latin-1') 
     except UnicodeEncodeError:
+        # 폰트 로드 실패 시 한글을 제거하고 출력 시도
         return pdf.output(dest='S').encode('latin-1', errors='ignore')
 
 # ------------------------------------------------------------------
@@ -584,17 +595,14 @@ USERS = {
 def check_password():
     if "logged_in" not in st.session_state: st.session_state.logged_in = False
     
-    # 이미 로그인 된 경우 즉시 True 반환
     if st.session_state.logged_in: return True
 
-    # 로그인 화면 렌더링
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True) 
         st.markdown("<h1 style='text-align:center;'>SMT 통합시스템</h1>", unsafe_allow_html=True)
         
         with st.container(border=True):
-            # Form을 사용하여 엔터키 입력 시 리로드 방지 및 버튼 클릭 시에만 처리
             with st.form(key="login_form"):
                 username = st.text_input("Username")
                 password = st.text_input("Password", type="password")
@@ -605,7 +613,7 @@ def check_password():
                         st.session_state.logged_in = True
                         st.session_state.user_info = USERS[username]
                         st.session_state.user_info["id"] = username
-                        st.rerun() # 로그인 성공 시에만 리로드
+                        st.rerun() 
                     else:
                         st.error("아이디 또는 비밀번호가 잘못되었습니다.")
             
@@ -616,9 +624,8 @@ def check_password():
                 
     return False
 
-if not check_password(): st.stop() # 로그인이 안되었으면 여기서 멈춤
+if not check_password(): st.stop() 
 
-# 로그인 통과 후 설정
 CURRENT_USER = st.session_state.user_info
 IS_ADMIN = (CURRENT_USER["role"] == "admin")
 IS_EDITOR = (CURRENT_USER["role"] in ["admin", "editor"])
@@ -712,7 +719,7 @@ if menu == "🏭 생산관리":
             df = load_data(SHEET_RECORDS)
             if not df.empty:
                 df = df.sort_values("입력시간", ascending=False).head(50)
-                if IS_ADMIN: # [권한] 관리자만 수정/삭제 가능
+                if IS_ADMIN: 
                     st.caption("💡 행을 선택하고 Del 키를 누르면 삭제됩니다.")
                     edited_df = st.data_editor(df, use_container_width=True, hide_index=True, num_rows="dynamic", key="prod_editor")
                     if st.button("변경사항 저장 (삭제 반영)", type="secondary"):
@@ -733,7 +740,7 @@ if menu == "🏭 생산관리":
                 mask = df_inv['품목코드'].astype(str).str.contains(search, case=False) | df_inv['제품명'].astype(str).str.contains(search, case=False)
                 df_inv = df_inv[mask]
             
-            if IS_ADMIN: # [권한] 관리자만 재고 수정 가능
+            if IS_ADMIN: 
                 st.caption("💡 수량 수정 및 Del 키로 삭제 가능")
                 edited_inv = st.data_editor(
                     df_inv, 
@@ -821,7 +828,6 @@ if menu == "🏭 생산관리":
 elif menu == "🛠️ 설비보전관리":
     t1, t2, t3, t4 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트", "⚙️ 설비 목록"])
     
-    # 6-1. 정비 이력 등록
     with t1:
         c1, c2 = st.columns([1, 1.5], gap="large")
         with c1:
@@ -886,7 +892,7 @@ elif menu == "🛠️ 설비보전관리":
             df_maint = load_data(SHEET_MAINTENANCE)
             if not df_maint.empty:
                 df_maint = df_maint.sort_values("입력시간", ascending=False).head(50)
-                if IS_ADMIN: # [권한] 관리자만 삭제 가능
+                if IS_ADMIN: 
                     st.caption("💡 행을 선택하고 Del 키를 누르면 삭제됩니다.")
                     edited_maint = st.data_editor(df_maint, use_container_width=True, hide_index=True, num_rows="dynamic", key="maint_editor_recent")
                     if st.button("변경사항 저장 (정비내역)", type="secondary"):
@@ -896,11 +902,10 @@ elif menu == "🛠️ 설비보전관리":
                 else: st.dataframe(df_maint, use_container_width=True, hide_index=True)
             else: st.info("이력이 없습니다.")
 
-    # 6-2. 이력 조회
     with t2:
         df_hist = load_data(SHEET_MAINTENANCE)
         if not df_hist.empty: 
-            if IS_ADMIN: # [권한] 관리자만 수정 가능
+            if IS_ADMIN: 
                 st.caption("💡 전체 이력 수정 및 삭제 모드")
                 df_hist_sorted = df_hist.sort_values("날짜", ascending=False)
                 edited_hist = st.data_editor(df_hist_sorted, use_container_width=True, num_rows="dynamic", key="hist_editor_full")
@@ -911,7 +916,6 @@ elif menu == "🛠️ 설비보전관리":
             else: st.dataframe(df_hist, use_container_width=True)
         else: st.info("데이터가 없습니다.")
 
-    # 6-3. 분석 및 리포트
     with t3:
         st.markdown("#### 📊 설비 고장 및 정비 분석")
         df = load_data(SHEET_MAINTENANCE)
@@ -949,9 +953,8 @@ elif menu == "🛠️ 설비보전관리":
             else: st.info(f"{sel_year}년 데이터가 없습니다.")
         else: st.info("데이터가 없습니다.")
 
-    # 6-4. 설비 목록
     with t4:
-        if IS_ADMIN: # [권한] 관리자만 접근 가능
+        if IS_ADMIN: 
             st.markdown("#### 설비 리스트 관리")
             df_eq = load_data(SHEET_EQUIPMENT)
             edited_eq = st.data_editor(df_eq, num_rows="dynamic", use_container_width=True)
@@ -965,5 +968,4 @@ elif menu == "🛠️ 설비보전관리":
 elif menu == "📱 일일점검":
     st.markdown("##### 👆 태블릿 터치용 일일점검 시스템")
     st.caption("※ 이 화면의 데이터는 태블릿 기기 내부에 자동 저장됩니다.")
-    # HTML 삽입 (높이 충분히 확보)
     components.html(DAILY_CHECK_HTML, height=1200, scrolling=True)
