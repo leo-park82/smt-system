@@ -5,7 +5,6 @@ import time
 import hashlib
 import base64
 import os
-from fpdf import FPDF
 import streamlit.components.v1 as components
 
 # 구글 시트 연동 라이브러리
@@ -31,129 +30,66 @@ DAILY_CHECK_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SMT 스마트 설비 점검 시스템 Pro</title>
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- PDF Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
     <script>
         tailwind.config = {
             safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200'],
-            theme: {
-                extend: {
-                    colors: {
-                        brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' }
-                    },
-                    fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] }
-                }
-            }
+            theme: { extend: { colors: { brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' } }, fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] } } }
         }
     </script>
-
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
-        
         body { font-family: 'Noto Sans KR', sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; }
-        
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        
         .tab-active { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3); }
         .tab-inactive { background: white; color: #64748b; border: 1px solid #e2e8f0; }
         .tab-inactive:hover { background: #f8fafc; color: #3b82f6; }
         .tab-ng { background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.3); }
-
         #signature-pad { touch-action: none; background: #fff; cursor: crosshair; }
         #progress-circle { transition: stroke-dashoffset 0.5s ease-out, color 0.5s ease; }
-        
         input[type="date"] { position: relative; }
-        input[type="date"]::-webkit-calendar-picker-indicator {
-            position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; color: transparent; background: transparent; cursor: pointer;
-        }
-
-        /* Calendar Grid */
-        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-        .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; font-size: 0.8rem; font-weight: bold; position: relative; border: 1px solid transparent; }
-        .calendar-day:hover { background-color: #f1f5f9; }
-        .calendar-day.today { border-color: #3b82f6; color: #3b82f6; }
-        .calendar-day.active { background-color: #eff6ff; color: #1d4ed8; }
-        .dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 4px; }
-        .dot-green { background-color: #22c55e; }
-        .dot-red { background-color: #ef4444; }
-        .dot-gray { background-color: #cbd5e1; }
+        input[type="date"]::-webkit-calendar-picker-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; color: transparent; background: transparent; cursor: pointer; }
     </style>
 </head>
 <body class="h-screen flex flex-col text-slate-800 overflow-hidden">
-
     <!-- Header -->
     <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
-        <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent"></div>
-        
         <div class="px-4 sm:px-6 py-3 flex justify-between items-center bg-slate-900 text-white">
             <div class="flex items-center gap-4">
-                <div class="flex flex-col justify-center select-none">
-                    <!-- [수정] CIMON 글씨만 남김 -->
-                    <span class="text-2xl font-black text-white tracking-tighter leading-none" style="font-family: 'Arial Black', sans-serif;">CIMON</span>
-                </div>
+                <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">CIMON</span>
             </div>
-            
             <div class="flex items-center gap-2">
-                <!-- 일괄합격 버튼 -->
-                <button onclick="checkAllGood()" class="flex items-center bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-1.5 border border-green-500 transition-colors shadow-sm active:scale-95 mr-2" title="현재 라인 일괄 합격">
-                    <i data-lucide="check-check" class="w-4 h-4 mr-1"></i>
-                    <span class="text-sm font-bold hidden sm:inline">일괄합격</span>
+                <button onclick="checkAllGood()" class="flex items-center bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-1.5 border border-green-500 transition-colors shadow-sm active:scale-95 mr-2" title="일괄 합격">
+                    <i data-lucide="check-check" class="w-4 h-4 mr-1"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
                 </button>
-
                 <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer group relative">
-                    <!-- Calendar Toggle Button -->
-                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors" title="달력 보기">
-                        <i data-lucide="calendar-days" class="w-5 h-5"></i>
-                    </button>
-                    <!-- Date Picker -->
+                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors"><i data-lucide="calendar-days" class="w-5 h-5"></i></button>
                     <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-slate-200 focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onclick="this.showPicker()">
                 </div>
-
                 <button onclick="openSignatureModal()" class="flex items-center bg-slate-800 hover:bg-slate-700 rounded-lg px-3 py-1.5 border border-slate-700 transition-colors" id="btn-signature">
-                    <i data-lucide="pen-tool" class="w-4 h-4 text-slate-400 mr-2"></i>
-                    <span class="text-sm text-slate-300 font-bold hidden sm:inline" id="sign-status">서명</span>
+                    <i data-lucide="pen-tool" class="w-4 h-4 text-slate-400 mr-2"></i><span class="text-sm text-slate-300 font-bold hidden sm:inline" id="sign-status">서명</span>
                 </button>
-
-                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white" title="설정">
-                    <i data-lucide="settings" class="w-5 h-5"></i>
-                </button>
+                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white"><i data-lucide="settings" class="w-5 h-5"></i></button>
             </div>
         </div>
-
         <div class="px-4 sm:px-6 py-3 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
-             <div id="edit-mode-indicator" class="hidden px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-200 animate-pulse flex items-center gap-1">
-                <i data-lucide="wrench" size="12"></i> 편집 모드 ON
-            </div>
+             <div id="edit-mode-indicator" class="hidden px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-200 animate-pulse flex items-center gap-1"><i data-lucide="wrench" size="12"></i> 편집 모드 ON</div>
             <div class="flex-1"></div>
-
             <div class="flex items-center gap-3">
                 <div class="flex items-center gap-4 px-4 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                    <div class="text-center">
-                        <div class="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Total</div>
-                        <div class="text-sm font-black text-slate-700 leading-none" id="count-total">0</div>
-                    </div>
+                    <div class="text-center"><div class="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Total</div><div class="text-sm font-black text-slate-700 leading-none" id="count-total">0</div></div>
                     <div class="w-px h-6 bg-slate-100"></div>
-                    <div class="text-center">
-                        <div class="text-[8px] font-bold text-green-500 uppercase tracking-wider">OK</div>
-                        <div class="text-sm font-black text-green-600 leading-none" id="count-ok">0</div>
-                    </div>
+                    <div class="text-center"><div class="text-[8px] font-bold text-green-500 uppercase tracking-wider">OK</div><div class="text-sm font-black text-green-600 leading-none" id="count-ok">0</div></div>
                     <div class="w-px h-6 bg-slate-100"></div>
-                    <div class="text-center">
-                        <div class="text-[8px] font-bold text-red-500 uppercase tracking-wider">NG</div>
-                        <div class="text-sm font-black text-red-600 leading-none" id="count-ng">0</div>
-                    </div>
+                    <div class="text-center"><div class="text-[8px] font-bold text-red-500 uppercase tracking-wider">NG</div><div class="text-sm font-black text-red-600 leading-none" id="count-ng">0</div></div>
                 </div>
-
                 <div class="relative w-10 h-10 flex items-center justify-center">
                     <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
                         <path class="text-slate-200" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3" />
@@ -161,166 +97,60 @@ DAILY_CHECK_HTML = """
                     </svg>
                     <span class="absolute text-[9px] font-bold text-slate-700" id="progress-text">0%</span>
                 </div>
-
-                <button onclick="saveAndDownloadPDF()" class="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-lg font-bold text-xs shadow-md active:scale-95 flex items-center gap-2 transition-all">
-                    <i data-lucide="download" class="w-4 h-4"></i>
-                </button>
+                <button onclick="saveAndDownloadPDF()" class="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-lg font-bold text-xs shadow-md active:scale-95 flex items-center gap-2 transition-all"><i data-lucide="download" class="w-4 h-4"></i></button>
             </div>
         </div>
-
-        <div class="bg-white border-b border-slate-200 shadow-sm">
-            <nav class="flex overflow-x-auto gap-2 p-3 no-scrollbar whitespace-nowrap" id="lineTabs">
-                <!-- Tabs generated here -->
-            </nav>
-        </div>
+        <div class="bg-white border-b border-slate-200 shadow-sm"><nav class="flex overflow-x-auto gap-2 p-3 no-scrollbar whitespace-nowrap" id="lineTabs"></nav></div>
     </header>
-
     <main class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50 relative" id="main-scroll">
         <div class="max-w-5xl mx-auto" id="checklistContainer"></div>
         <div class="h-20"></div>
     </main>
-
-    <!-- Hidden File Input for Camera -->
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
-
     <!-- Calendar Modal -->
     <div id="calendar-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
-            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
-                <h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3>
-                <button onclick="closeCalendarModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button>
-            </div>
-            <div class="p-6 bg-white">
-                <div class="flex justify-between items-center mb-6">
-                    <button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
-                    <span class="text-lg font-bold text-slate-800" id="calendar-title">2023년 10월</span>
-                    <button onclick="changeMonth(1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
-                </div>
-                <div class="grid grid-cols-7 gap-1 mb-2 text-center text-xs font-bold text-slate-400">
-                    <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
-                </div>
-                <div id="calendar-grid" class="calendar-grid">
-                    <!-- Days generated by JS -->
-                </div>
-                <div class="flex justify-center gap-4 mt-6 text-xs font-bold text-slate-600">
-                    <div class="flex items-center gap-1"><div class="dot dot-green"></div> 완료(양호)</div>
-                    <div class="flex items-center gap-1"><div class="dot dot-red"></div> NG 발생</div>
-                    <div class="flex items-center gap-1"><div class="dot dot-gray"></div> 미실시</div>
-                </div>
-            </div>
+            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
+            <div class="p-6 bg-white"><div class="flex justify-between items-center mb-6"><button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-left" class="w-5 h-5"></i></button><span class="text-lg font-bold text-slate-800" id="calendar-title">2023년 10월</span><button onclick="changeMonth(1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-right" class="w-5 h-5"></i></button></div><div class="grid grid-cols-7 gap-1 mb-2 text-center text-xs font-bold text-slate-400"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div><div id="calendar-grid" class="calendar-grid"></div><div class="flex justify-center gap-4 mt-6 text-xs font-bold text-slate-600"><div class="flex items-center gap-1"><div class="dot dot-green"></div> 완료(양호)</div><div class="flex items-center gap-1"><div class="dot dot-red"></div> NG 발생</div><div class="flex items-center gap-1"><div class="dot dot-gray"></div> 미실시</div></div></div>
         </div>
     </div>
-
     <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="settings-content">
-            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
-                <h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3>
-                <button onclick="closeSettings()" class="hover:text-slate-300"><i data-lucide="x" class="w-5 h-5"></i></button>
-            </div>
-            <div class="p-6 space-y-6">
-                <div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                    <div>
-                        <div class="font-bold text-amber-900">점검 항목 편집 모드</div>
-                        <div class="text-xs text-amber-700 mt-1">장비 및 점검 항목을 추가/삭제/수정합니다.</div>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
-                    </label>
-                </div>
-                <div class="space-y-3 pt-4 border-t border-slate-100">
-                    <label class="block text-sm font-bold text-slate-700">데이터 관리</label>
-                    <button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i> 현재 날짜 데이터 초기화
-                    </button>
-                    <button onclick="resetConfigToDefault()" class="w-full py-3 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-                        <i data-lucide="rotate-ccw" class="w-4 h-4"></i> 점검 항목(양식) 초기화
-                    </button>
-                </div>
-            </div>
+            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-slate-300"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+            <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div><div class="text-xs text-amber-700 mt-1">장비 및 점검 항목을 추가/삭제/수정합니다.</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><div class="space-y-3 pt-4 border-t border-slate-100"><label class="block text-sm font-bold text-slate-700">데이터 관리</label><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 현재 날짜 데이터 초기화</button><button onclick="resetConfigToDefault()" class="w-full py-3 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="rotate-ccw" class="w-4 h-4"></i> 점검 항목(양식) 초기화</button></div></div>
         </div>
     </div>
-
     <!-- Signature Modal -->
     <div id="signature-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
-            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
-                <h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="pen-tool" class="w-5 h-5"></i> 전자 서명</h3>
-                <button onclick="closeSignatureModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button>
-            </div>
-            <div class="p-4 bg-slate-100">
-                <canvas id="signature-pad" class="w-full h-48 rounded-xl shadow-inner border border-slate-300 touch-none bg-white"></canvas>
-                <div class="text-xs text-slate-500 mt-2 text-center">서명란 안에 정자로 서명해주세요.</div>
-            </div>
-            <div class="p-4 bg-white flex gap-3 justify-end border-t border-slate-100">
-                <button onclick="clearSignature()" class="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-bold">지우기</button>
-                <button onclick="saveSignature()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/30">서명 완료</button>
-            </div>
+            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="pen-tool" class="w-5 h-5"></i> 전자 서명</h3><button onclick="closeSignatureModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
+            <div class="p-4 bg-slate-100"><canvas id="signature-pad" class="w-full h-48 rounded-xl shadow-inner border border-slate-300 touch-none bg-white"></canvas><div class="text-xs text-slate-500 mt-2 text-center">서명란 안에 정자로 서명해주세요.</div></div>
+            <div class="p-4 bg-white flex gap-3 justify-end border-t border-slate-100"><button onclick="clearSignature()" class="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-bold">지우기</button><button onclick="saveSignature()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/30">서명 완료</button></div>
         </div>
     </div>
-
     <!-- Add Item Modal -->
     <div id="add-item-modal" class="fixed inset-0 bg-black/50 z-[60] hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6">
             <h3 class="text-lg font-bold mb-4 text-slate-800">새 점검 항목 추가</h3>
-            <div class="space-y-3">
-                <div><label class="text-xs font-bold text-slate-500">항목명</label><input id="new-item-name" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div>
-                <div><label class="text-xs font-bold text-slate-500">점검 내용</label><input id="new-item-content" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div>
-                <div><label class="text-xs font-bold text-slate-500">기준</label><input id="new-item-standard" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div>
-                <div><label class="text-xs font-bold text-slate-500">입력 방식</label><select id="new-item-type" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"><option value="OX">OX 버튼</option><option value="NUMBER">수치 입력</option><option value="NUMBER_AND_OX">수치 + OX</option></select></div>
-            </div>
-            <div class="flex justify-end gap-2 mt-6">
-                <button onclick="document.getElementById('add-item-modal').classList.add('hidden')" class="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-lg font-bold">취소</button>
-                <button onclick="confirmAddItem()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">추가</button>
-            </div>
+            <div class="space-y-3"><div><label class="text-xs font-bold text-slate-500">항목명</label><input id="new-item-name" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div><div><label class="text-xs font-bold text-slate-500">점검 내용</label><input id="new-item-content" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div><div><label class="text-xs font-bold text-slate-500">기준</label><input id="new-item-standard" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div><div><label class="text-xs font-bold text-slate-500">입력 방식</label><select id="new-item-type" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"><option value="OX">OX 버튼</option><option value="NUMBER">수치 입력</option><option value="NUMBER_AND_OX">수치 + OX</option></select></div></div>
+            <div class="flex justify-end gap-2 mt-6"><button onclick="document.getElementById('add-item-modal').classList.add('hidden')" class="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-lg font-bold">취소</button><button onclick="confirmAddItem()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">추가</button></div>
         </div>
     </div>
-
-    <!-- NumPad Modal (Added) -->
+    <!-- NumPad Modal -->
     <div id="numpad-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] hidden flex items-end sm:items-center justify-center transition-opacity duration-200">
         <div class="bg-white w-full sm:w-[320px] sm:rounded-2xl rounded-t-2xl shadow-2xl overflow-hidden transform transition-transform duration-300 translate-y-full sm:translate-y-0 scale-95" id="numpad-content">
-            <div class="bg-slate-900 p-4 flex justify-between items-center text-white">
-                <span class="font-bold text-lg flex items-center gap-2"><i data-lucide="calculator" width="20"></i> 값 입력</span>
-                <button onclick="closeNumPad()" class="p-1 hover:bg-slate-700 rounded transition-colors"><i data-lucide="x"></i></button>
-            </div>
-            <div class="p-4 bg-slate-50">
-                <div class="bg-white border-2 border-blue-500 rounded-xl p-4 mb-4 text-right shadow-inner h-20 flex items-center justify-end">
-                    <span id="numpad-display" class="text-3xl font-mono font-black text-slate-800 tracking-wider"></span>
-                    <span class="animate-pulse text-blue-500 ml-1 text-3xl font-light">|</span>
-                </div>
-                <div class="grid grid-cols-4 gap-2">
-                    <button onclick="npKey('7')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">7</button>
-                    <button onclick="npKey('8')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">8</button>
-                    <button onclick="npKey('9')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">9</button>
-                    <button onclick="npBack()" class="h-14 rounded-lg bg-slate-200 border border-slate-300 shadow-sm text-xl font-bold text-slate-600 active:bg-slate-300 transition-colors flex items-center justify-center"><i data-lucide="delete" width="24"></i></button>
-                    
-                    <button onclick="npKey('4')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">4</button>
-                    <button onclick="npKey('5')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">5</button>
-                    <button onclick="npKey('6')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">6</button>
-                    <button onclick="npClear()" class="h-14 rounded-lg bg-red-50 border border-red-200 shadow-sm text-lg font-bold text-red-500 active:bg-red-100 transition-colors">C</button>
-                    
-                    <button onclick="npKey('1')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">1</button>
-                    <button onclick="npKey('2')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">2</button>
-                    <button onclick="npKey('3')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">3</button>
-                    <button onclick="npKey('0')" class="row-span-2 h-full rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">0</button>
-
-                    <button onclick="npKey('.')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold text-slate-600 active:bg-slate-200 transition-colors">.</button>
-                    <button onclick="npKey('-')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold text-slate-600 active:bg-slate-200 transition-colors">+/-</button>
-                    <button onclick="npConfirm()" class="col-span-2 h-14 rounded-lg bg-blue-600 shadow-lg shadow-blue-500/30 text-white text-lg font-bold active:bg-blue-700 flex items-center justify-center gap-2 transition-colors">완료 <i data-lucide="check" width="20"></i></button>
-                </div>
-            </div>
+            <div class="bg-slate-900 p-4 flex justify-between items-center text-white"><span class="font-bold text-lg flex items-center gap-2"><i data-lucide="calculator" width="20"></i> 값 입력</span><button onclick="closeNumPad()" class="p-1 hover:bg-slate-700 rounded transition-colors"><i data-lucide="x"></i></button></div>
+            <div class="p-4 bg-slate-50"><div class="bg-white border-2 border-blue-500 rounded-xl p-4 mb-4 text-right shadow-inner h-20 flex items-center justify-end"><span id="numpad-display" class="text-3xl font-mono font-black text-slate-800 tracking-wider"></span><span class="animate-pulse text-blue-500 ml-1 text-3xl font-light">|</span></div><div class="grid grid-cols-4 gap-2"><button onclick="npKey('7')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">7</button><button onclick="npKey('8')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">8</button><button onclick="npKey('9')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">9</button><button onclick="npBack()" class="h-14 rounded-lg bg-slate-200 border border-slate-300 shadow-sm text-xl font-bold text-slate-600 active:bg-slate-300 transition-colors flex items-center justify-center"><i data-lucide="delete" width="24"></i></button><button onclick="npKey('4')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">4</button><button onclick="npKey('5')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">5</button><button onclick="npKey('6')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">6</button><button onclick="npClear()" class="h-14 rounded-lg bg-red-50 border border-red-200 shadow-sm text-lg font-bold text-red-500 active:bg-red-100 transition-colors">C</button><button onclick="npKey('1')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">1</button><button onclick="npKey('2')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">2</button><button onclick="npKey('3')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">3</button><button onclick="npKey('0')" class="row-span-2 h-full rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold text-slate-700 active:bg-slate-100 transition-colors">0</button><button onclick="npKey('.')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold text-slate-600 active:bg-slate-200 transition-colors">.</button><button onclick="npKey('-')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold text-slate-600 active:bg-slate-200 transition-colors">+/-</button><button onclick="npConfirm()" class="col-span-2 h-14 rounded-lg bg-blue-600 shadow-lg shadow-blue-500/30 text-white text-lg font-bold active:bg-blue-700 flex items-center justify-center gap-2 transition-colors">완료 <i data-lucide="check" width="20"></i></button></div></div>
         </div>
     </div>
-
     <div id="toast-container" class="fixed bottom-20 right-6 z-50 flex flex-col gap-2"></div>
-
     <script>
         window.onerror = null;
         const DATA_PREFIX = "SMT_DATA_V3_"; 
         const CONFIG_KEY = "SMT_CONFIG_V6.1_SYNTAX_FIXED"; 
         
-        // [중요] 사장님이 만드신 전체 설비/점검 항목 데이터 (복구 완료)
+        // [중요] 모든 데이터 원복
         const defaultLineData = {
             "1 LINE": [
                 { equip: "IN LOADER (SML-120Y)", items: [{ name: "AIR 압력", content: "압력 게이지 지침 확인", standard: "0.5 MPa ± 0.1", type: "OX" }, { name: "수/자동 전환", content: "MODE 전환 스위치 작동", standard: "정상 동작", type: "OX" }, { name: "각 구동부", content: "작동 이상음 및 소음 상태", standard: "정상 동작", type: "OX" }, { name: "매거진 상태", content: "Locking 마모, 휨, 흔들림", standard: "마모/휨 없을 것", type: "OX" }] },
@@ -675,82 +505,6 @@ def get_user_id():
     return st.session_state.user_info["name"]
 
 # ------------------------------------------------------------------
-# [신규] PDF 보고서 생성 함수 (한글 인코딩 오류 수정)
-# ------------------------------------------------------------------
-def create_daily_pdf(daily_df, report_date):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # 1. 폰트 설정 (가장 중요)
-    font_path = 'NanumGothic.ttf'
-    if not os.path.exists(font_path):
-        font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
-    
-    has_korean_font = False
-    if os.path.exists(font_path):
-        try:
-            pdf.add_font('Korean', '', font_path, uni=True)
-            pdf.set_font('Korean', '', 11)
-            has_korean_font = True
-        except:
-            pdf.set_font('Arial', '', 11)
-    else:
-        pdf.set_font('Arial', '', 11)
-
-    # 2. 타이틀 출력
-    title_text = f'일일 생산 보고서 ({report_date.strftime("%Y-%m-%d")})' if has_korean_font else f'Daily Production Report ({report_date.strftime("%Y-%m-%d")})'
-    pdf.cell(0, 10, title_text, ln=True, align='C')
-    pdf.ln(5)
-
-    # 3. 데이터 필터링 (외주 제외)
-    daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] 
-    
-    custom_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정"]
-    # 카테고리 순서 정렬을 위한 임시 컬럼
-    daily_df['구분'] = pd.Categorical(daily_df['구분'], categories=custom_order, ordered=True)
-    daily_df = daily_df.sort_values(by=['구분', '제품명'])
-
-    # 4. 헤더 출력
-    pdf.set_font_size(10)
-    pdf.set_fill_color(220, 230, 241) 
-    
-    w_cat = 30; w_code = 40; w_name = 80; w_qty = 30
-    
-    pdf.cell(w_cat, 10, "Category", border=1, align='C', fill=True)
-    pdf.cell(w_code, 10, "Item Code", border=1, align='C', fill=True)
-    pdf.cell(w_name, 10, "Item Name", border=1, align='C', fill=True)
-    pdf.cell(w_qty, 10, "Q'ty", border=1, align='C', fill=True)
-    pdf.ln()
-
-    # 5. 본문 출력
-    total_qty = 0
-    for _, row in daily_df.iterrows():
-        pdf.cell(w_cat, 8, str(row['구분']), border=1, align='C')
-        pdf.cell(w_code, 8, str(row['품목코드']), border=1, align='C')
-        
-        p_name = str(row['제품명'])
-        if len(p_name) > 30: p_name = p_name[:28] + ".."
-        pdf.cell(w_name, 8, p_name, border=1, align='L')
-        
-        pdf.cell(w_qty, 8, f"{row['수량']:,}", border=1, align='R')
-        pdf.ln()
-        total_qty += row['수량']
-
-    # 6. 합계 출력
-    pdf.ln(5)
-    pdf.set_font_size(12)
-    pdf.set_fill_color(255, 255, 200) 
-    pdf.cell(w_cat + w_code + w_name, 10, "Total Production Quantity : ", border=1, align='R', fill=True)
-    pdf.cell(w_qty, 10, f"{total_qty:,} EA", border=1, align='R', fill=True)
-    
-    # [수정] PDF 바이트 데이터 반환 방식 변경 (인코딩 오류 방지)
-    try:
-        return pdf.output(dest='S').encode('latin-1') 
-    except UnicodeEncodeError:
-        # 폰트 로드 실패 시 한글을 제거하고 출력 시도
-        return pdf.output(dest='S').encode('latin-1', errors='ignore')
-
-# ------------------------------------------------------------------
 # 3. 로그인 및 사용자 관리 (무한로딩 수정)
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
@@ -963,7 +717,7 @@ if menu == "🏭 생산관리":
                 if st.button("품목 기준정보 저장", type="primary"):
                     save_data(edited, SHEET_ITEMS); st.success("저장 완료"); time.sleep(1); st.rerun()
             with t_raw: st.markdown("전체 데이터 직접 편집 모드")
-        else: st.warning("🔒 관리자 전용 메뉴입니다.")
+        else: st.warning("관리자 권한 필요")
 
     with t5:
         st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
@@ -973,7 +727,9 @@ if menu == "🏭 생산관리":
         with c1:
             report_date = st.date_input("보고서 날짜 선택", datetime.now())
         
+        # [수정] JS 기반 PDF 생성 버튼
         df = load_data(SHEET_RECORDS)
+        
         if not df.empty:
             mask_date = pd.to_datetime(df['날짜']).dt.date == report_date
             daily_df = df[mask_date].copy()
@@ -981,13 +737,119 @@ if menu == "🏭 생산관리":
             
             if not daily_df.empty:
                 st.info(f"{report_date} : 총 {len(daily_df)}건의 생산 실적 (외주 제외)")
+                
+                # 데이터 정렬 및 표시
+                daily_df = daily_df.sort_values(by=['구분', '제품명'])
                 st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
                 
-                if st.button("📄 PDF 보고서 생성", type="primary"):
-                    try:
-                        pdf_bytes = create_daily_pdf(daily_df, report_date)
-                        st.download_button(label="📥 PDF 다운로드", data=pdf_bytes, file_name=f"SMT_Daily_Report_{report_date}.pdf", mime="application/pdf")
-                    except Exception as e: st.error(f"오류: {e}")
+                # ---------------------------------------------------------
+                # JS 기반 PDF 생성용 숨겨진 HTML 테이블 생성
+                # ---------------------------------------------------------
+                # 스타일: 인쇄용 CSS (A4 사이즈, 폰트, 테이블 디자인)
+                pdf_style = """
+                <style>
+                    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+                    #pdf-content {
+                        font-family: 'Noto Sans KR', sans-serif;
+                        width: 210mm;
+                        padding: 20mm;
+                        background: white;
+                        display: none; /* 화면엔 안보임 */
+                    }
+                    .pdf-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+                    .pdf-title { font-size: 24px; font-weight: bold; margin: 0; }
+                    .pdf-date { font-size: 14px; color: #666; margin-top: 5px; }
+                    .pdf-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+                    .pdf-table th, .pdf-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    .pdf-table th { background-color: #f2f2f2; text-align: center; font-weight: bold; }
+                    .pdf-table td.qty { text-align: right; }
+                    .pdf-footer { margin-top: 30px; text-align: right; font-size: 12px; font-weight: bold; }
+                </style>
+                """
+                
+                # 테이블 데이터 HTML 생성
+                table_rows = ""
+                total_q = 0
+                for _, row in daily_df.iterrows():
+                    table_rows += f"<tr><td>{row['구분']}</td><td>{row['품목코드']}</td><td>{row['제품명']}</td><td class='qty'>{row['수량']:,}</td></tr>"
+                    total_q += row['수량']
+                
+                html_content = f"""
+                {pdf_style}
+                <div id="pdf-content">
+                    <div class="pdf-header">
+                        <h1 class="pdf-title">SMT 일일 생산현황</h1>
+                        <p class="pdf-date">날짜: {report_date.strftime("%Y-%m-%d")}</p>
+                    </div>
+                    <table class="pdf-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%">구분</th>
+                                <th style="width: 20%">품목코드</th>
+                                <th style="width: 50%">제품명</th>
+                                <th style="width: 15%">수량</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {table_rows}
+                        </tbody>
+                    </table>
+                    <div class="pdf-footer">
+                        총 생산량 : {total_q:,} EA
+                    </div>
+                </div>
+                
+                <!-- PDF 생성 스크립트 -->
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+                <script>
+                    async function generatePDF() {{
+                        const { jsPDF } = window.jspdf;
+                        const element = document.getElementById('pdf-content');
+                        
+                        // 임시로 보이게 설정 (캡처 위해)
+                        element.style.display = 'block';
+                        element.style.position = 'absolute';
+                        element.style.top = '-9999px';
+                        
+                        try {{
+                            const canvas = await html2canvas(element, {{ scale: 2 }});
+                            const imgData = canvas.toDataURL('image/png');
+                            
+                            const pdf = new jsPDF('p', 'mm', 'a4');
+                            const pdfWidth = pdf.internal.pageSize.getWidth();
+                            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                            
+                            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                            pdf.save("SMT_Daily_Report_{report_date.strftime('%Y%m%d')}.pdf");
+                        }} catch (err) {{
+                            console.error("PDF 생성 오류:", err);
+                            alert("PDF 생성 중 오류가 발생했습니다.");
+                        }} finally {{
+                            // 다시 숨김
+                            element.style.display = 'none';
+                        }}
+                    }}
+                </script>
+                <div style="margin-top: 20px;">
+                    <button onclick="generatePDF()" style="
+                        background-color: #ef4444; 
+                        color: white; 
+                        padding: 10px 20px; 
+                        border: none; 
+                        border-radius: 5px; 
+                        cursor: pointer; 
+                        font-weight: bold;
+                        font-size: 14px;
+                    ">
+                        📄 PDF 다운로드 (JS)
+                    </button>
+                </div>
+                """
+                
+                # HTML 컴포넌트로 삽입
+                components.html(html_content, height=200) # 버튼 높이만큼만
+                
             else: st.warning(f"해당 날짜({report_date})에 '외주'를 제외한 생산 실적이 없습니다.")
         else: st.info("데이터가 없습니다.")
 
