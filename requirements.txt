@@ -7,3 +7,4 @@ xlrd
 altair
 fpdf
 oauth2client
+gspread-dataframe
