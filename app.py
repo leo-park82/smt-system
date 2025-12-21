@@ -169,12 +169,27 @@ def get_worksheet(name):
         if name in headers: new_ws.append_row(headers[name])
         return new_ws
 
+# [수정] 데이터 로드 시 빈 데이터프레임 처리 강화
 def load_sheet_data(name):
     try:
         ws = get_worksheet(name)
         data = ws.get_all_records()
-        return pd.DataFrame(data)
-    except: return pd.DataFrame()
+        df = pd.DataFrame(data)
+        
+        # 데이터가 없을 때 기본 컬럼 구조 반환 (에러 방지)
+        if df.empty:
+            headers = {
+                "records": ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자"],
+                "items": ["품목코드", "제품명", "규격"],
+                "inventory": ["품목코드", "제품명", "현재고"],
+                "maintenance": ["날짜", "설비명", "작업구분", "내용", "비용", "비가동시간", "작업자"],
+                "equipment": ["설비ID", "설비명", "공정", "상태"]
+            }
+            if name in headers:
+                return pd.DataFrame(columns=headers[name])
+        return df
+    except:
+        return pd.DataFrame()
 
 def save_sheet_data(df, name):
     ws = get_worksheet(name)
@@ -293,7 +308,7 @@ if menu == "🏭 생산관리":
     with tab_prod:
         # 품목 정보 로드
         item_df = load_sheet_data("items")
-        item_list = item_df['품목코드'].tolist() if not item_df.empty else []
+        item_list = item_df['품목코드'].tolist() if not item_df.empty and '품목코드' in item_df.columns else []
         
         c1, c2 = st.columns([1, 1.6], gap="large")
         with c1:
@@ -313,7 +328,10 @@ if menu == "🏭 생산관리":
                         name = st.text_input("제품명 직접 입력")
                     else:
                         code = code_select
-                        name = item_df[item_df['품목코드'] == code]['제품명'].values[0]
+                        try:
+                            name = item_df[item_df['품목코드'] == code]['제품명'].values[0]
+                        except:
+                            name = ""
                         st.text_input("제품명 (자동)", value=name, disabled=True)
                     
                     qty = st.number_input("생산 수량", min_value=1, value=100)
@@ -327,7 +345,7 @@ if menu == "🏭 생산관리":
                             if cat not in ["후공정", "외주공정"]:
                                 inv_df = load_sheet_data("inventory")
                                 # 기존 재고 확인
-                                if not inv_df.empty and str(code) in inv_df['품목코드'].astype(str).values:
+                                if not inv_df.empty and '품목코드' in inv_df.columns and str(code) in inv_df['품목코드'].astype(str).values:
                                     idx = inv_df[inv_df['품목코드'].astype(str) == str(code)].index[0]
                                     try: cur_val = int(inv_df.at[idx, '현재고'])
                                     except: cur_val = 0
@@ -350,7 +368,7 @@ if menu == "🏭 생산관리":
             st.markdown("""<div class="smart-card">""", unsafe_allow_html=True)
             st.markdown("#### 📋 최근 등록 내역")
             df = load_sheet_data("records")
-            if not df.empty:
+            if not df.empty and '입력시간' in df.columns:
                 st.dataframe(df.sort_values("입력시간", ascending=False), use_container_width=True, height=500)
             else: st.info("데이터가 없습니다.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -368,7 +386,7 @@ if menu == "🏭 생산관리":
     # 1-3. 대시보드 (오전 버전 복구)
     with tab_dash:
         df = load_sheet_data("records")
-        if not df.empty:
+        if not df.empty and '수량' in df.columns:
             df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
             total_qty = df['수량'].sum()
             today_qty = df[pd.to_datetime(df['날짜']).dt.date == datetime.now().date()]['수량'].sum()
@@ -410,9 +428,10 @@ if menu == "🏭 생산관리":
             pdf.cell(200, 10, txt=f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True, align='C')
             pdf.ln(10)
             
-            today_df = df[pd.to_datetime(df['날짜']).dt.date == datetime.now().date()]
-            for _, row in today_df.iterrows():
-                pdf.cell(0, 10, txt=f"[{row['구분']}] {row['제품명']} : {row['수량']} EA", ln=True)
+            if not df.empty:
+                today_df = df[pd.to_datetime(df['날짜']).dt.date == datetime.now().date()]
+                for _, row in today_df.iterrows():
+                    pdf.cell(0, 10, txt=f"[{row['구분']}] {row['제품명']} : {row['수량']} EA", ln=True)
                 
             pdf.output("report.pdf")
             with open("report.pdf", "rb") as f:
@@ -447,7 +466,11 @@ elif menu == "🛠️ 설비보전관리":
                 st.markdown("#### 📝 설비 보전 이력 등록")
                 
                 eq_df = load_sheet_data("equipment")
-                eq_list = eq_df['설비명'].tolist() if not eq_df.empty else ["직접 입력"]
+                # [수정] 컬럼명 안전하게 가져오기 (에러 방지)
+                if not eq_df.empty and '설비명' in eq_df.columns:
+                    eq_list = eq_df['설비명'].tolist()
+                else:
+                    eq_list = ["직접 입력"]
                 
                 f_date = st.date_input("작업 일자", datetime.now(), key="m_date")
                 f_eq = st.selectbox("대상 설비", eq_list)
