@@ -273,7 +273,43 @@ DAILY_CHECK_HTML = """
         function clearSignature(){ctx.clearRect(0,0,cvs.width,cvs.height);}
         function saveSignature(){signatureData=cvs.toDataURL();saveData();updateSignatureStatus();closeSignatureModal();}
         function updateSignatureStatus(){const b=document.getElementById('btn-signature'),s=document.getElementById('sign-status');if(signatureData){s.innerText="서명 완료";s.className="text-green-400 font-bold";b.classList.add('border-green-500')}else{s.innerText="서명";s.className="text-slate-300";b.classList.remove('border-green-500')}}
+        
+        function showToast(message, type = "normal") {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            // 스타일 클래스 설정
+            let bgClass = "bg-slate-800";
+            let icon = "info";
+            if (type === "success") { bgClass = "bg-green-600"; icon = "check-circle"; }
+            if (type === "error") { bgClass = "bg-red-600"; icon = "alert-circle"; }
+            
+            toast.className = `${bgClass} text-white px-4 py-3 rounded-lg shadow-lg transform transition-all duration-300 translate-y-10 opacity-0 flex items-center gap-3 min-w-[200px]`;
+            toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span class="font-bold text-sm">${message}</span>`;
+            
+            container.appendChild(toast);
+            lucide.createIcons();
+            
+            // 애니메이션
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+            });
+            
+            setTimeout(() => {
+                toast.classList.add('translate-y-10', 'opacity-0');
+                setTimeout(() => {
+                    container.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+
         window.saveAndDownloadPDF=async function(){
+            // [수정] 전자서명 필수 확인 로직
+            if (!signatureData) {
+                showToast("전자 서명을 먼저 해주세요.", "error");
+                return;
+            }
+
             const d=document.getElementById('inputDate').value;
             const {jsPDF}=window.jspdf;
             const pdf=new jsPDF('p','mm','a4');
@@ -293,7 +329,15 @@ DAILY_CHECK_HTML = """
                 h.style.borderBottom='2px solid #333';
                 h.style.marginBottom='20px';
                 if(showTitle) {
-                    h.innerHTML=`<h1 class='text-3xl font-black'>SMT Daily Check</h1><div class='flex justify-between mt-4'><span>점검일자: ${d}</span><span>서명: ${signatureData ? '완료' : '미서명'}</span></div>`;
+                    // [수정] 서명 이미지 포함 로직
+                    let signContent = "<span>서명: 미서명</span>";
+                    if (signatureData) {
+                        signContent = `<div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-weight:bold;">서명:</span>
+                            <img src="${signatureData}" style="height:50px; width:auto;" alt="서명"/>
+                        </div>`;
+                    }
+                    h.innerHTML=`<h1 class='text-3xl font-black'>SMT Daily Check</h1><div class='flex justify-between mt-4 items-end'><span class='font-bold'>점검일자: ${d}</span>${signContent}</div>`;
                 } else {
                     h.innerHTML=`<div class='flex justify-between text-sm text-gray-500'><span>SMT Daily Check (계속)</span><span>${d}</span></div>`;
                 }
