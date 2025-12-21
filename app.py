@@ -191,6 +191,90 @@ def update_inventory(code, name, change, reason, user):
     }
     append_data(hist, SHEET_INV_HISTORY)
 
+def get_user_id():
+    return st.session_state.user_info["name"]
+
+# ------------------------------------------------------------------
+# [신규] PDF 보고서 생성 함수 (한글 지원 및 외주 제외 로직 포함)
+# ------------------------------------------------------------------
+def create_daily_pdf(daily_df, report_date):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # 1. 한글 폰트 설정 (폰트 파일이 없으면 기본 폰트 사용 - 한글 깨질 수 있음)
+    # 실행 환경에 NanumGothic.ttf 파일이 있어야 가장 좋습니다.
+    font_path = 'NanumGothic.ttf'
+    if not os.path.exists(font_path):
+        # 윈도우 로컬 환경용 백업 경로
+        font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
+    
+    has_korean_font = False
+    if os.path.exists(font_path):
+        try:
+            pdf.add_font('Korean', '', font_path, uni=True)
+            pdf.set_font('Korean', '', 12)
+            has_korean_font = True
+        except:
+            pdf.set_font('Arial', '', 12)
+    else:
+        pdf.set_font('Arial', '', 12)
+
+    # 2. 타이틀
+    pdf.set_font_size(18)
+    title_text = f'SMT Daily Report ({report_date.strftime("%Y-%m-%d")})'
+    if has_korean_font:
+        title_text = f'SMT 일일 생산현황 ({report_date.strftime("%Y-%m-%d")})'
+    pdf.cell(0, 15, title_text, ln=True, align='C')
+    pdf.ln(5)
+
+    # 3. 데이터 필터링 및 정렬 (외주 제외)
+    # PC, CM1, CM3, 배전, 샘플, 후공정 순서
+    daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] # 외주 제외
+    
+    custom_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정"]
+    daily_df['구분'] = pd.Categorical(daily_df['구분'], categories=custom_order, ordered=True)
+    daily_df = daily_df.sort_values(by=['구분', '제품명'])
+
+    # 4. 테이블 헤더
+    pdf.set_font_size(10)
+    pdf.set_fill_color(220, 230, 241) # 연한 파랑
+    
+    # 열 너비 설정
+    w_cat = 30
+    w_code = 40
+    w_name = 80
+    w_qty = 30
+    
+    pdf.cell(w_cat, 10, "Category", border=1, align='C', fill=True)
+    pdf.cell(w_code, 10, "Item Code", border=1, align='C', fill=True)
+    pdf.cell(w_name, 10, "Item Name", border=1, align='C', fill=True)
+    pdf.cell(w_qty, 10, "Q'ty", border=1, align='C', fill=True)
+    pdf.ln()
+
+    # 5. 데이터 출력
+    total_qty = 0
+    for _, row in daily_df.iterrows():
+        pdf.cell(w_cat, 8, str(row['구분']), border=1, align='C')
+        pdf.cell(w_code, 8, str(row['품목코드']), border=1, align='C')
+        
+        # 제품명 길이 처리
+        p_name = str(row['제품명'])
+        if len(p_name) > 30: p_name = p_name[:28] + ".."
+        pdf.cell(w_name, 8, p_name, border=1, align='L')
+        
+        pdf.cell(w_qty, 8, f"{row['수량']:,}", border=1, align='R')
+        pdf.ln()
+        total_qty += row['수량']
+
+    # 6. 합계
+    pdf.ln(5)
+    pdf.set_font_size(12)
+    pdf.set_fill_color(255, 255, 200) # 연한 노랑
+    pdf.cell(w_cat + w_code + w_name, 10, "Total Production Quantity : ", border=1, align='R', fill=True)
+    pdf.cell(w_qty, 10, f"{total_qty:,} EA", border=1, align='R', fill=True)
+    
+    return bytes(pdf.output())
+
 # ------------------------------------------------------------------
 # 3. 로그인 및 사용자 관리
 # ------------------------------------------------------------------
@@ -264,7 +348,8 @@ st.markdown(f"""<div class="dashboard-header"><div><h2 style="margin:0;">{menu}<
 # 5. [메뉴 1] 생산관리
 # ------------------------------------------------------------------
 if menu == "🏭 생산관리":
-    t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 대시보드", "⚙️ 기준정보"])
+    # [수정] 탭에 "📑 일일 보고서" 추가
+    t1, t2, t3, t4, t5 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 대시보드", "⚙️ 기준정보", "📑 일일 보고서"])
     
     # 5-1. 생산 등록
     with t1:
@@ -406,6 +491,44 @@ if menu == "🏭 생산관리":
             with t_raw: st.markdown("전체 데이터 직접 편집 모드")
         else: st.warning("관리자 권한 필요")
 
+    # [신규] 5-5. 일일 보고서 (PDF)
+    with t5:
+        st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
+        st.markdown("PC, CM1, CM3, 배전, 샘플, 후공정 작업 내용만 출력됩니다. (외주 제외)")
+        
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            report_date = st.date_input("보고서 날짜 선택", datetime.now())
+        
+        df = load_data(SHEET_RECORDS)
+        if not df.empty:
+            # 날짜 필터링
+            mask_date = pd.to_datetime(df['날짜']).dt.date == report_date
+            daily_df = df[mask_date].copy()
+            
+            # 외주 제외 필터링 (후공정 외주 등)
+            daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
+            
+            if not daily_df.empty:
+                st.info(f"{report_date} : 총 {len(daily_df)}건의 생산 실적 (외주 제외)")
+                st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
+                
+                if st.button("📄 PDF 보고서 생성", type="primary"):
+                    try:
+                        pdf_bytes = create_daily_pdf(daily_df, report_date)
+                        st.download_button(
+                            label="📥 PDF 다운로드",
+                            data=pdf_bytes,
+                            file_name=f"SMT_Daily_Report_{report_date}.pdf",
+                            mime="application/pdf"
+                        )
+                    except Exception as e:
+                        st.error(f"PDF 생성 중 오류 발생: {e}")
+            else:
+                st.warning(f"해당 날짜({report_date})에 '외주'를 제외한 생산 실적이 없습니다.")
+        else:
+            st.info("데이터가 없습니다.")
+
 # ------------------------------------------------------------------
 # 6. [메뉴 2] 설비보전관리
 # ------------------------------------------------------------------
@@ -538,7 +661,7 @@ elif menu == "🛠️ 설비보전관리":
                     c1, c2 = st.columns([2, 1])
                     with c1:
                         st.markdown("##### 📉 월별 비용 추이")
-                        # [수정] X축과 Y축 글씨 각도 0도로 확실하게 고정
+                        # [수정] X축과 Y축 글씨 각도 모두 0도로 수정
                         chart = alt.Chart(df_year.groupby('Month')['비용'].sum().reset_index()).mark_bar().encode(
                             x=alt.X('Month:O', title='월', axis=alt.Axis(labelAngle=0)), 
                             y=alt.Y('비용', title='비용', axis=alt.Axis(labelAngle=0, titleAngle=0))
