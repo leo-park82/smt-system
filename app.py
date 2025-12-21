@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import time
 import hashlib
 import base64
+import os  # [추가] 파일 존재 여부 확인용
 from fpdf import FPDF
 import streamlit.components.v1 as components
 
@@ -139,7 +140,11 @@ def check_password():
 
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        st.markdown("<br><br><h1 style='text-align:center;'>☁️ SMT Cloud System</h1>", unsafe_allow_html=True)
+        # [수정] 로그인 화면에 로고 표시
+        if os.path.exists("logo.png"):
+             st.image("logo.png", width=120) # 로고 크기 조절 가능
+        
+        st.markdown("<h1 style='text-align:center;'>☁️ SMT Cloud System</h1>", unsafe_allow_html=True)
         with st.container(border=True):
             with st.form(key="login_form"):
                 username = st.text_input("Username")
@@ -302,6 +307,10 @@ def get_user_id():
 CATEGORIES = ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"]
 
 with st.sidebar:
+    # [수정] 사이드바 로고 표시 (GitHub에 파일이 있어야 함)
+    if os.path.exists("logo.png"):
+        st.image("logo.png", use_container_width=True)
+    
     st.markdown("<h2 style='text-align:center;'>Cloud SMT</h2>", unsafe_allow_html=True)
     if st.session_state.logged_in:
         u_info = st.session_state.user_info
