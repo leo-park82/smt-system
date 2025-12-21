@@ -25,8 +25,8 @@ except Exception as e:
 # 1. 기본 설정 및 디자인
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="SMT Dashboard (Cloud)", 
-    page_icon="☁️",
+    page_title="SMT 통합시스템", 
+    page_icon="🏭",
     layout="wide",
     initial_sidebar_state="auto" 
 )
@@ -140,11 +140,13 @@ def check_password():
 
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        # [수정] 로그인 화면에 로고 표시
+        # [수정] 로그인 화면에 로고 표시 (꽉 차게 변경)
         if os.path.exists("logo.png"):
-             st.image("logo.png", width=120) # 로고 크기 조절 가능
+             st.image("logo.png", use_container_width=True) 
         
-        st.markdown("<h1 style='text-align:center;'>☁️ SMT Cloud System</h1>", unsafe_allow_html=True)
+        # [수정] 타이틀 변경
+        st.markdown("<h1 style='text-align:center;'>SMT 통합시스템</h1>", unsafe_allow_html=True)
+        
         with st.container(border=True):
             with st.form(key="login_form"):
                 username = st.text_input("Username")
