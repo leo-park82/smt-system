@@ -53,7 +53,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# [핵심] Google Sheets 연결 설정
+# [핵심] Google Sheets 연결 설정 (최적화 적용)
 # ------------------------------------------------------------------
 # 구글 시트 파일 이름 (구글 드라이브에 생성한 시트 이름과 일치해야 함)
 GOOGLE_SHEET_NAME = "SMT_Database" 
@@ -68,41 +68,46 @@ SHEET_EQUIPMENT = "equipment_list"
 
 @st.cache_resource
 def get_gs_connection():
-    """Google Sheets API 연결 객체 생성 (캐싱 사용)"""
+    """Google Sheets API 클라이언트 연결 객체 생성 (캐싱 사용)"""
     try:
-        # st.secrets에서 인증 정보 가져오기
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ]
-        
-        # .streamlit/secrets.toml 파일에 [gcp_service_account] 섹션이 있어야 함
         if "gcp_service_account" not in st.secrets:
              st.error("Secrets 설정이 없습니다. .streamlit/secrets.toml 파일을 확인해주세요.")
              return None
 
         creds_dict = dict(st.secrets["gcp_service_account"])
-        credentials = Credentials.from_service_account_info(
-            creds_dict,
-            scopes=scopes,
-        )
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(credentials)
         return client
     except Exception as e:
         st.error(f"⚠️ Google Cloud 연결 실패: {e}")
         return None
 
-def get_worksheet(sheet_name, worksheet_name, create_if_missing=False, columns=None):
-    """특정 워크시트를 가져오거나 없으면 생성"""
+@st.cache_resource
+def get_spreadsheet_object(sheet_name):
+    """
+    [중요] 스프레드시트 파일 자체를 여는 객체를 캐싱합니다.
+    이 함수가 없으면 페이지가 리로드될 때마다 client.open()을 호출하여 API 한도를 초과하게 됩니다.
+    """
     client = get_gs_connection()
     if not client: return None
-    
     try:
-        sh = client.open(sheet_name)
+        return client.open(sheet_name)
     except gspread.SpreadsheetNotFound:
-        st.error(f"⚠️ 구글 시트 '{sheet_name}'를 찾을 수 없습니다. 구글 드라이브에서 시트를 생성하고 서비스 계정 이메일을 공유해주세요.")
+        st.error(f"⚠️ 구글 시트 '{sheet_name}'를 찾을 수 없습니다.")
+        return None
+    except Exception as e:
+        st.error(f"⚠️ 시트 열기 오류: {e}")
         return None
 
+def get_worksheet(sheet_name, worksheet_name, create_if_missing=False, columns=None):
+    """특정 워크시트를 가져오거나 없으면 생성"""
+    sh = get_spreadsheet_object(sheet_name)
+    if not sh: return None
+    
     try:
         ws = sh.worksheet(worksheet_name)
     except gspread.WorksheetNotFound:
@@ -120,7 +125,6 @@ def get_worksheet(sheet_name, worksheet_name, create_if_missing=False, columns=N
 def make_hash(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-# (데모용) 사용자 정보
 USERS = {
     "park": {"name": "Park", "password_hash": make_hash("1083"), "role": "admin", "desc": "System Administrator"},
     "suk": {"name": "Suk", "password_hash": make_hash("1734"), "role": "editor", "desc": "Production Manager"},
@@ -133,7 +137,6 @@ def check_password():
     
     if st.session_state.logged_in: return True
 
-    # 로그인 UI
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         st.markdown("<br><br><h1 style='text-align:center;'>☁️ SMT Cloud System</h1>", unsafe_allow_html=True)
@@ -164,9 +167,8 @@ IS_ADMIN = (CURRENT_USER["role"] == "admin")
 IS_EDITOR = (CURRENT_USER["role"] in ["admin", "editor"])
 
 # ------------------------------------------------------------------
-# 3. 데이터 로드 및 저장 (Google Sheets 버전)
+# 3. 데이터 로드 및 저장 (캐싱 최적화 적용)
 # ------------------------------------------------------------------
-# 기본 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_ITEMS = ["품목코드", "제품명"]
 COLS_INVENTORY = ["품목코드", "제품명", "현재고"]
@@ -174,7 +176,6 @@ COLS_INV_HISTORY = ["날짜", "품목코드", "구분", "수량", "비고", "작
 COLS_MAINTENANCE = ["날짜", "설비ID", "설비명", "작업구분", "작업내용", "교체부품", "비용", "작업자", "비가동시간", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_EQUIPMENT = ["id", "name", "func"]
 
-# 설비 초기 데이터
 DEFAULT_EQUIPMENT = [
     {"id": "CIMON-SMT34", "name": "Loader (SLD-120Y)", "func": "메거진 로딩"},
     {"id": "CIMON-SMT03", "name": "Screen Printer", "func": "솔더링 설비"},
@@ -184,6 +185,12 @@ DEFAULT_EQUIPMENT = [
 
 def init_sheets():
     """필요한 시트 탭이 없으면 생성"""
+    # Spreadsheet 객체 하나로 여러 워크시트 확인 (API 호출 절약)
+    sh = get_spreadsheet_object(GOOGLE_SHEET_NAME)
+    if not sh: return
+    
+    existing_titles = [ws.title for ws in sh.worksheets()]
+    
     defaults = {
         SHEET_RECORDS: COLS_RECORDS,
         SHEET_ITEMS: COLS_ITEMS,
@@ -194,37 +201,43 @@ def init_sheets():
     }
     
     for s_name, cols in defaults.items():
-        ws = get_worksheet(GOOGLE_SHEET_NAME, s_name, create_if_missing=True, columns=cols)
-        # 설비 목록이 비어있으면 초기값 주입 (헤더만 있는 경우)
-        if ws and s_name == SHEET_EQUIPMENT and len(ws.get_all_values()) <= 1:
-            df_def = pd.DataFrame(DEFAULT_EQUIPMENT)
-            set_with_dataframe(ws, df_def)
+        if s_name not in existing_titles:
+            ws = sh.add_worksheet(title=s_name, rows=100, cols=20)
+            ws.append_row(cols)
+            if s_name == SHEET_EQUIPMENT:
+                 set_with_dataframe(ws, pd.DataFrame(DEFAULT_EQUIPMENT))
 
-# 앱 시작 시 시트 초기화 확인
+# 앱 시작 시 초기화
 if 'sheets_initialized' not in st.session_state:
     init_sheets()
     st.session_state.sheets_initialized = True
 
+@st.cache_data(ttl=5) # [핵심] 5초 동안은 다시 로드하지 않음 (API 보호)
 def load_data(sheet_name):
     """구글 시트에서 데이터를 읽어와 DataFrame으로 반환"""
     ws = get_worksheet(GOOGLE_SHEET_NAME, sheet_name)
     if not ws: return pd.DataFrame()
     
-    # get_as_dataframe 사용 시 빈 값 처리 및 헤더 인식
-    df = get_as_dataframe(ws, evaluate_formulas=True)
-    
-    # 빈 행/열 제거
-    df = df.dropna(how='all').dropna(axis=1, how='all')
-    
-    # 모든 컬럼을 문자열로 변환 (안전성 확보) 후 숫자 변환 필요한 곳만 처리
-    return df
+    try:
+        df = get_as_dataframe(ws, evaluate_formulas=True)
+        # 빈 행/열 제거
+        df = df.dropna(how='all').dropna(axis=1, how='all')
+        return df
+    except Exception as e:
+        # st.error(f"데이터 로드 중 오류: {e}")
+        return pd.DataFrame()
+
+def clear_cache():
+    """데이터 변경 시 캐시를 비워 즉시 반영되도록 함"""
+    load_data.clear()
 
 def save_data(df, sheet_name):
-    """DataFrame 전체를 구글 시트에 덮어쓰기"""
+    """데이터 덮어쓰기"""
     ws = get_worksheet(GOOGLE_SHEET_NAME, sheet_name)
     if ws:
-        ws.clear() # 기존 데이터 삭제
-        set_with_dataframe(ws, df) # 새 데이터 쓰기
+        ws.clear() 
+        set_with_dataframe(ws, df) 
+        clear_cache() # 캐시 초기화
         return True
     return False
 
@@ -232,39 +245,37 @@ def append_data(data_dict, sheet_name):
     """행 추가"""
     ws = get_worksheet(GOOGLE_SHEET_NAME, sheet_name)
     if ws:
-        # 데이터프레임으로 변환
         df_new = pd.DataFrame([data_dict])
         
-        # 시트의 헤더 가져오기
+        # 헤더 순서 맞추기
         try:
+            # 첫 행(헤더)만 가져오기 (전체 데이터 로드 X)
             headers = ws.row_values(1)
         except:
             headers = list(data_dict.keys())
             
-        # 딕셔너리 데이터를 헤더 순서에 맞게 정렬하여 리스트로 변환
         row_to_add = []
         for h in headers:
             val = data_dict.get(h, "")
-            # NaN 값 처리
             if pd.isna(val): val = ""
             row_to_add.append(str(val))
             
         ws.append_row(row_to_add)
+        clear_cache() # 캐시 초기화
         return True
     return False
 
 def update_inventory(code, name, change, reason, user):
     """재고 수량 업데이트"""
+    # 캐시 무시하고 최신 데이터 로드 필요할 수 있으므로, 로직 내에서 처리하거나
+    # load_data를 그대로 쓰되, 앞선 작업에서 clear_cache()가 호출되었는지 확인
     df = load_data(SHEET_INVENTORY)
     
-    # 데이터 타입 정리
     if not df.empty and '현재고' in df.columns:
         df['현재고'] = pd.to_numeric(df['현재고'], errors='coerce').fillna(0).astype(int)
     else:
-        # 데이터가 없거나 컬럼이 없으면 초기화
         df = pd.DataFrame(columns=COLS_INVENTORY)
 
-    # 로직 수행
     if not df.empty and code in df['품목코드'].values:
         idx = df[df['품목코드'] == code].index[0]
         df.at[idx, '현재고'] = df.at[idx, '현재고'] + change
@@ -272,9 +283,8 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
-    save_data(df, SHEET_INVENTORY)
+    save_data(df, SHEET_INVENTORY) # 내부에서 clear_cache 호출됨
     
-    # 이력 저장
     hist = {
         "날짜": datetime.now().strftime("%Y-%m-%d"), 
         "품목코드": code, "구분": "입고" if change > 0 else "출고", 
@@ -287,7 +297,7 @@ def get_user_id():
     return st.session_state.user_info["name"]
 
 # ------------------------------------------------------------------
-# 4. UI 구성 (Smart Layout)
+# 4. UI 구성
 # ------------------------------------------------------------------
 CATEGORIES = ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"]
 
@@ -317,7 +327,6 @@ with st.sidebar:
         st.session_state.user_info = None
         st.rerun()
 
-# 메인 헤더
 st.markdown(f"""
     <div class="dashboard-header">
         <div>
@@ -334,7 +343,6 @@ st.markdown(f"""
 if menu == "🏭 생산관리":
     t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 대시보드", "⚙️ 기준정보"])
     
-    # 1. 실적 등록
     with t1:
         c1, c2 = st.columns([1, 1.5], gap="large")
         with c1:
@@ -344,7 +352,6 @@ if menu == "🏭 생산관리":
                     date = st.date_input("작업 일자")
                     cat = st.selectbox("공정 구분", CATEGORIES)
                     
-                    # 품목 코드 자동완성 (시트에서 로드)
                     item_df = load_data(SHEET_ITEMS)
                     item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
                     
@@ -382,43 +389,33 @@ if menu == "🏭 생산관리":
             st.markdown("#### 📋 최근 등록 내역")
             df = load_data(SHEET_RECORDS)
             if not df.empty:
-                # 최신순 정렬
                 df = df.sort_values("입력시간", ascending=False).head(20)
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else: st.info("등록된 데이터가 없습니다.")
 
-    # 2. 재고 현황
     with t2:
         df_inv = load_data(SHEET_INVENTORY)
         if not df_inv.empty:
             df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0).astype(int)
-            
             c_s, _ = st.columns([1, 2])
             search = c_s.text_input("🔍 재고 검색", placeholder="품목명/코드")
-            
             if search:
                 mask = df_inv['품목코드'].astype(str).str.contains(search, case=False) | df_inv['제품명'].astype(str).str.contains(search, case=False)
                 df_inv = df_inv[mask]
-                
             st.dataframe(df_inv, use_container_width=True, hide_index=True)
         else: st.info("재고 데이터가 없습니다.")
 
-    # 3. 대시보드
     with t3:
         df = load_data(SHEET_RECORDS)
         if not df.empty:
             df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
             df['날짜'] = pd.to_datetime(df['날짜'])
-            
             total = df['수량'].sum()
             recent_day = df['날짜'].max().strftime('%Y-%m-%d')
-            
             k1, k2 = st.columns(2)
             k1.metric("총 누적 생산량", f"{total:,} EA")
             k2.metric("최근 생산일", recent_day)
-            
             st.divider()
-            
             if HAS_ALTAIR:
                 c1, c2 = st.columns([2, 1])
                 with c1:
@@ -426,28 +423,22 @@ if menu == "🏭 생산관리":
                     chart_data = df.groupby('날짜')['수량'].sum().reset_index()
                     c = alt.Chart(chart_data).mark_line(point=True).encode(
                         x=alt.X('날짜', axis=alt.Axis(format='%m-%d')), 
-                        y='수량',
-                        tooltip=['날짜', '수량']
+                        y='수량', tooltip=['날짜', '수량']
                     ).interactive()
                     st.altair_chart(c, use_container_width=True)
-                
                 with c2:
                     st.markdown("##### 🍰 공정별 비중")
                     pie_data = df.groupby('구분')['수량'].sum().reset_index()
                     pie = alt.Chart(pie_data).mark_arc(innerRadius=50).encode(
-                        theta=alt.Theta("수량", stack=True),
-                        color=alt.Color("구분"),
-                        tooltip=["구분", "수량"]
+                        theta=alt.Theta("수량", stack=True), color=alt.Color("구분"), tooltip=["구분", "수량"]
                     )
                     st.altair_chart(pie, use_container_width=True)
         else: st.info("분석할 데이터가 없습니다.")
 
-    # 4. 기준정보
     with t4:
         if IS_ADMIN:
             st.warning("⚠️ 주의: 여기서 수정하면 구글 시트에 즉시 반영됩니다.")
             t_item, t_raw = st.tabs(["품목 관리", "데이터 원본(Admin)"])
-            
             with t_item:
                 df_items = load_data(SHEET_ITEMS)
                 edited = st.data_editor(df_items, num_rows="dynamic", use_container_width=True)
@@ -455,7 +446,6 @@ if menu == "🏭 생산관리":
                     save_data(edited, SHEET_ITEMS)
                     st.success("저장 완료")
                     time.sleep(1); st.rerun()
-            
             with t_raw:
                 st.markdown("구글 시트 전체 데이터 직접 편집 (조심해서 사용하세요)")
         else: st.warning("🔒 관리자 전용 메뉴입니다.")
@@ -469,7 +459,6 @@ elif menu == "🛠️ 설비보전관리":
             if IS_EDITOR:
                 with st.container(border=True):
                     st.markdown("#### 🔧 정비 이력 등록")
-                    # 설비 목록 로드
                     eq_df = load_data(SHEET_EQUIPMENT)
                     eq_list = eq_df['id'].tolist() if not eq_df.empty else []
                     
@@ -481,7 +470,6 @@ elif menu == "🛠️ 설비보전관리":
                     f_down = st.number_input("비가동 시간 (분)", step=10)
                     
                     if st.button("이력 저장", type="primary", use_container_width=True):
-                        # 설비명 찾기
                         eq_name = ""
                         if not eq_df.empty:
                             row = eq_df[eq_df['id'] == f_eq]
@@ -493,7 +481,6 @@ elif menu == "🛠️ 설비보전관리":
                             "비용": f_cost, "작업자": get_user_id(), "비가동시간": f_down,
                             "입력시간": str(datetime.now()), "작성자": get_user_id()
                         }
-                        
                         with st.spinner("저장 중..."):
                             append_data(rec, SHEET_MAINTENANCE)
                             st.success("저장 완료")
