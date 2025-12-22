@@ -29,14 +29,13 @@ DAILY_CHECK_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- [수정] 타이틀 Pro 삭제 -->
     <title>SMT Daily Check</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- PDF Libraries (순서 중요) -->
+    <!-- PDF Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
@@ -45,7 +44,6 @@ DAILY_CHECK_HTML = """
 
     <script>
         tailwind.config = {
-            safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200'],
             theme: { 
                 extend: { 
                     colors: { 
@@ -58,127 +56,173 @@ DAILY_CHECK_HTML = """
         }
     </script>
     <style>
-        body { font-family: 'Pretendard', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
+        /* [디자인 통일] 전체 폰트 및 배경 설정 */
+        body { 
+            font-family: 'Pretendard', sans-serif !important; 
+            background-color: #f8fafc; 
+            -webkit-tap-highlight-color: transparent; 
+            color: #1e293b;
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* [디자인 통일] 탭 스타일 변경 */
-        .tab-active { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); color: white; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3); }
-        .tab-inactive { background: white; color: #64748b; border: 1px solid #e2e8f0; }
-        .tab-inactive:hover { background: #f1f5f9; color: #3b82f6; }
-        .tab-ng { background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.3); }
+
+        /* [디자인 통일] 탭 스타일 재정의 (시스템 스타일과 유사하게) */
+        .tab-btn {
+            font-family: 'Pretendard', sans-serif;
+            font-weight: 600;
+            padding: 10px 20px;
+            border-radius: 12px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-size: 0.95rem;
+        }
+        .tab-active { 
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); 
+            color: white; 
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.4);
+            transform: translateY(-1px);
+        }
+        .tab-inactive { 
+            background: white; 
+            color: #64748b; 
+            border: 1px solid #e2e8f0; 
+        }
+        .tab-inactive:hover { 
+            background: #f1f5f9; 
+            color: #3b82f6; 
+            border-color: #cbd5e1;
+        }
+
         #signature-pad { touch-action: none; background: #fff; cursor: crosshair; }
         #progress-circle { transition: stroke-dashoffset 0.5s ease-out, color 0.5s ease; }
-        input[type="date"] { position: relative; }
-        input[type="date"]::-webkit-calendar-picker-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; color: transparent; background: transparent; cursor: pointer; }
-        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-        .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; font-size: 0.8rem; font-weight: bold; position: relative; border: 1px solid transparent; }
+        
+        /* 캘린더 스타일 */
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; font-size: 0.85rem; font-weight: 700; position: relative; border: 1px solid transparent; transition: all 0.2s; }
         .calendar-day:hover { background-color: #f1f5f9; }
-        .calendar-day.today { border-color: #3b82f6; color: #3b82f6; }
-        .calendar-day.active { background-color: #eff6ff; color: #1d4ed8; }
+        .calendar-day.today { border-color: #3b82f6; color: #3b82f6; background-color: #eff6ff; }
+        .calendar-day.active { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3); }
+        
         .dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 4px; }
         .dot-green { background-color: #22c55e; }
         .dot-red { background-color: #ef4444; }
         .dot-gray { background-color: #cbd5e1; }
-        /* [디자인 통일] 그라데이션 헤더 클래스 */
-        .header-gradient { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); }
+
+        /* [디자인 통일] 그라데이션 헤더 클래스 (메인 시스템과 동일) */
+        .header-gradient { 
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        /* 카드 스타일 통일 */
+        .smart-card-html {
+            background: #ffffff; 
+            border-radius: 16px; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); 
+            border: 1px solid #f1f5f9;
+        }
     </style>
 </head>
-<body class="h-screen flex flex-col text-slate-800 overflow-hidden">
+<body class="h-screen flex flex-col overflow-hidden">
     <!-- Header -->
-    <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
-        <!-- [디자인 통일] 헤더 배경색을 그라데이션으로 변경 -->
-        <div class="px-4 sm:px-6 py-4 flex justify-between items-center header-gradient text-white">
+    <header class="z-20 flex-shrink-0 relative bg-white pb-2">
+        <!-- [디자인 통일] 헤더 영역 -->
+        <div class="px-6 py-5 flex justify-between items-center header-gradient text-white rounded-b-3xl mx-2 mt-2 shadow-lg">
             <div class="flex items-center gap-4">
-                <span class="text-2xl font-black text-white tracking-tighter">SMT Daily Check</span>
+                <!-- 폰트 통일 및 크기 조정 -->
+                <span class="text-2xl font-extrabold tracking-tight">SMT Daily Check</span>
             </div>
-            <div class="flex items-center gap-2">
-                <button onclick="checkAllGood()" class="flex items-center bg-white/20 hover:bg-white/30 text-white rounded-lg px-3 py-1.5 border border-white/30 transition-colors shadow-sm active:scale-95 mr-2 backdrop-blur-sm" title="일괄 합격">
-                    <i data-lucide="check-check" class="w-4 h-4 mr-1"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
+            <div class="flex items-center gap-3">
+                <button onclick="checkAllGood()" class="flex items-center bg-white/20 hover:bg-white/30 text-white rounded-xl px-4 py-2 border border-white/20 transition-all shadow-sm active:scale-95 backdrop-blur-md" title="일괄 합격">
+                    <i data-lucide="check-check" class="w-5 h-5 mr-1.5"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
                 </button>
-                <div class="flex items-center bg-white/20 rounded-lg px-3 py-1.5 border border-white/30 hover:border-white/50 transition-colors cursor-pointer group relative backdrop-blur-sm">
-                    <button onclick="openCalendarModal()" class="mr-2 text-white/80 hover:text-white transition-colors" title="달력 보기">
+                <div class="flex items-center bg-white/20 rounded-xl px-4 py-2 border border-white/20 hover:border-white/40 transition-all cursor-pointer group relative backdrop-blur-md">
+                    <button onclick="openCalendarModal()" class="mr-2 text-white/90 hover:text-white transition-colors" title="달력 보기">
                         <i data-lucide="calendar-days" class="w-5 h-5"></i>
                     </button>
-                    <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-white focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onclick="this.showPicker()">
+                    <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-white focus:ring-0 p-0 cursor-pointer font-mono font-bold w-24 sm:w-auto z-10" onclick="this.showPicker()">
                 </div>
-                <button onclick="openSignatureModal()" class="flex items-center bg-white/20 hover:bg-white/30 rounded-lg px-3 py-1.5 border border-white/30 transition-colors backdrop-blur-sm" id="btn-signature">
-                    <i data-lucide="pen-tool" class="w-4 h-4 text-white/80 mr-2"></i><span class="text-sm text-white font-bold hidden sm:inline" id="sign-status">서명</span>
+                <button onclick="openSignatureModal()" class="flex items-center bg-white/20 hover:bg-white/30 rounded-xl px-4 py-2 border border-white/20 transition-all backdrop-blur-md" id="btn-signature">
+                    <i data-lucide="pen-tool" class="w-5 h-5 text-white/90 mr-2"></i><span class="text-sm text-white font-bold hidden sm:inline" id="sign-status">서명</span>
                 </button>
-                <button onclick="openSettings()" class="p-2 hover:bg-white/20 rounded-full transition-colors text-white/80 hover:text-white" title="설정">
-                    <i data-lucide="settings" class="w-5 h-5"></i>
+                <button onclick="openSettings()" class="p-2 hover:bg-white/20 rounded-full transition-colors text-white/90 hover:text-white" title="설정">
+                    <i data-lucide="settings" class="w-6 h-6"></i>
                 </button>
             </div>
         </div>
-        <div class="px-4 sm:px-6 py-3 bg-white border-b border-slate-100 flex justify-between items-center">
+        
+        <!-- 통계 및 액션 바 -->
+        <div class="px-6 py-4 flex justify-between items-center">
              <div id="edit-mode-indicator" class="hidden px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-200 animate-pulse flex items-center gap-1"><i data-lucide="wrench" size="12"></i> 편집 모드 ON</div>
             <div class="flex-1"></div>
-            <div class="flex items-center gap-3">
-                <div class="flex items-center gap-4 px-4 py-1.5 bg-slate-50 rounded-xl border border-slate-200 shadow-sm">
-                    <div class="text-center"><div class="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Total</div><div class="text-sm font-black text-slate-700 leading-none" id="count-total">0</div></div>
-                    <div class="w-px h-6 bg-slate-200"></div>
-                    <div class="text-center"><div class="text-[8px] font-bold text-green-500 uppercase tracking-wider">OK</div><div class="text-sm font-black text-green-600 leading-none" id="count-ok">0</div></div>
-                    <div class="w-px h-6 bg-slate-200"></div>
-                    <div class="text-center"><div class="text-[8px] font-bold text-red-500 uppercase tracking-wider">NG</div><div class="text-sm font-black text-red-600 leading-none" id="count-ng">0</div></div>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-5 px-5 py-2 bg-white rounded-2xl border border-slate-100 shadow-sm">
+                    <div class="text-center"><div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total</div><div class="text-lg font-black text-slate-700 leading-none" id="count-total">0</div></div>
+                    <div class="w-px h-8 bg-slate-100"></div>
+                    <div class="text-center"><div class="text-[9px] font-bold text-green-500 uppercase tracking-wider mb-0.5">OK</div><div class="text-lg font-black text-green-600 leading-none" id="count-ok">0</div></div>
+                    <div class="w-px h-8 bg-slate-100"></div>
+                    <div class="text-center"><div class="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-0.5">NG</div><div class="text-lg font-black text-red-600 leading-none" id="count-ng">0</div></div>
                 </div>
-                <div class="relative w-10 h-10 flex items-center justify-center">
+                <div class="relative w-12 h-12 flex items-center justify-center">
                     <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                        <path class="text-slate-200" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3" />
-                        <path id="progress-circle" class="text-red-500 transition-all duration-700 ease-out" stroke-dasharray="100, 100" stroke-dashoffset="100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+                        <path class="text-slate-100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3" />
+                        <path id="progress-circle" class="text-blue-600 transition-all duration-700 ease-out" stroke-dasharray="100, 100" stroke-dashoffset="100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
                     </svg>
-                    <span class="absolute text-[9px] font-bold text-slate-700" id="progress-text">0%</span>
+                    <span class="absolute text-[10px] font-bold text-slate-700" id="progress-text">0%</span>
                 </div>
-                <!-- [디자인 통일] PDF 다운로드 버튼 색상 변경 -->
-                <button onclick="saveAndDownloadPDF()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-xs shadow-md active:scale-95 flex items-center gap-2 transition-all"><i data-lucide="download" class="w-4 h-4"></i></button>
+                <!-- [디자인 통일] PDF 다운로드 버튼 -->
+                <button onclick="saveAndDownloadPDF()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl font-bold text-sm shadow-lg shadow-indigo-200 active:scale-95 flex items-center gap-2 transition-all"><i data-lucide="download" class="w-5 h-5"></i></button>
             </div>
         </div>
-        <div class="bg-white border-b border-slate-200 shadow-sm"><nav class="flex overflow-x-auto gap-2 p-3 no-scrollbar whitespace-nowrap" id="lineTabs"></nav></div>
+        
+        <!-- [디자인 통일] 탭 메뉴 영역 -->
+        <div class="px-6 pb-2"><nav class="flex overflow-x-auto gap-3 p-1 no-scrollbar whitespace-nowrap" id="lineTabs"></nav></div>
     </header>
-    <main class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50 relative" id="main-scroll">
+    
+    <main class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50 relative" id="main-scroll">
         <div class="max-w-5xl mx-auto" id="checklistContainer"></div>
-        <div class="h-20"></div>
+        <div class="h-24"></div>
     </main>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
     
     <!-- 모달: 캘린더 -->
-    <div id="calendar-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
-            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
-            <div class="header-gradient px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-white/70 hover:text-white"><i data-lucide="x"></i></button></div>
-            <div class="p-6 bg-white"><div class="flex justify-between items-center mb-6"><button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-left" class="w-5 h-5"></i></button><span class="text-lg font-bold text-slate-800" id="calendar-title">2023년 10월</span><button onclick="changeMonth(1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-right" class="w-5 h-5"></i></button></div><div class="grid grid-cols-7 gap-1 mb-2 text-center text-xs font-bold text-slate-400"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div><div id="calendar-grid" class="calendar-grid"></div><div class="flex justify-center gap-4 mt-6 text-xs font-bold text-slate-600"><div class="flex items-center gap-1"><div class="dot dot-green"></div> 완료(양호)</div><div class="flex items-center gap-1"><div class="dot dot-red"></div> NG 발생</div><div class="flex items-center gap-1"><div class="dot dot-gray"></div> 미실시</div></div></div>
+    <div id="calendar-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
+            <div class="header-gradient px-8 py-5 flex justify-between items-center text-white"><h3 class="font-bold text-xl flex items-center gap-2"><i data-lucide="calendar-days" class="w-6 h-6"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-white/80 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button></div>
+            <div class="p-8 bg-white"><div class="flex justify-between items-center mb-6"><button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-100 rounded-full transition-colors"><i data-lucide="chevron-left" class="w-6 h-6 text-slate-600"></i></button><span class="text-xl font-bold text-slate-800 tracking-tight" id="calendar-title">2023년 10월</span><button onclick="changeMonth(1)" class="p-2 hover:bg-slate-100 rounded-full transition-colors"><i data-lucide="chevron-right" class="w-6 h-6 text-slate-600"></i></button></div><div class="grid grid-cols-7 gap-2 mb-2 text-center text-sm font-bold text-slate-400"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div><div id="calendar-grid" class="calendar-grid"></div><div class="flex justify-center gap-6 mt-8 text-sm font-bold text-slate-600"><div class="flex items-center gap-2"><div class="dot dot-green w-3 h-3"></div> 완료(양호)</div><div class="flex items-center gap-2"><div class="dot dot-red w-3 h-3"></div> NG 발생</div><div class="flex items-center gap-2"><div class="dot dot-gray w-3 h-3"></div> 미실시</div></div></div>
         </div>
     </div>
     <!-- 모달: 설정 -->
-    <div id="settings-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="settings-content">
-            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
-            <div class="header-gradient px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-white text-white/70"><i data-lucide="x" class="w-5 h-5"></i></button></div>
-            <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div><div class="text-xs text-amber-700 mt-1">장비 및 점검 항목을 추가/삭제/수정합니다.</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 데이터 초기화</button></div></div>
+    <div id="settings-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="settings-content">
+            <div class="header-gradient px-8 py-5 flex justify-between items-center text-white"><h3 class="font-bold text-xl flex items-center gap-2"><i data-lucide="settings" class="w-6 h-6"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-white text-white/80"><i data-lucide="x" class="w-6 h-6"></i></button></div>
+            <div class="p-8 space-y-6"><div class="flex justify-between items-center p-5 bg-amber-50 border border-amber-200 rounded-2xl"><div><div class="font-bold text-amber-900 text-lg">점검 항목 편집 모드</div><div class="text-sm text-amber-700 mt-1">장비/항목을 추가·수정합니다.</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-14 h-8 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-amber-500"></div></label></div><button onclick="resetCurrentData()" class="w-full py-4 border border-red-200 text-red-600 hover:bg-red-50 rounded-2xl text-base font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-5 h-5"></i> 데이터 초기화</button></div></div>
         </div>
     </div>
     <!-- 모달: 전자 서명 -->
-    <div id="signature-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
-            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
-            <div class="header-gradient px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="pen-tool" class="w-5 h-5"></i> 전자 서명</h3><button onclick="closeSignatureModal()" class="text-white/70 hover:text-white"><i data-lucide="x"></i></button></div>
-            <div class="p-4 bg-slate-100"><canvas id="signature-pad" class="w-full h-48 rounded-xl shadow-inner border border-slate-300 touch-none bg-white"></canvas></div>
-            <div class="p-4 bg-white flex gap-3 justify-end border-t border-slate-100"><button onclick="clearSignature()" class="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-bold">지우기</button><button onclick="saveSignature()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/30">서명 완료</button></div>
+    <div id="signature-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
+            <div class="header-gradient px-8 py-5 flex justify-between items-center text-white"><h3 class="font-bold text-xl flex items-center gap-2"><i data-lucide="pen-tool" class="w-6 h-6"></i> 전자 서명</h3><button onclick="closeSignatureModal()" class="text-white/80 hover:text-white"><i data-lucide="x"></i></button></div>
+            <div class="p-6 bg-slate-50"><canvas id="signature-pad" class="w-full h-64 rounded-2xl shadow-sm border border-slate-200 touch-none bg-white"></canvas></div>
+            <div class="p-6 bg-white flex gap-3 justify-end border-t border-slate-100"><button onclick="clearSignature()" class="px-6 py-3 text-slate-500 hover:bg-slate-100 rounded-xl text-sm font-bold transition-colors">지우기</button><button onclick="saveSignature()" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-500/30 transition-all">서명 완료</button></div>
         </div>
     </div>
-    <div id="add-item-modal" class="fixed inset-0 bg-black/50 z-[60] hidden flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6">
-            <h3 class="text-lg font-bold mb-4 text-slate-800">새 점검 항목 추가</h3>
-            <div class="space-y-3"><div><label class="text-xs font-bold text-slate-500">항목명</label><input id="new-item-name" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div><div><label class="text-xs font-bold text-slate-500">점검 내용</label><input id="new-item-content" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div><div><label class="text-xs font-bold text-slate-500">기준</label><input id="new-item-standard" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"></div><div><label class="text-xs font-bold text-slate-500">입력 방식</label><select id="new-item-type" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"><option value="OX">OX 버튼</option><option value="NUMBER">수치 입력</option><option value="NUMBER_AND_OX">수치 + OX</option></select></div></div>
-            <div class="flex justify-end gap-2 mt-6"><button onclick="document.getElementById('add-item-modal').classList.add('hidden')" class="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-lg font-bold">취소</button><button onclick="confirmAddItem()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">추가</button></div>
+    <!-- 항목 추가 모달 -->
+    <div id="add-item-modal" class="fixed inset-0 bg-black/40 z-[60] hidden flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl shadow-xl p-8">
+            <h3 class="text-xl font-bold mb-6 text-slate-800">새 점검 항목 추가</h3>
+            <div class="space-y-4"><div><label class="text-sm font-bold text-slate-500 mb-1 block">항목명</label><input id="new-item-name" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-colors"></div><div><label class="text-sm font-bold text-slate-500 mb-1 block">점검 내용</label><input id="new-item-content" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-colors"></div><div><label class="text-sm font-bold text-slate-500 mb-1 block">기준</label><input id="new-item-standard" type="text" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-colors"></div><div><label class="text-sm font-bold text-slate-500 mb-1 block">입력 방식</label><select id="new-item-type" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-colors"><option value="OX">OX 버튼</option><option value="NUMBER">수치 입력</option><option value="NUMBER_AND_OX">수치 + OX</option></select></div></div>
+            <div class="flex justify-end gap-3 mt-8"><button onclick="document.getElementById('add-item-modal').classList.add('hidden')" class="px-6 py-3 text-slate-500 hover:bg-slate-50 rounded-xl font-bold transition-colors">취소</button><button onclick="confirmAddItem()" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 transition-all">추가</button></div>
         </div>
     </div>
     <!-- 모달: 숫자 패드 -->
-    <div id="numpad-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] hidden flex items-end sm:items-center justify-center transition-opacity duration-200">
-        <div class="bg-white w-full sm:w-[320px] sm:rounded-2xl rounded-t-2xl shadow-2xl overflow-hidden transform transition-transform duration-300 translate-y-full sm:translate-y-0 scale-95" id="numpad-content">
-            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
-            <div class="header-gradient p-4 flex justify-between items-center text-white"><span class="font-bold text-lg flex items-center gap-2"><i data-lucide="calculator" width="20"></i> 값 입력</span><button onclick="closeNumPad()" class="p-1 hover:bg-white/20 rounded transition-colors"><i data-lucide="x"></i></button></div>
-            <div class="p-4 bg-slate-50"><div class="bg-white border-2 border-blue-500 rounded-xl p-4 mb-4 text-right shadow-inner h-20 flex items-center justify-end"><span id="numpad-display" class="text-3xl font-mono font-black text-slate-800 tracking-wider"></span><span class="animate-pulse text-blue-500 ml-1 text-3xl font-light">|</span></div><div class="grid grid-cols-4 gap-2"><button onclick="npKey('7')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">7</button><button onclick="npKey('8')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">8</button><button onclick="npKey('9')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">9</button><button onclick="npBack()" class="h-14 rounded-lg bg-slate-200 border border-slate-300 shadow-sm flex items-center justify-center"><i data-lucide="delete" width="24"></i></button><button onclick="npKey('4')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">4</button><button onclick="npKey('5')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">5</button><button onclick="npKey('6')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">6</button><button onclick="npClear()" class="h-14 rounded-lg bg-red-50 border border-red-200 shadow-sm text-lg font-bold text-red-500">C</button><button onclick="npKey('1')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">1</button><button onclick="npKey('2')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">2</button><button onclick="npKey('3')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">3</button><button onclick="npKey('0')" class="row-span-2 h-full rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">0</button><button onclick="npKey('.')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold">.</button><button onclick="npKey('-')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold">+/-</button><button onclick="npConfirm()" class="col-span-2 h-14 rounded-lg bg-blue-600 shadow-lg text-white text-lg font-bold flex items-center justify-center gap-2">완료 <i data-lucide="check" width="20"></i></button></div></div>
+    <div id="numpad-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[70] hidden flex items-end sm:items-center justify-center transition-opacity duration-200">
+        <div class="bg-white w-full sm:w-[360px] sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden transform transition-transform duration-300 translate-y-full sm:translate-y-0 scale-95" id="numpad-content">
+            <div class="header-gradient p-5 flex justify-between items-center text-white"><span class="font-bold text-xl flex items-center gap-2"><i data-lucide="calculator" width="24"></i> 값 입력</span><button onclick="closeNumPad()" class="p-2 hover:bg-white/20 rounded-full transition-colors"><i data-lucide="x"></i></button></div>
+            <div class="p-6 bg-slate-50"><div class="bg-white border-2 border-blue-500 rounded-2xl p-5 mb-6 text-right shadow-inner h-24 flex items-center justify-end"><span id="numpad-display" class="text-4xl font-mono font-black text-slate-800 tracking-wider"></span><span class="animate-pulse text-blue-500 ml-1 text-4xl font-light">|</span></div><div class="grid grid-cols-4 gap-3"><button onclick="npKey('7')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">7</button><button onclick="npKey('8')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">8</button><button onclick="npKey('9')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">9</button><button onclick="npBack()" class="h-16 rounded-xl bg-slate-200 border border-slate-300 shadow-sm flex items-center justify-center hover:bg-slate-300 active:scale-95 transition-all"><i data-lucide="delete" width="28"></i></button><button onclick="npKey('4')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">4</button><button onclick="npKey('5')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">5</button><button onclick="npKey('6')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">6</button><button onclick="npClear()" class="h-16 rounded-xl bg-red-100 border border-red-200 shadow-sm text-xl font-bold text-red-600 hover:bg-red-200 active:scale-95 transition-all">C</button><button onclick="npKey('1')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">1</button><button onclick="npKey('2')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">2</button><button onclick="npKey('3')" class="h-16 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">3</button><button onclick="npKey('0')" class="row-span-2 h-full rounded-xl bg-white border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-50 active:scale-95 transition-all">0</button><button onclick="npKey('.')" class="h-16 rounded-xl bg-slate-100 border border-slate-200 shadow-sm text-2xl font-bold hover:bg-slate-200 active:scale-95 transition-all">.</button><button onclick="npKey('-')" class="h-16 rounded-xl bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold hover:bg-slate-200 active:scale-95 transition-all">+/-</button><button onclick="npConfirm()" class="col-span-2 h-16 rounded-xl bg-blue-600 shadow-lg shadow-blue-200 text-white text-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-95 transition-all">완료 <i data-lucide="check" width="24"></i></button></div></div>
         </div>
     </div>
     <div id="toast-container" class="fixed bottom-20 right-6 z-50 flex flex-col gap-2"></div>
@@ -244,7 +288,7 @@ DAILY_CHECK_HTML = """
         }
         function handleDateChange(d){currentDate=d;const k=DATA_PREFIX+d;let s=null;try{s=localStorage.getItem(k)}catch(e){}if(s){try{checkResults=JSON.parse(s);signatureData=checkResults.signature||null}catch(e){checkResults={};signatureData=null}}else{checkResults={};signatureData=null}updateSignatureStatus();renderChecklist();updateSummary();}
         function saveData(){if(signatureData)checkResults.signature=signatureData;try{localStorage.setItem(DATA_PREFIX+currentDate,JSON.stringify(checkResults))}catch(e){}updateSummary();}
-        function renderTabs(){const n=document.getElementById('lineTabs');if(!n)return;n.innerHTML='';Object.keys(appConfig).forEach(l=>{const b=document.createElement('button');b.className=`px-5 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all transform active:scale-95 ${l===currentLine?'tab-active':'tab-inactive'}`;b.innerText=l;b.onclick=()=>{currentLine=l;renderTabs();renderChecklist();};n.appendChild(b);});}
+        function renderTabs(){const n=document.getElementById('lineTabs');if(!n)return;n.innerHTML='';Object.keys(appConfig).forEach(l=>{const b=document.createElement('button');b.className=`tab-btn ${l===currentLine?'tab-active':'tab-inactive'}`;b.innerText=l;b.onclick=()=>{currentLine=l;renderTabs();renderChecklist();};n.appendChild(b);});}
         function validateStandard(v,s){if(!v)return true;const val=parseFloat(v.replace(/[^0-9.-]/g,''));if(isNaN(val))return true;if(s.includes('±')){const p=s.split('±');return val>=parseFloat(p[0])-parseFloat(p[1])&&val<=parseFloat(p[0])+parseFloat(p[1]);}if(s.includes('이하'))return val<=parseFloat(s);if(s.includes('이상'))return val>=parseFloat(s);if(s.includes('~')){const p=s.split('~');return val>=parseFloat(p[0])&&val<=parseFloat(p[1]);}return true;}
         function getIconForEquip(n){return `<i data-lucide="monitor" size="20"></i>`;}
         let npTargetId=null,npType=null,npValue="";
@@ -257,16 +301,16 @@ DAILY_CHECK_HTML = """
         function renderChecklist(){
             const c=document.getElementById('checklistContainer');c.innerHTML='';const eqs=appConfig[currentLine]||[];
             eqs.forEach((eq,ei)=>{
-                const card=document.createElement('div');card.className="bg-white rounded-2xl shadow-sm border border-slate-100 mb-6 overflow-hidden animate-fade-in";
-                card.innerHTML=`<div class="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex justify-between items-center"><h3 class="font-bold text-lg text-slate-800">${eq.equip}</h3></div>`;
+                const card=document.createElement('div');card.className="smart-card-html mb-6 overflow-hidden animate-fade-in";
+                card.innerHTML=`<div class="bg-slate-50/80 px-6 py-4 border-b border-slate-100 flex justify-between items-center"><h3 class="font-bold text-lg text-slate-800">${eq.equip}</h3></div>`;
                 const list=document.createElement('div');list.className="divide-y divide-slate-50";
                 eq.items.forEach((it,ii)=>{
                     const uid=`${currentLine}-${ei}-${ii}`,v=checkResults[uid],nv=checkResults[uid+'_num'];
                     let ctrl='';
-                    if(it.type==='OX')ctrl=`<div class="flex gap-2"><button onclick="setBtnResult('${uid}','OK')" class="px-4 py-2 rounded-lg font-bold text-xs border ${v==='OK'?'bg-green-500 text-white':'bg-white'}">OK</button><button onclick="setBtnResult('${uid}','NG')" class="px-4 py-2 rounded-lg font-bold text-xs border ${v==='NG'?'bg-red-500 text-white':'bg-white'}">NG</button></div>`;
-                    else if(it.type==='NUMBER_AND_OX')ctrl=`<div class="flex items-center gap-2"><input type="text" readonly value="${nv||''}" onclick="openNumPad('${uid}','num_suffix')" class="w-20 py-2 border rounded-lg text-center font-bold ${validateStandard(nv,it.standard)?'bg-slate-50':'bg-red-50 text-red-600 animate-pulse'}"><div class="flex gap-2"><button onclick="setBtnResult('${uid}','OK')" class="px-3 py-2 rounded-lg font-bold text-xs border ${v==='OK'?'bg-green-500 text-white':'bg-white'}">O</button><button onclick="setBtnResult('${uid}','NG')" class="px-3 py-2 rounded-lg font-bold text-xs border ${v==='NG'?'bg-red-500 text-white':'bg-white'}">X</button></div></div>`;
+                    if(it.type==='OX')ctrl=`<div class="flex gap-2"><button onclick="setBtnResult('${uid}','OK')" class="px-4 py-2 rounded-lg font-bold text-xs border transition-all ${v==='OK'?'bg-green-500 text-white border-green-500 shadow-md shadow-green-200':'bg-white border-slate-200 hover:bg-slate-50'}">OK</button><button onclick="setBtnResult('${uid}','NG')" class="px-4 py-2 rounded-lg font-bold text-xs border transition-all ${v==='NG'?'bg-red-500 text-white border-red-500 shadow-md shadow-red-200':'bg-white border-slate-200 hover:bg-slate-50'}">NG</button></div>`;
+                    else if(it.type==='NUMBER_AND_OX')ctrl=`<div class="flex items-center gap-2"><input type="text" readonly value="${nv||''}" onclick="openNumPad('${uid}','num_suffix')" class="w-24 py-2 border rounded-lg text-center font-bold text-slate-700 outline-none focus:border-blue-500 transition-colors ${validateStandard(nv,it.standard)?'bg-white':'bg-red-50 text-red-600 border-red-200 animate-pulse'}"><div class="flex gap-2"><button onclick="setBtnResult('${uid}','OK')" class="px-3 py-2 rounded-lg font-bold text-xs border transition-all ${v==='OK'?'bg-green-500 text-white border-green-500 shadow-md shadow-green-200':'bg-white border-slate-200 hover:bg-slate-50'}">O</button><button onclick="setBtnResult('${uid}','NG')" class="px-3 py-2 rounded-lg font-bold text-xs border transition-all ${v==='NG'?'bg-red-500 text-white border-red-500 shadow-md shadow-red-200':'bg-white border-slate-200 hover:bg-slate-50'}">X</button></div></div>`;
                     const row=document.createElement('div');row.className="p-5 hover:bg-blue-50/30 transition-colors";
-                    row.innerHTML=`<div class="flex justify-between items-center gap-4"><div class="flex-1"><div class="font-bold text-slate-700">${it.name} <span class="text-xs text-blue-500 bg-blue-50 px-1 rounded">${it.standard}</span></div><div class="text-sm text-slate-500">${it.content}</div></div>${ctrl}</div>`;
+                    row.innerHTML=`<div class="flex justify-between items-center gap-4"><div class="flex-1"><div class="font-bold text-slate-700 text-sm">${it.name} <span class="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded ml-1 font-semibold">${it.standard}</span></div><div class="text-xs text-slate-400 mt-0.5">${it.content}</div></div>${ctrl}</div>`;
                     list.appendChild(row);
                 });
                 card.appendChild(list);c.appendChild(card);
