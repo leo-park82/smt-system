@@ -276,19 +276,9 @@ DAILY_CHECK_HTML = """
                 }
                 return true;
             },
+            // [수정 완료] 불필요한 루프 제거 버전
             calculateSummary() {
                 let total = 0, ok = 0, ng = 0;
-                Object.values(state.config).forEach(lines =>
-                    lines.forEach((e, ei) =>
-                        e.items.forEach((_, ii) => {
-                            total++;
-                            const l = Object.keys(state.config).find(key => state.config[key] === lines); // Reverse lookup for line name if needed, but simple iteration works better with composite keys logic
-                        })
-                    )
-                );
-                
-                // Re-calculating correctly based on global results
-                total = 0; ok = 0; ng = 0;
                 Object.keys(state.config).forEach(lineName => {
                     state.config[lineName].forEach((eq, ei) => {
                         eq.items.forEach((it, ii) => {
