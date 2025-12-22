@@ -6,7 +6,7 @@ import hashlib
 import base64
 import os
 import streamlit.components.v1 as components
-from fpdf import FPDF  # [수정] FPDF 라이브러리 재확인 (생산관리 보고서용)
+from fpdf import FPDF
 
 # 구글 시트 연동 라이브러리
 import gspread
@@ -77,7 +77,6 @@ DAILY_CHECK_HTML = """
     <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
         <div class="px-4 sm:px-6 py-3 flex justify-between items-center bg-slate-900 text-white">
             <div class="flex items-center gap-4">
-                <!-- [수정] CIMON 삭제, SMT Daily Check만 남김 -->
                 <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">SMT Daily Check</span>
             </div>
             <div class="flex items-center gap-2">
@@ -127,7 +126,6 @@ DAILY_CHECK_HTML = """
     </main>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
     
-    <!-- 모달 등은 동일하게 유지 -->
     <div id="calendar-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
             <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
@@ -830,27 +828,37 @@ if menu == "🏭 생산관리":
                         st.divider()
                         st.info("ℹ️ 생산 등록 시 재고가 자동으로 증가합니다.")
 
-                    if st.button("저장하기", type="primary", use_container_width=True):
-                        if name:
+                    # [수정] 저장 로직을 콜백 함수로 변경하여 session_state 초기화 에러 해결
+                    def save_production():
+                        # 콜백 내부에서 session_state 값 참조
+                        cur_code = st.session_state.code_in
+                        cur_name = st.session_state.name_in
+                        cur_qty = st.session_state.prod_qty
+                        
+                        if cur_name:
                             rec = {
-                                "날짜":str(date), "구분":cat, "품목코드":code, "제품명":name, 
-                                "수량":qty, "입력시간":str(datetime.now()), 
+                                "날짜":str(date), "구분":cat, "품목코드":cur_code, "제품명":cur_name, 
+                                "수량":cur_qty, "입력시간":str(datetime.now()), 
                                 "작성자":get_user_id(), "수정자":"", "수정시간":""
                             }
                             with st.spinner("저장 중..."):
                                 if append_data(rec, SHEET_RECORDS):
                                     if cat in ["후공정", "후공정 외주"]:
-                                        if auto_deduct: update_inventory(code, name, -qty, f"생산출고({cat})", get_user_id())
+                                        if auto_deduct: update_inventory(cur_code, cur_name, -cur_qty, f"생산출고({cat})", get_user_id())
                                     else:
-                                        update_inventory(code, name, qty, f"생산입고({cat})", get_user_id())
+                                        update_inventory(cur_code, cur_name, cur_qty, f"생산입고({cat})", get_user_id())
                                     
-                                    st.success("저장 완료!")
+                                    # 콜백 내부에서는 안전하게 session_state 초기화 가능
                                     st.session_state.code_in = ""
                                     st.session_state.name_in = ""
                                     st.session_state.prod_qty = 100
-                                    time.sleep(0.5); st.rerun()
-                                else: st.error("저장 실패")
-                        else: st.error("제품명을 입력해주세요.")
+                                    st.toast("저장 완료!", icon="✅")
+                                else:
+                                    st.toast("저장 실패", icon="🚫")
+                        else:
+                            st.toast("제품명을 입력해주세요.", icon="⚠️")
+
+                    st.button("저장하기", type="primary", use_container_width=True, on_click=save_production)
             else: st.warning("🔒 뷰어 모드입니다.")
 
         with c2:
