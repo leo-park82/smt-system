@@ -40,22 +40,33 @@ DAILY_CHECK_HTML = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
+    <!-- [디자인 통일] Pretendard 폰트 적용 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+
     <script>
         tailwind.config = {
             safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200'],
-            theme: { extend: { colors: { brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' } }, fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] } } }
+            theme: { 
+                extend: { 
+                    colors: { 
+                        brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' },
+                        primary: { 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+                    }, 
+                    fontFamily: { sans: ['Pretendard', 'sans-serif'] } 
+                } 
+            }
         }
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
-        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Pretendard', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .tab-active { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3); }
+        /* [디자인 통일] 탭 스타일 변경 */
+        .tab-active { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); color: white; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3); }
         .tab-inactive { background: white; color: #64748b; border: 1px solid #e2e8f0; }
-        .tab-inactive:hover { background: #f8fafc; color: #3b82f6; }
+        .tab-inactive:hover { background: #f1f5f9; color: #3b82f6; }
         .tab-ng { background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.3); }
         #signature-pad { touch-action: none; background: #fff; cursor: crosshair; }
         #progress-circle { transition: stroke-dashoffset 0.5s ease-out, color 0.5s ease; }
@@ -70,43 +81,45 @@ DAILY_CHECK_HTML = """
         .dot-green { background-color: #22c55e; }
         .dot-red { background-color: #ef4444; }
         .dot-gray { background-color: #cbd5e1; }
+        /* [디자인 통일] 그라데이션 헤더 클래스 */
+        .header-gradient { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); }
     </style>
 </head>
 <body class="h-screen flex flex-col text-slate-800 overflow-hidden">
     <!-- Header -->
     <header class="bg-white shadow-sm z-20 flex-shrink-0 relative">
-        <div class="px-4 sm:px-6 py-3 flex justify-between items-center bg-slate-900 text-white">
+        <!-- [디자인 통일] 헤더 배경색을 그라데이션으로 변경 -->
+        <div class="px-4 sm:px-6 py-4 flex justify-between items-center header-gradient text-white">
             <div class="flex items-center gap-4">
-                <!-- [수정] CIMON 삭제, SMT Daily Check만 남김 -->
-                <span class="text-2xl font-black text-white tracking-tighter" style="font-family: 'Arial Black', sans-serif;">SMT Daily Check</span>
+                <span class="text-2xl font-black text-white tracking-tighter">SMT Daily Check</span>
             </div>
             <div class="flex items-center gap-2">
-                <button onclick="checkAllGood()" class="flex items-center bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-1.5 border border-green-500 transition-colors shadow-sm active:scale-95 mr-2" title="일괄 합격">
+                <button onclick="checkAllGood()" class="flex items-center bg-white/20 hover:bg-white/30 text-white rounded-lg px-3 py-1.5 border border-white/30 transition-colors shadow-sm active:scale-95 mr-2 backdrop-blur-sm" title="일괄 합격">
                     <i data-lucide="check-check" class="w-4 h-4 mr-1"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
                 </button>
-                <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer group relative">
-                    <button onclick="openCalendarModal()" class="mr-2 text-blue-400 hover:text-white transition-colors" title="달력 보기">
+                <div class="flex items-center bg-white/20 rounded-lg px-3 py-1.5 border border-white/30 hover:border-white/50 transition-colors cursor-pointer group relative backdrop-blur-sm">
+                    <button onclick="openCalendarModal()" class="mr-2 text-white/80 hover:text-white transition-colors" title="달력 보기">
                         <i data-lucide="calendar-days" class="w-5 h-5"></i>
                     </button>
-                    <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-slate-200 focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onclick="this.showPicker()">
+                    <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-white focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onclick="this.showPicker()">
                 </div>
-                <button onclick="openSignatureModal()" class="flex items-center bg-slate-800 hover:bg-slate-700 rounded-lg px-3 py-1.5 border border-slate-700 transition-colors" id="btn-signature">
-                    <i data-lucide="pen-tool" class="w-4 h-4 text-slate-400 mr-2"></i><span class="text-sm text-slate-300 font-bold hidden sm:inline" id="sign-status">서명</span>
+                <button onclick="openSignatureModal()" class="flex items-center bg-white/20 hover:bg-white/30 rounded-lg px-3 py-1.5 border border-white/30 transition-colors backdrop-blur-sm" id="btn-signature">
+                    <i data-lucide="pen-tool" class="w-4 h-4 text-white/80 mr-2"></i><span class="text-sm text-white font-bold hidden sm:inline" id="sign-status">서명</span>
                 </button>
-                <button onclick="openSettings()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-white" title="설정">
+                <button onclick="openSettings()" class="p-2 hover:bg-white/20 rounded-full transition-colors text-white/80 hover:text-white" title="설정">
                     <i data-lucide="settings" class="w-5 h-5"></i>
                 </button>
             </div>
         </div>
-        <div class="px-4 sm:px-6 py-3 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+        <div class="px-4 sm:px-6 py-3 bg-white border-b border-slate-100 flex justify-between items-center">
              <div id="edit-mode-indicator" class="hidden px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-200 animate-pulse flex items-center gap-1"><i data-lucide="wrench" size="12"></i> 편집 모드 ON</div>
             <div class="flex-1"></div>
             <div class="flex items-center gap-3">
-                <div class="flex items-center gap-4 px-4 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div class="flex items-center gap-4 px-4 py-1.5 bg-slate-50 rounded-xl border border-slate-200 shadow-sm">
                     <div class="text-center"><div class="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Total</div><div class="text-sm font-black text-slate-700 leading-none" id="count-total">0</div></div>
-                    <div class="w-px h-6 bg-slate-100"></div>
+                    <div class="w-px h-6 bg-slate-200"></div>
                     <div class="text-center"><div class="text-[8px] font-bold text-green-500 uppercase tracking-wider">OK</div><div class="text-sm font-black text-green-600 leading-none" id="count-ok">0</div></div>
-                    <div class="w-px h-6 bg-slate-100"></div>
+                    <div class="w-px h-6 bg-slate-200"></div>
                     <div class="text-center"><div class="text-[8px] font-bold text-red-500 uppercase tracking-wider">NG</div><div class="text-sm font-black text-red-600 leading-none" id="count-ng">0</div></div>
                 </div>
                 <div class="relative w-10 h-10 flex items-center justify-center">
@@ -116,7 +129,8 @@ DAILY_CHECK_HTML = """
                     </svg>
                     <span class="absolute text-[9px] font-bold text-slate-700" id="progress-text">0%</span>
                 </div>
-                <button onclick="saveAndDownloadPDF()" class="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-lg font-bold text-xs shadow-md active:scale-95 flex items-center gap-2 transition-all"><i data-lucide="download" class="w-4 h-4"></i></button>
+                <!-- [디자인 통일] PDF 다운로드 버튼 색상 변경 -->
+                <button onclick="saveAndDownloadPDF()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-xs shadow-md active:scale-95 flex items-center gap-2 transition-all"><i data-lucide="download" class="w-4 h-4"></i></button>
             </div>
         </div>
         <div class="bg-white border-b border-slate-200 shadow-sm"><nav class="flex overflow-x-auto gap-2 p-3 no-scrollbar whitespace-nowrap" id="lineTabs"></nav></div>
@@ -127,22 +141,27 @@ DAILY_CHECK_HTML = """
     </main>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="processImageUpload(this)">
     
-    <!-- 모달 등은 동일하게 유지 -->
+    <!-- 모달: 캘린더 -->
     <div id="calendar-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="calendar-content">
-            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
+            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
+            <div class="header-gradient px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5"></i> 월간 현황</h3><button onclick="closeCalendarModal()" class="text-white/70 hover:text-white"><i data-lucide="x"></i></button></div>
             <div class="p-6 bg-white"><div class="flex justify-between items-center mb-6"><button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-left" class="w-5 h-5"></i></button><span class="text-lg font-bold text-slate-800" id="calendar-title">2023년 10월</span><button onclick="changeMonth(1)" class="p-2 hover:bg-slate-100 rounded-full"><i data-lucide="chevron-right" class="w-5 h-5"></i></button></div><div class="grid grid-cols-7 gap-1 mb-2 text-center text-xs font-bold text-slate-400"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div><div id="calendar-grid" class="calendar-grid"></div><div class="flex justify-center gap-4 mt-6 text-xs font-bold text-slate-600"><div class="flex items-center gap-1"><div class="dot dot-green"></div> 완료(양호)</div><div class="flex items-center gap-1"><div class="dot dot-red"></div> NG 발생</div><div class="flex items-center gap-1"><div class="dot dot-gray"></div> 미실시</div></div></div>
         </div>
     </div>
+    <!-- 모달: 설정 -->
     <div id="settings-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0" id="settings-content">
-            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-slate-300"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
+            <div class="header-gradient px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="settings" class="w-5 h-5"></i> 설정</h3><button onclick="closeSettings()" class="hover:text-white text-white/70"><i data-lucide="x" class="w-5 h-5"></i></button></div>
             <div class="p-6 space-y-6"><div class="flex justify-between items-center p-4 bg-amber-50 border border-amber-200 rounded-xl"><div><div class="font-bold text-amber-900">점검 항목 편집 모드</div><div class="text-xs text-amber-700 mt-1">장비 및 점검 항목을 추가/삭제/수정합니다.</div></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="toggleEditMode" class="sr-only peer" onchange="toggleEditMode(this.checked)"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div></label></div><button onclick="resetCurrentData()" class="w-full py-3 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i> 데이터 초기화</button></div></div>
         </div>
     </div>
+    <!-- 모달: 전자 서명 -->
     <div id="signature-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
-            <div class="bg-slate-900 px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="pen-tool" class="w-5 h-5"></i> 전자 서명</h3><button onclick="closeSignatureModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button></div>
+            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
+            <div class="header-gradient px-6 py-4 flex justify-between items-center text-white"><h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="pen-tool" class="w-5 h-5"></i> 전자 서명</h3><button onclick="closeSignatureModal()" class="text-white/70 hover:text-white"><i data-lucide="x"></i></button></div>
             <div class="p-4 bg-slate-100"><canvas id="signature-pad" class="w-full h-48 rounded-xl shadow-inner border border-slate-300 touch-none bg-white"></canvas></div>
             <div class="p-4 bg-white flex gap-3 justify-end border-t border-slate-100"><button onclick="clearSignature()" class="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-bold">지우기</button><button onclick="saveSignature()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/30">서명 완료</button></div>
         </div>
@@ -154,9 +173,11 @@ DAILY_CHECK_HTML = """
             <div class="flex justify-end gap-2 mt-6"><button onclick="document.getElementById('add-item-modal').classList.add('hidden')" class="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-lg font-bold">취소</button><button onclick="confirmAddItem()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">추가</button></div>
         </div>
     </div>
+    <!-- 모달: 숫자 패드 -->
     <div id="numpad-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] hidden flex items-end sm:items-center justify-center transition-opacity duration-200">
         <div class="bg-white w-full sm:w-[320px] sm:rounded-2xl rounded-t-2xl shadow-2xl overflow-hidden transform transition-transform duration-300 translate-y-full sm:translate-y-0 scale-95" id="numpad-content">
-            <div class="bg-slate-900 p-4 flex justify-between items-center text-white"><span class="font-bold text-lg flex items-center gap-2"><i data-lucide="calculator" width="20"></i> 값 입력</span><button onclick="closeNumPad()" class="p-1 hover:bg-slate-700 rounded transition-colors"><i data-lucide="x"></i></button></div>
+            <!-- [디자인 통일] 모달 헤더 그라데이션 적용 -->
+            <div class="header-gradient p-4 flex justify-between items-center text-white"><span class="font-bold text-lg flex items-center gap-2"><i data-lucide="calculator" width="20"></i> 값 입력</span><button onclick="closeNumPad()" class="p-1 hover:bg-white/20 rounded transition-colors"><i data-lucide="x"></i></button></div>
             <div class="p-4 bg-slate-50"><div class="bg-white border-2 border-blue-500 rounded-xl p-4 mb-4 text-right shadow-inner h-20 flex items-center justify-end"><span id="numpad-display" class="text-3xl font-mono font-black text-slate-800 tracking-wider"></span><span class="animate-pulse text-blue-500 ml-1 text-3xl font-light">|</span></div><div class="grid grid-cols-4 gap-2"><button onclick="npKey('7')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">7</button><button onclick="npKey('8')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">8</button><button onclick="npKey('9')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">9</button><button onclick="npBack()" class="h-14 rounded-lg bg-slate-200 border border-slate-300 shadow-sm flex items-center justify-center"><i data-lucide="delete" width="24"></i></button><button onclick="npKey('4')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">4</button><button onclick="npKey('5')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">5</button><button onclick="npKey('6')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">6</button><button onclick="npClear()" class="h-14 rounded-lg bg-red-50 border border-red-200 shadow-sm text-lg font-bold text-red-500">C</button><button onclick="npKey('1')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">1</button><button onclick="npKey('2')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">2</button><button onclick="npKey('3')" class="h-14 rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">3</button><button onclick="npKey('0')" class="row-span-2 h-full rounded-lg bg-white border border-slate-200 shadow-sm text-xl font-bold">0</button><button onclick="npKey('.')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold">.</button><button onclick="npKey('-')" class="h-14 rounded-lg bg-slate-100 border border-slate-200 shadow-sm text-xl font-bold">+/-</button><button onclick="npConfirm()" class="col-span-2 h-14 rounded-lg bg-blue-600 shadow-lg text-white text-lg font-bold flex items-center justify-center gap-2">완료 <i data-lucide="check" width="20"></i></button></div></div>
         </div>
     </div>
@@ -272,7 +293,7 @@ DAILY_CHECK_HTML = """
         function closeSignatureModal(){document.getElementById('signature-modal').classList.add('hidden');}
         function clearSignature(){ctx.clearRect(0,0,cvs.width,cvs.height);}
         function saveSignature(){signatureData=cvs.toDataURL();saveData();updateSignatureStatus();closeSignatureModal();}
-        function updateSignatureStatus(){const b=document.getElementById('btn-signature'),s=document.getElementById('sign-status');if(signatureData){s.innerText="서명 완료";s.className="text-green-400 font-bold";b.classList.add('border-green-500')}else{s.innerText="서명";s.className="text-slate-300";b.classList.remove('border-green-500')}}
+        function updateSignatureStatus(){const b=document.getElementById('btn-signature'),s=document.getElementById('sign-status');if(signatureData){s.innerText="서명 완료";s.className="text-white font-bold";b.classList.add('border-green-400')}else{s.innerText="서명";s.className="text-white";b.classList.remove('border-green-400')}}
         
         function showToast(message, type = "normal") {
             const container = document.getElementById('toast-container');
