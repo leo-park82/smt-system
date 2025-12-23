@@ -21,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (최종 구조 개선 버전)
+# [핵심] SMT 일일점검표 HTML 코드 (수치 검증 및 서명 강제 적용)
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -60,7 +60,6 @@ DAILY_CHECK_HTML = """
         input[type="date"] { position: relative; }
         input[type="date"]::-webkit-calendar-picker-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; color: transparent; background: transparent; cursor: pointer; }
         
-        /* 성능 최적화를 위한 상태 클래스 정의 */
         .ox-btn { transition: all 0.2s; }
         .ox-btn.active[data-ox="OK"] { background-color: #22c55e; color: white; border-color: #22c55e; }
         .ox-btn.active[data-ox="NG"] { background-color: #ef4444; color: white; border-color: #ef4444; }
@@ -142,7 +141,6 @@ DAILY_CHECK_HTML = """
     <div id="toast-container" class="fixed bottom-20 right-6 z-50 flex flex-col gap-2"></div>
 
     <script>
-        // 1. Constants & Default Config
         const DATA_PREFIX = "SMT_DATA_V3_";
         const CONFIG_KEY = "SMT_CONFIG_V6.1_SYNTAX_FIXED";
         const defaultLineData = {
@@ -193,44 +191,30 @@ DAILY_CHECK_HTML = """
             ]
         };
 
-        // 2. State Management (Refactored 1: Consolidated State)
         const state = {
             config: {},
-            results: {}, // 구조: { [uid]: { ox: 'OK' | 'NG' | null, value: string | null } }
+            results: {},
             currentLine: "1 LINE",
             currentDate: "",
             signature: null,
             editMode: false,
-            // Numpad state
-            numpad: {
-                targetId: null,
-                value: ""
-            }
+            numpad: { targetId: null, value: "" }
         };
 
-        // 2.5 Migration Logic (Critical for Old Data)
         function migrateOldResults(oldResults) {
             const migrated = {};
             Object.entries(oldResults || {}).forEach(([key, val]) => {
                 if(key === 'signature') return;
-                // 이미 새 구조인 경우
                 if (val && typeof val === 'object' && 'ox' in val) {
                     migrated[key] = val;
                     return;
                 }
-                // 구 구조 변환
                 if (val === 'OK' || val === 'NG') {
                     migrated[key] = { ox: val, value: null };
                 } else if (typeof val === 'string' || typeof val === 'number') {
-                    // 키가 _num으로 끝나는 경우 처리 필요하지만, 
-                    // 여기선 기본적으로 단순 값은 value로, 판정은 ox로 넣어야 함.
-                    // 복잡성을 피하기 위해 단순 할당은 지양하고, 기존 데이터 로드시 
-                    // 키 매칭을 통해 재구성하는 것이 안전하나, 
-                    // 여기서는 가장 일반적인 케이스(OX 판정)만 복구합니다.
                     if(!key.endsWith('_num')) migrated[key] = { ox: null, value: val }; 
                 }
             });
-            // 숫자값 별도 병합 (_num 접미사 처리)
             Object.entries(oldResults || {}).forEach(([key, val]) => {
                 if (key.endsWith('_num')) {
                     const originalKey = key.replace('_num', '');
@@ -241,7 +225,6 @@ DAILY_CHECK_HTML = """
             return migrated;
         }
 
-        // 3. Storage Abstraction (Refactored 2: Unified Storage Access)
         const storage = {
             loadConfig() {
                 try {
@@ -271,7 +254,6 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 3.5 Data Manager (Centralized Data Access)
         const dataMgr = {
             ensure(uid) {
                 if (!state.results[uid] || typeof state.results[uid] !== 'object') {
@@ -279,33 +261,17 @@ DAILY_CHECK_HTML = """
                 }
                 return state.results[uid];
             },
-            setOX(uid, ox) {
-                this.ensure(uid).ox = ox;
-            },
-            setValue(uid, val) {
-                this.ensure(uid).value = val;
-            },
-            getOX(uid) {
-                return state.results[uid]?.ox || null;
-            },
-            getValue(uid) {
-                return state.results[uid]?.value || null;
-            }
+            setOX(uid, ox) { this.ensure(uid).ox = ox; },
+            setValue(uid, val) { this.ensure(uid).value = val; },
+            getOX(uid) { return state.results[uid]?.ox || null; },
+            getValue(uid) { return state.results[uid]?.value || null; }
         };
 
-        // 4. Render Control (Event Delegation Friendly)
         const renderControl = {
             OX(uid) {
                 const ox = dataMgr.getOX(uid);
                 const activeClass = (type) => ox === type ? 'active' : '';
-                return `
-                    <div class="flex gap-2">
-                        <button class="ox-btn px-4 py-2 rounded-lg font-bold text-xs border ${activeClass('OK')}" 
-                                data-uid="${uid}" data-ox="OK">OK</button>
-                        <button class="ox-btn px-4 py-2 rounded-lg font-bold text-xs border ${activeClass('NG')}" 
-                                data-uid="${uid}" data-ox="NG">NG</button>
-                    </div>
-                `;
+                return `<div class="flex gap-2"><button class="ox-btn px-4 py-2 rounded-lg font-bold text-xs border ${activeClass('OK')}" data-uid="${uid}" data-ox="OK">OK</button><button class="ox-btn px-4 py-2 rounded-lg font-bold text-xs border ${activeClass('NG')}" data-uid="${uid}" data-ox="NG">NG</button></div>`;
             },
             NUMBER_AND_OX(uid, item) {
                 const ox = dataMgr.getOX(uid);
@@ -314,19 +280,7 @@ DAILY_CHECK_HTML = """
                 const isValid = utils.validateStandard(val, item.standard);
                 const inputClass = isValid ? 'bg-slate-50' : 'bg-red-50 text-red-600 error';
                 
-                return `
-                    <div class="flex items-center gap-2">
-                        <input type="text" readonly value="${val || ''}" 
-                               class="num-input w-20 py-2 border rounded-lg text-center font-bold ${inputClass}"
-                               data-uid="${uid}">
-                        <div class="flex gap-2">
-                            <button class="ox-btn px-3 py-2 rounded-lg font-bold text-xs border ${activeClass('OK')}" 
-                                    data-uid="${uid}" data-ox="OK">O</button>
-                            <button class="ox-btn px-3 py-2 rounded-lg font-bold text-xs border ${activeClass('NG')}" 
-                                    data-uid="${uid}" data-ox="NG">X</button>
-                        </div>
-                    </div>
-                `;
+                return `<div class="flex items-center gap-2"><input type="text" readonly value="${val || ''}" class="num-input w-20 py-2 border rounded-lg text-center font-bold ${inputClass}" data-uid="${uid}"><div class="flex gap-2"><button class="ox-btn px-3 py-2 rounded-lg font-bold text-xs border ${activeClass('OK')}" data-uid="${uid}" data-ox="OK">O</button><button class="ox-btn px-3 py-2 rounded-lg font-bold text-xs border ${activeClass('NG')}" data-uid="${uid}" data-ox="NG">X</button></div></div>`;
             },
             render(item, uid) {
                 if (item.type === 'OX') return this.OX(uid);
@@ -335,7 +289,6 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 5. Utility Functions
         const utils = {
             qs: (selector) => document.querySelector(selector),
             qsa: (selector) => document.querySelectorAll(selector),
@@ -355,6 +308,11 @@ DAILY_CHECK_HTML = """
                 }
                 return true;
             },
+            isValueValid(uid, item) {
+                const val = dataMgr.getValue(uid);
+                if (val === null || val === "" || isNaN(parseFloat(val))) return false;
+                return this.validateStandard(val, item.standard);
+            },
             calculateSummary() {
                 let total = 0, ok = 0, ng = 0;
                 Object.keys(state.config).forEach(lineName => {
@@ -372,7 +330,6 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 6. UI Rendering Functions
         const ui = {
             renderTabs() {
                 const container = utils.qs('#lineTabs');
@@ -385,7 +342,7 @@ DAILY_CHECK_HTML = """
                     b.onclick = () => {
                         state.currentLine = l;
                         ui.renderTabs();
-                        ui.renderChecklist(); // Tab change still requires full render
+                        ui.renderChecklist(); 
                     };
                     container.appendChild(b);
                 });
@@ -435,7 +392,6 @@ DAILY_CHECK_HTML = """
                 utils.qs('#progress-text').innerText = `${percent}%`;
                 utils.qs('#progress-circle').style.strokeDashoffset = 100 - percent;
             },
-            // [NEW] Partial DOM Update for Performance
             updateOXUI(uid) {
                 const ox = dataMgr.getOX(uid);
                 const buttons = utils.qsa(`.ox-btn[data-uid="${uid}"]`);
@@ -449,12 +405,6 @@ DAILY_CHECK_HTML = """
                 const input = utils.qs(`.num-input[data-uid="${uid}"]`);
                 if(input) {
                     input.value = value;
-                    // Re-validate visual feedback
-                    // Finding the item config is tricky here without context, 
-                    // but we can skip style update for now or lookup config.
-                    // For performance, we assume standard validation logic in input class handled by render is sufficient for init,
-                    // but real-time validation needs config.
-                    // Let's find item:
                     const [l, ei, ii] = uid.split('-');
                     const item = state.config[l][ei].items[ii];
                     const isValid = utils.validateStandard(value, item.standard);
@@ -519,7 +469,6 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 7. Actions & Event Handlers
         const actions = {
             init() {
                 const today = new Date().toISOString().split('T')[0];
@@ -534,16 +483,25 @@ DAILY_CHECK_HTML = """
             },
             setupDelegation() {
                 document.addEventListener('click', (e) => {
-                    // OX Button Click
                     if (e.target.classList.contains('ox-btn')) {
                         const uid = e.target.dataset.uid;
                         const ox = e.target.dataset.ox;
+                        
+                        // [보호 로직] NUMBER_AND_OX 타입 OK 체크 시 수치 검증
+                        const [l, ei, ii] = uid.split('-');
+                        const item = state.config[l][ei].items[ii];
+                        if (item.type === 'NUMBER_AND_OX' && ox === 'OK') {
+                            if (!utils.isValueValid(uid, item)) {
+                                alert('수치를 정상적으로 입력해야 OK 체크가 가능합니다.');
+                                return;
+                            }
+                        }
+                        
                         dataMgr.setOX(uid, ox);
                         ui.updateOXUI(uid);
                         actions.saveOnly();
                         ui.updateSummary();
                     }
-                    // Num Input Click
                     if (e.target.classList.contains('num-input')) {
                         const uid = e.target.dataset.uid;
                         ui.openNumPad(uid);
@@ -566,20 +524,23 @@ DAILY_CHECK_HTML = """
                 equipments.forEach((eq, ei) => {
                     eq.items.forEach((item, ii) => {
                         const uid = `${line}-${ei}-${ii}`;
+                        // [지능화] 수치 없거나 기준 미달 시 OK 제외
+                        if (item.type === 'NUMBER_AND_OX') {
+                            if (!utils.isValueValid(uid, item)) return;
+                        }
                         dataMgr.setOX(uid, 'OK');
-                        ui.updateOXUI(uid); // Direct DOM update
+                        ui.updateOXUI(uid); 
                     });
                 });
 
                 actions.saveOnly();
                 ui.updateSummary();
-                ui.showToast("일괄 합격 처리되었습니다.", "success");
+                ui.showToast("일괄 합격 처리되었습니다 (미달 항목 제외).", "success");
             },
             saveOnly() {
                 if (state.signature) state.results.signature = state.signature;
                 storage.saveResults(state.currentDate, state.results);
             },
-            // Signature Pad Logic
             cvs: null, ctx: null, drawing: false,
             initSignaturePad() {
                 this.cvs = document.getElementById('signature-pad');
@@ -650,16 +611,29 @@ DAILY_CHECK_HTML = """
             confirm() {
                 const { targetId, value } = state.numpad;
                 dataMgr.setValue(targetId, value);
+                
+                // [자동 체크 로직] 수치 정상 -> OK 자동, 이상 -> 체크 해제
+                const [l, ei, ii] = targetId.split('-');
+                const item = state.config[l][ei].items[ii];
+                
+                if (utils.validateStandard(value, item.standard)) {
+                    dataMgr.setOX(targetId, 'OK');
+                } else {
+                    dataMgr.setOX(targetId, null);
+                    alert('입력 수치가 기준을 벗어났습니다.');
+                }
+                
+                ui.updateOXUI(targetId);
                 actions.saveOnly();
                 ui.updateNumUI(targetId, value);
                 ui.closeNumPad();
+                ui.updateSummary();
             }
         };
 
-        // 8. PDF Export (Adapted for New Data Structure)
         window.saveAndDownloadPDF = async function() {
             if (!state.signature) {
-                ui.showToast("전자 서명을 먼저 해주세요.", "error");
+                alert('⚠️ 서명이 완료되지 않았습니다. 서명 후 출력 가능합니다.');
                 return;
             }
             const d = utils.qs('#inputDate').value;
@@ -689,7 +663,6 @@ DAILY_CHECK_HTML = """
                     
                     e.items.forEach((it, ii) => {
                         const uid = `${l}-${ei}-${ii}`;
-                        // New Data Access
                         const ox = dataMgr.getOX(uid);
                         const val = dataMgr.getValue(uid);
                         
@@ -759,7 +732,6 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // Initialize
         document.addEventListener('DOMContentLoaded', actions.init);
     </script>
 </body>
