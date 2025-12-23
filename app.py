@@ -21,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (리팩토링 버전)
+# [핵심] SMT 일일점검표 HTML 코드 (데이터 구조 리팩토링 버전)
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -41,7 +41,7 @@ DAILY_CHECK_HTML = """
     
     <script>
         tailwind.config = {
-            safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200'],
+            safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200', 'bg-green-500', 'bg-red-500', 'bg-white'],
             theme: { extend: { colors: { brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' } }, fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] } } }
         }
     </script>
@@ -186,7 +186,7 @@ DAILY_CHECK_HTML = """
         // 2. State Management (Refactored 1: Consolidated State)
         const state = {
             config: {},
-            results: {},
+            results: {}, // { uid: { ox: 'OK'|'NG', value: string|null } }
             currentLine: "1 LINE",
             currentDate: "",
             signature: null,
@@ -194,7 +194,6 @@ DAILY_CHECK_HTML = """
             // Numpad state
             numpad: {
                 targetId: null,
-                type: null,
                 value: ""
             }
         };
@@ -225,35 +224,61 @@ DAILY_CHECK_HTML = """
             }
         };
 
+        // 3.5 Data Manager (New Layer for Data Consistency)
+        const dataMgr = {
+            ensure(uid) {
+                if (!state.results[uid] || typeof state.results[uid] !== 'object') {
+                    state.results[uid] = { ox: null, value: null };
+                }
+                return state.results[uid];
+            },
+            setOX(uid, ox) {
+                this.ensure(uid).ox = ox;
+            },
+            setValue(uid, val) {
+                this.ensure(uid).value = val;
+            },
+            getOX(uid) {
+                return state.results[uid]?.ox || null;
+            },
+            getValue(uid) {
+                return state.results[uid]?.value || null;
+            }
+        };
+
         // 4. Render Control (Refactored 3: Separated Item Rendering)
         const renderControl = {
-            OX(uid, value) {
+            OX(uid, item) {
+                const ox = dataMgr.getOX(uid);
                 const btn = (type, v) => `px-4 py-2 rounded-lg font-bold text-xs border ${v === type ? (type === 'OK' ? 'bg-green-500 text-white' : 'bg-red-500 text-white') : 'bg-white'}`;
                 return `
                     <div class="flex gap-2">
-                        <button onclick="actions.setResult('${uid}','OK')" class="${btn('OK', value)}">OK</button>
-                        <button onclick="actions.setResult('${uid}','NG')" class="${btn('NG', value)}">NG</button>
+                        <button onclick="actions.setOK('${uid}')" class="${btn('OK', ox)}">OK</button>
+                        <button onclick="actions.setNG('${uid}')" class="${btn('NG', ox)}">NG</button>
                     </div>
                 `;
             },
-            NUMBER_AND_OX(uid, item, value, num) {
+            NUMBER_AND_OX(uid, item) {
+                const ox = dataMgr.getOX(uid);
+                const val = dataMgr.getValue(uid);
+                
                 const btn = (type, v) => `px-3 py-2 rounded-lg font-bold text-xs border ${v === type ? (type === 'OK' ? 'bg-green-500 text-white' : 'bg-red-500 text-white') : 'bg-white'}`;
-                const isValid = utils.validateStandard(num, item.standard);
+                const isValid = utils.validateStandard(val, item.standard);
                 const inputClass = isValid ? 'bg-slate-50' : 'bg-red-50 text-red-600 animate-pulse';
                 
                 return `
                     <div class="flex items-center gap-2">
-                        <input type="text" readonly value="${num || ''}" onclick="ui.openNumPad('${uid}','num_suffix')" class="w-20 py-2 border rounded-lg text-center font-bold ${inputClass}">
+                        <input type="text" readonly value="${val || ''}" onclick="ui.openNumPad('${uid}')" class="w-20 py-2 border rounded-lg text-center font-bold ${inputClass}">
                         <div class="flex gap-2">
-                            <button onclick="actions.setResult('${uid}','OK')" class="${btn('OK', value)}">O</button>
-                            <button onclick="actions.setResult('${uid}','NG')" class="${btn('NG', value)}">X</button>
+                            <button onclick="actions.setOK('${uid}')" class="${btn('OK', ox)}">O</button>
+                            <button onclick="actions.setNG('${uid}')" class="${btn('NG', ox)}">X</button>
                         </div>
                     </div>
                 `;
             },
-            render(item, uid, value, numValue) {
+            render(item, uid) {
                 const renderFn = this[item.type];
-                return renderFn ? renderFn(uid, item, value, numValue) : '';
+                return renderFn ? renderFn(uid, item) : '';
             }
         };
 
@@ -276,7 +301,6 @@ DAILY_CHECK_HTML = """
                 }
                 return true;
             },
-            // [수정 완료] 불필요한 루프 제거 버전
             calculateSummary() {
                 let total = 0, ok = 0, ng = 0;
                 Object.keys(state.config).forEach(lineName => {
@@ -284,9 +308,9 @@ DAILY_CHECK_HTML = """
                         eq.items.forEach((it, ii) => {
                             total++;
                             const uid = `${lineName}-${ei}-${ii}`;
-                            const v = state.results[uid];
-                            if (v === 'OK') ok++;
-                            if (v === 'NG') ng++;
+                            const ox = dataMgr.getOX(uid);
+                            if (ox === 'OK') ok++;
+                            if (ox === 'NG') ng++;
                         });
                     });
                 });
@@ -327,10 +351,7 @@ DAILY_CHECK_HTML = """
                     
                     eq.items.forEach((it, ii) => {
                         const uid = `${state.currentLine}-${ei}-${ii}`;
-                        const value = state.results[uid];
-                        const numValue = state.results[uid + '_num'];
-                        
-                        const controlHtml = renderControl.render(it, uid, value, numValue);
+                        const controlHtml = renderControl.render(it, uid);
                         
                         const row = document.createElement('div');
                         row.className = "p-5 hover:bg-blue-50/30 transition-colors";
@@ -390,10 +411,9 @@ DAILY_CHECK_HTML = """
                     setTimeout(() => container.removeChild(toast), 300);
                 }, 3000);
             },
-            openNumPad(targetId, type) {
+            openNumPad(targetId) {
                 state.numpad.targetId = targetId;
-                state.numpad.type = type;
-                state.numpad.value = (state.results[type === 'num_suffix' ? targetId + '_num' : targetId] || "").toString();
+                state.numpad.value = (dataMgr.getValue(targetId) || "").toString();
                 
                 utils.qs('#numpad-display').innerText = state.numpad.value;
                 utils.qs('#numpad-modal').classList.remove('hidden');
@@ -433,11 +453,14 @@ DAILY_CHECK_HTML = """
                 ui.renderChecklist();
                 ui.updateSummary();
             },
-            setResult(uid, value) {
-                state.results[uid] = value;
-                actions.saveData();
-                ui.renderChecklist(); // Re-render to update UI state
-                ui.updateSummary();
+            // Replaced generic setResult with setOK / setNG using dataMgr
+            setOK(uid) {
+                dataMgr.setOX(uid, 'OK');
+                actions.saveAndRefresh();
+            },
+            setNG(uid) {
+                dataMgr.setOX(uid, 'NG');
+                actions.saveAndRefresh();
             },
             checkAllGood() {
                 const line = state.currentLine;
@@ -446,26 +469,19 @@ DAILY_CHECK_HTML = """
                 equipments.forEach((eq, ei) => {
                     eq.items.forEach((item, ii) => {
                         const uid = `${line}-${ei}-${ii}`;
-
-                        // NUMBER_AND_OX → OX만 OK 처리
-                        if (item.type === 'NUMBER_AND_OX') {
-                            state.results[uid] = 'OK';
-                        } 
-                        // 일반 OX
-                        else if (item.type === 'OX') {
-                            state.results[uid] = 'OK';
-                        }
+                        // Unified Logic: Just set OX to OK regardless of type
+                        dataMgr.setOX(uid, 'OK');
                     });
                 });
 
-                actions.saveData();
-                ui.renderChecklist();
-                ui.updateSummary();
+                actions.saveAndRefresh();
                 ui.showToast("일괄 합격 처리되었습니다.", "success");
             },
-            saveData() {
+            saveAndRefresh() {
                 if (state.signature) state.results.signature = state.signature;
                 storage.saveResults(state.currentDate, state.results);
+                ui.renderChecklist();
+                ui.updateSummary();
             },
             // Signature Pad Logic
             cvs: null, ctx: null, drawing: false,
@@ -512,7 +528,7 @@ DAILY_CHECK_HTML = """
             },
             saveSignature() {
                 state.signature = this.cvs.toDataURL();
-                actions.saveData();
+                actions.saveAndRefresh();
                 ui.updateSignatureStatus();
                 ui.closeSignatureModal();
             }
@@ -536,13 +552,9 @@ DAILY_CHECK_HTML = """
                 utils.qs('#numpad-display').innerText = state.numpad.value;
             },
             confirm() {
-                const { targetId, type, value } = state.numpad;
-                if (type === 'num_suffix') state.results[targetId + '_num'] = value;
-                else state.results[targetId] = value;
-                
-                actions.saveData();
-                ui.renderChecklist();
-                ui.updateSummary();
+                const { targetId, value } = state.numpad;
+                dataMgr.setValue(targetId, value);
+                actions.saveAndRefresh();
                 ui.closeNumPad();
             }
         };
@@ -553,8 +565,6 @@ DAILY_CHECK_HTML = """
                 ui.showToast("전자 서명을 먼저 해주세요.", "error");
                 return;
             }
-            // ... (Existing PDF logic simplified or kept as is, accessing state.results)
-            // For brevity, using the existing structure but pointing to state.results
             const d = utils.qs('#inputDate').value;
             const { jsPDF } = window.jspdf;
             
@@ -563,7 +573,6 @@ DAILY_CHECK_HTML = """
             document.body.appendChild(container);
 
             try {
-                // ... Header Creation ...
                 function createHeader(showTitle) {
                     const h = document.createElement('div');
                     h.style.cssText = 'padding:20px; border-bottom:2px solid #333; margin-bottom:20px;';
@@ -576,7 +585,6 @@ DAILY_CHECK_HTML = """
                     return h;
                 }
 
-                // ... Card Creation ...
                 const createCard = (l, e, ei) => {
                     const card = document.createElement('div');
                     card.className = "mb-4 border border-slate-200 rounded-lg overflow-hidden shadow-sm bg-white break-inside-avoid";
@@ -584,13 +592,13 @@ DAILY_CHECK_HTML = """
                     
                     e.items.forEach((it, ii) => {
                         const uid = `${l}-${ei}-${ii}`;
-                        const v = state.results[uid];
-                        const nv = state.results[uid + '_num'];
+                        const ox = dataMgr.getOX(uid);
+                        const val = dataMgr.getValue(uid);
                         let r = `<span class="text-slate-300">-</span>`;
-                        const displayVal = nv ? `<span class="mr-2 font-mono font-bold text-xs">${nv} ${it.unit||''}</span>` : '';
+                        const displayVal = val ? `<span class="mr-2 font-mono font-bold text-xs">${val} ${it.unit||''}</span>` : '';
                         
-                        if (v === 'OK') r = `${displayVal}<span class="font-bold text-green-600">합격</span>`;
-                        else if (v === 'NG') r = `${displayVal}<span class="font-bold text-red-600">불합격</span>`;
+                        if (ox === 'OK') r = `${displayVal}<span class="font-bold text-green-600">합격</span>`;
+                        else if (ox === 'NG') r = `${displayVal}<span class="font-bold text-red-600">불합격</span>`;
                         
                         h += `<tr class="border-t border-slate-50"><td class="px-4 py-2"><div class="font-bold text-slate-700">${it.name}</div><div class="text-[10px] text-slate-400">${it.content}</div></td><td class="px-4 py-2 text-slate-500">${it.standard}</td><td class="px-4 py-2 text-right">${r}</td></tr>`;
                     });
@@ -599,7 +607,6 @@ DAILY_CHECK_HTML = """
                     return card;
                 };
 
-                // ... Pagination Logic (Simplified) ...
                 let pageDiv = document.createElement('div');
                 Object.assign(pageDiv.style, { width: '794px', height: '1123px', padding: '40px', background: 'white', boxSizing: 'border-box', position: 'relative', marginBottom: '20px' });
                 
