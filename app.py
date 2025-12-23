@@ -21,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (수치 검증 및 서명 강제 적용)
+# [핵심] SMT 일일점검표 HTML 코드 (날짜 버그 수정 및 상태 유지)
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -82,6 +82,7 @@ DAILY_CHECK_HTML = """
                     <i data-lucide="check-check" class="w-4 h-4 mr-1"></i><span class="text-sm font-bold hidden sm:inline">일괄합격</span>
                 </button>
                 <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer group relative">
+                    <!-- 날짜 입력 필드 -->
                     <input type="date" id="inputDate" class="bg-transparent border-none text-sm text-slate-200 focus:ring-0 p-0 cursor-pointer font-mono w-24 sm:w-auto font-bold z-10" onchange="actions.handleDateChange(this.value)">
                 </div>
                 <button onclick="ui.openSignatureModal()" class="flex items-center bg-slate-800 hover:bg-slate-700 rounded-lg px-3 py-1.5 border border-slate-700 transition-colors" id="btn-signature">
@@ -142,6 +143,7 @@ DAILY_CHECK_HTML = """
 
     <script>
         const DATA_PREFIX = "SMT_DATA_V3_";
+        const LAST_DATE_KEY = "SMT_DATA_LAST_DATE"; // 마지막 선택 날짜 저장 키
         const CONFIG_KEY = "SMT_CONFIG_V6.1_SYNTAX_FIXED";
         const defaultLineData = {
             "1 LINE": [
@@ -471,11 +473,21 @@ DAILY_CHECK_HTML = """
 
         const actions = {
             init() {
-                const today = new Date().toISOString().split('T')[0];
-                utils.qs('#inputDate').value = today;
+                // [Fix 1] 한국 시간(KST) 및 로컬 날짜 생성 (UTC 문제 해결)
+                const d = new Date();
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                const today = `${year}-${month}-${day}`;
+                
+                // [Fix 2] 마지막으로 선택한 날짜 불러오기 (새로고침 시 리셋 방지)
+                const savedDate = localStorage.getItem(LAST_DATE_KEY);
+                const initDate = savedDate || today;
+
+                utils.qs('#inputDate').value = initDate;
                 
                 state.config = storage.loadConfig();
-                actions.handleDateChange(today);
+                actions.handleDateChange(initDate);
                 
                 ui.renderTabs();
                 actions.initSignaturePad();
@@ -509,6 +521,14 @@ DAILY_CHECK_HTML = """
                 });
             },
             handleDateChange(date) {
+                // [Fix 3] 프로그램적으로 호출되었을 때 인풋 값 동기화
+                if(utils.qs('#inputDate').value !== date) {
+                    utils.qs('#inputDate').value = date;
+                }
+                
+                // [Fix 4] 마지막 선택 날짜 저장
+                localStorage.setItem(LAST_DATE_KEY, date);
+
                 state.currentDate = date;
                 state.results = storage.loadResults(date);
                 state.signature = state.results.signature || null;
