@@ -440,16 +440,24 @@ DAILY_CHECK_HTML = """
                 ui.updateSummary();
             },
             checkAllGood() {
-                const equipments = state.config[state.currentLine] || [];
+                const line = state.currentLine;
+                const equipments = state.config[line] || [];
+
                 equipments.forEach((eq, ei) => {
-                    eq.items.forEach((it, ii) => {
-                        const uid = `${state.currentLine}-${ei}-${ii}`;
-                        state.results[uid] = 'OK';
-                        if (it.type === 'NUMBER_AND_OX' && !state.results[uid + '_num']) {
-                            // Optional: auto-fill standard value if needed, currently skipping
+                    eq.items.forEach((item, ii) => {
+                        const uid = `${line}-${ei}-${ii}`;
+
+                        // NUMBER_AND_OX → OX만 OK 처리
+                        if (item.type === 'NUMBER_AND_OX') {
+                            state.results[uid] = 'OK';
+                        } 
+                        // 일반 OX
+                        else if (item.type === 'OX') {
+                            state.results[uid] = 'OK';
                         }
                     });
                 });
+
                 actions.saveData();
                 ui.renderChecklist();
                 ui.updateSummary();
