@@ -21,7 +21,7 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (데이터 구조 리팩토링 버전)
+# [핵심] SMT 일일점검표 HTML 코드 (최종 구조 개선 버전)
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -41,7 +41,7 @@ DAILY_CHECK_HTML = """
     
     <script>
         tailwind.config = {
-            safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200', 'bg-green-500', 'bg-red-500', 'bg-white'],
+            safelist: ['text-red-500', 'text-blue-500', 'text-green-500', 'bg-red-50', 'border-red-500', 'ring-red-200', 'bg-green-500', 'bg-red-500', 'bg-white', 'border-green-500'],
             theme: { extend: { colors: { brand: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 900: '#1e3a8a' } }, fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] } } }
         }
     </script>
@@ -59,6 +59,16 @@ DAILY_CHECK_HTML = """
         #progress-circle { transition: stroke-dashoffset 0.5s ease-out, color 0.5s ease; }
         input[type="date"] { position: relative; }
         input[type="date"]::-webkit-calendar-picker-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; color: transparent; background: transparent; cursor: pointer; }
+        
+        /* 성능 최적화를 위한 상태 클래스 정의 */
+        .ox-btn { transition: all 0.2s; }
+        .ox-btn.active[data-ox="OK"] { background-color: #22c55e; color: white; border-color: #22c55e; }
+        .ox-btn.active[data-ox="NG"] { background-color: #ef4444; color: white; border-color: #ef4444; }
+        .ox-btn:not(.active) { background-color: white; color: #334155; border-color: #e2e8f0; }
+        
+        .num-input { transition: all 0.2s; }
+        .num-input.error { background-color: #fef2f2; color: #dc2626; border-color: #fecaca; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
     </style>
 </head>
 <body class="h-screen flex flex-col text-slate-800 overflow-hidden">
@@ -186,7 +196,7 @@ DAILY_CHECK_HTML = """
         // 2. State Management (Refactored 1: Consolidated State)
         const state = {
             config: {},
-            results: {}, // { uid: { ox: 'OK'|'NG', value: string|null } }
+            results: {}, // 구조: { [uid]: { ox: 'OK' | 'NG' | null, value: string | null } }
             currentLine: "1 LINE",
             currentDate: "",
             signature: null,
@@ -197,6 +207,39 @@ DAILY_CHECK_HTML = """
                 value: ""
             }
         };
+
+        // 2.5 Migration Logic (Critical for Old Data)
+        function migrateOldResults(oldResults) {
+            const migrated = {};
+            Object.entries(oldResults || {}).forEach(([key, val]) => {
+                if(key === 'signature') return;
+                // 이미 새 구조인 경우
+                if (val && typeof val === 'object' && 'ox' in val) {
+                    migrated[key] = val;
+                    return;
+                }
+                // 구 구조 변환
+                if (val === 'OK' || val === 'NG') {
+                    migrated[key] = { ox: val, value: null };
+                } else if (typeof val === 'string' || typeof val === 'number') {
+                    // 키가 _num으로 끝나는 경우 처리 필요하지만, 
+                    // 여기선 기본적으로 단순 값은 value로, 판정은 ox로 넣어야 함.
+                    // 복잡성을 피하기 위해 단순 할당은 지양하고, 기존 데이터 로드시 
+                    // 키 매칭을 통해 재구성하는 것이 안전하나, 
+                    // 여기서는 가장 일반적인 케이스(OX 판정)만 복구합니다.
+                    if(!key.endsWith('_num')) migrated[key] = { ox: null, value: val }; 
+                }
+            });
+            // 숫자값 별도 병합 (_num 접미사 처리)
+            Object.entries(oldResults || {}).forEach(([key, val]) => {
+                if (key.endsWith('_num')) {
+                    const originalKey = key.replace('_num', '');
+                    if (!migrated[originalKey]) migrated[originalKey] = { ox: null, value: null };
+                    migrated[originalKey].value = val;
+                }
+            });
+            return migrated;
+        }
 
         // 3. Storage Abstraction (Refactored 2: Unified Storage Access)
         const storage = {
@@ -210,7 +253,11 @@ DAILY_CHECK_HTML = """
             },
             loadResults(date) {
                 try {
-                    return JSON.parse(localStorage.getItem(DATA_PREFIX + date)) || {};
+                    const raw = JSON.parse(localStorage.getItem(DATA_PREFIX + date)) || {};
+                    const signature = raw.signature;
+                    const migrated = migrateOldResults(raw);
+                    migrated.signature = signature;
+                    return migrated;
                 } catch {
                     return {};
                 }
@@ -224,7 +271,7 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 3.5 Data Manager (New Layer for Data Consistency)
+        // 3.5 Data Manager (Centralized Data Access)
         const dataMgr = {
             ensure(uid) {
                 if (!state.results[uid] || typeof state.results[uid] !== 'object') {
@@ -246,45 +293,52 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 4. Render Control (Refactored 3: Separated Item Rendering)
+        // 4. Render Control (Event Delegation Friendly)
         const renderControl = {
-            OX(uid, item) {
+            OX(uid) {
                 const ox = dataMgr.getOX(uid);
-                const btn = (type, v) => `px-4 py-2 rounded-lg font-bold text-xs border ${v === type ? (type === 'OK' ? 'bg-green-500 text-white' : 'bg-red-500 text-white') : 'bg-white'}`;
+                const activeClass = (type) => ox === type ? 'active' : '';
                 return `
                     <div class="flex gap-2">
-                        <button onclick="actions.setOK('${uid}')" class="${btn('OK', ox)}">OK</button>
-                        <button onclick="actions.setNG('${uid}')" class="${btn('NG', ox)}">NG</button>
+                        <button class="ox-btn px-4 py-2 rounded-lg font-bold text-xs border ${activeClass('OK')}" 
+                                data-uid="${uid}" data-ox="OK">OK</button>
+                        <button class="ox-btn px-4 py-2 rounded-lg font-bold text-xs border ${activeClass('NG')}" 
+                                data-uid="${uid}" data-ox="NG">NG</button>
                     </div>
                 `;
             },
             NUMBER_AND_OX(uid, item) {
                 const ox = dataMgr.getOX(uid);
                 const val = dataMgr.getValue(uid);
-                
-                const btn = (type, v) => `px-3 py-2 rounded-lg font-bold text-xs border ${v === type ? (type === 'OK' ? 'bg-green-500 text-white' : 'bg-red-500 text-white') : 'bg-white'}`;
+                const activeClass = (type) => ox === type ? 'active' : '';
                 const isValid = utils.validateStandard(val, item.standard);
-                const inputClass = isValid ? 'bg-slate-50' : 'bg-red-50 text-red-600 animate-pulse';
+                const inputClass = isValid ? 'bg-slate-50' : 'bg-red-50 text-red-600 error';
                 
                 return `
                     <div class="flex items-center gap-2">
-                        <input type="text" readonly value="${val || ''}" onclick="ui.openNumPad('${uid}')" class="w-20 py-2 border rounded-lg text-center font-bold ${inputClass}">
+                        <input type="text" readonly value="${val || ''}" 
+                               class="num-input w-20 py-2 border rounded-lg text-center font-bold ${inputClass}"
+                               data-uid="${uid}">
                         <div class="flex gap-2">
-                            <button onclick="actions.setOK('${uid}')" class="${btn('OK', ox)}">O</button>
-                            <button onclick="actions.setNG('${uid}')" class="${btn('NG', ox)}">X</button>
+                            <button class="ox-btn px-3 py-2 rounded-lg font-bold text-xs border ${activeClass('OK')}" 
+                                    data-uid="${uid}" data-ox="OK">O</button>
+                            <button class="ox-btn px-3 py-2 rounded-lg font-bold text-xs border ${activeClass('NG')}" 
+                                    data-uid="${uid}" data-ox="NG">X</button>
                         </div>
                     </div>
                 `;
             },
             render(item, uid) {
-                const renderFn = this[item.type];
-                return renderFn ? renderFn(uid, item) : '';
+                if (item.type === 'OX') return this.OX(uid);
+                if (item.type === 'NUMBER_AND_OX') return this.NUMBER_AND_OX(uid, item);
+                return '';
             }
         };
 
         // 5. Utility Functions
         const utils = {
             qs: (selector) => document.querySelector(selector),
+            qsa: (selector) => document.querySelectorAll(selector),
             validateStandard(v, s) {
                 if (!v) return true;
                 const val = parseFloat(v.replace(/[^0-9.-]/g, ''));
@@ -318,7 +372,7 @@ DAILY_CHECK_HTML = """
             }
         };
 
-        // 6. UI Rendering Functions (Refactored 4: View only)
+        // 6. UI Rendering Functions
         const ui = {
             renderTabs() {
                 const container = utils.qs('#lineTabs');
@@ -331,7 +385,7 @@ DAILY_CHECK_HTML = """
                     b.onclick = () => {
                         state.currentLine = l;
                         ui.renderTabs();
-                        ui.renderChecklist();
+                        ui.renderChecklist(); // Tab change still requires full render
                     };
                     container.appendChild(b);
                 });
@@ -380,6 +434,39 @@ DAILY_CHECK_HTML = """
                 const percent = total === 0 ? 0 : Math.round(((ok + ng) / total) * 100);
                 utils.qs('#progress-text').innerText = `${percent}%`;
                 utils.qs('#progress-circle').style.strokeDashoffset = 100 - percent;
+            },
+            // [NEW] Partial DOM Update for Performance
+            updateOXUI(uid) {
+                const ox = dataMgr.getOX(uid);
+                const buttons = utils.qsa(`.ox-btn[data-uid="${uid}"]`);
+                buttons.forEach(btn => {
+                    const isSelected = btn.dataset.ox === ox;
+                    if (isSelected) btn.classList.add('active');
+                    else btn.classList.remove('active');
+                });
+            },
+            updateNumUI(uid, value) {
+                const input = utils.qs(`.num-input[data-uid="${uid}"]`);
+                if(input) {
+                    input.value = value;
+                    // Re-validate visual feedback
+                    // Finding the item config is tricky here without context, 
+                    // but we can skip style update for now or lookup config.
+                    // For performance, we assume standard validation logic in input class handled by render is sufficient for init,
+                    // but real-time validation needs config.
+                    // Let's find item:
+                    const [l, ei, ii] = uid.split('-');
+                    const item = state.config[l][ei].items[ii];
+                    const isValid = utils.validateStandard(value, item.standard);
+                    
+                    if(isValid) {
+                        input.classList.remove('bg-red-50', 'text-red-600', 'error');
+                        input.classList.add('bg-slate-50');
+                    } else {
+                        input.classList.remove('bg-slate-50');
+                        input.classList.add('bg-red-50', 'text-red-600', 'error');
+                    }
+                }
             },
             updateSignatureStatus() {
                 const btn = utils.qs('#btn-signature');
@@ -443,6 +530,25 @@ DAILY_CHECK_HTML = """
                 
                 ui.renderTabs();
                 actions.initSignaturePad();
+                actions.setupDelegation();
+            },
+            setupDelegation() {
+                document.addEventListener('click', (e) => {
+                    // OX Button Click
+                    if (e.target.classList.contains('ox-btn')) {
+                        const uid = e.target.dataset.uid;
+                        const ox = e.target.dataset.ox;
+                        dataMgr.setOX(uid, ox);
+                        ui.updateOXUI(uid);
+                        actions.saveOnly();
+                        ui.updateSummary();
+                    }
+                    // Num Input Click
+                    if (e.target.classList.contains('num-input')) {
+                        const uid = e.target.dataset.uid;
+                        ui.openNumPad(uid);
+                    }
+                });
             },
             handleDateChange(date) {
                 state.currentDate = date;
@@ -453,15 +559,6 @@ DAILY_CHECK_HTML = """
                 ui.renderChecklist();
                 ui.updateSummary();
             },
-            // Replaced generic setResult with setOK / setNG using dataMgr
-            setOK(uid) {
-                dataMgr.setOX(uid, 'OK');
-                actions.saveAndRefresh();
-            },
-            setNG(uid) {
-                dataMgr.setOX(uid, 'NG');
-                actions.saveAndRefresh();
-            },
             checkAllGood() {
                 const line = state.currentLine;
                 const equipments = state.config[line] || [];
@@ -469,19 +566,18 @@ DAILY_CHECK_HTML = """
                 equipments.forEach((eq, ei) => {
                     eq.items.forEach((item, ii) => {
                         const uid = `${line}-${ei}-${ii}`;
-                        // Unified Logic: Just set OX to OK regardless of type
                         dataMgr.setOX(uid, 'OK');
+                        ui.updateOXUI(uid); // Direct DOM update
                     });
                 });
 
-                actions.saveAndRefresh();
+                actions.saveOnly();
+                ui.updateSummary();
                 ui.showToast("일괄 합격 처리되었습니다.", "success");
             },
-            saveAndRefresh() {
+            saveOnly() {
                 if (state.signature) state.results.signature = state.signature;
                 storage.saveResults(state.currentDate, state.results);
-                ui.renderChecklist();
-                ui.updateSummary();
             },
             // Signature Pad Logic
             cvs: null, ctx: null, drawing: false,
@@ -528,7 +624,7 @@ DAILY_CHECK_HTML = """
             },
             saveSignature() {
                 state.signature = this.cvs.toDataURL();
-                actions.saveAndRefresh();
+                actions.saveOnly();
                 ui.updateSignatureStatus();
                 ui.closeSignatureModal();
             }
@@ -554,12 +650,13 @@ DAILY_CHECK_HTML = """
             confirm() {
                 const { targetId, value } = state.numpad;
                 dataMgr.setValue(targetId, value);
-                actions.saveAndRefresh();
+                actions.saveOnly();
+                ui.updateNumUI(targetId, value);
                 ui.closeNumPad();
             }
         };
 
-        // 8. PDF Export (Legacy Logic wrapped)
+        // 8. PDF Export (Adapted for New Data Structure)
         window.saveAndDownloadPDF = async function() {
             if (!state.signature) {
                 ui.showToast("전자 서명을 먼저 해주세요.", "error");
@@ -592,13 +689,16 @@ DAILY_CHECK_HTML = """
                     
                     e.items.forEach((it, ii) => {
                         const uid = `${l}-${ei}-${ii}`;
+                        // New Data Access
                         const ox = dataMgr.getOX(uid);
                         const val = dataMgr.getValue(uid);
+                        
                         let r = `<span class="text-slate-300">-</span>`;
                         const displayVal = val ? `<span class="mr-2 font-mono font-bold text-xs">${val} ${it.unit||''}</span>` : '';
                         
                         if (ox === 'OK') r = `${displayVal}<span class="font-bold text-green-600">합격</span>`;
                         else if (ox === 'NG') r = `${displayVal}<span class="font-bold text-red-600">불합격</span>`;
+                        else if (val) r = `${displayVal}<span class="text-slate-500">입력됨</span>`;
                         
                         h += `<tr class="border-t border-slate-50"><td class="px-4 py-2"><div class="font-bold text-slate-700">${it.name}</div><div class="text-[10px] text-slate-400">${it.content}</div></td><td class="px-4 py-2 text-slate-500">${it.standard}</td><td class="px-4 py-2 text-right">${r}</td></tr>`;
                     });
@@ -613,7 +713,7 @@ DAILY_CHECK_HTML = """
                 pageDiv.appendChild(createHeader(true));
                 container.appendChild(pageDiv);
                 
-                let currentH = 150; // Approx header height
+                let currentH = 150; 
                 const PAGE_H = 1123, MARGIN = 40;
                 let pageList = [pageDiv];
 
