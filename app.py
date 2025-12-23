@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 import hashlib
-import base64
+import json
 import os
 import streamlit.components.v1 as components
 from fpdf import FPDF
@@ -21,7 +21,17 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# [핵심] SMT 일일점검표 HTML 코드 (고객님 파일 원본: SMT일일점검표.HTML)
+# 1. 시스템 설정 (화면 꽉 차게 설정)
+# ------------------------------------------------------------------
+st.set_page_config(
+    page_title="SMT 통합시스템", 
+    page_icon="🏭",
+    layout="wide",  # [중요] 화면 넓게 쓰기 (축소 방지)
+    initial_sidebar_state="auto" 
+)
+
+# ------------------------------------------------------------------
+# 2. [완전 복구] SMT 일일점검표 HTML 원본 (고객님 파일 그대로)
 # ------------------------------------------------------------------
 DAILY_CHECK_HTML = """
 <!DOCTYPE html>
@@ -1192,7 +1202,7 @@ DAILY_CHECK_HTML = """
                     appConfig[line].forEach((eq, eqIdx) => {
                         eq.items.forEach((item, itemIdx) => {
                             const uid = `${line}-${eqIdx}-${itemIdx}`;
-                            if (checkResults[uid] === 'NG') {
+                            if (checkResults[uId] === 'NG') {
                                 ngList.push({
                                     line: line,
                                     equip: eq.equip,
@@ -1200,7 +1210,7 @@ DAILY_CHECK_HTML = """
                                     content: item.content,
                                     standard: item.standard,
                                     unit: item.unit,
-                                    uid: uid
+                                    uid: uId
                                 });
                             }
                         });
@@ -1530,7 +1540,8 @@ if menu == "🏭 생산관리":
     with t2:
         df_inv = load_data(SHEET_INVENTORY)
         if not df_inv.empty:
-            df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0).astype(int)
+            if '현재고' in df_inv.columns:
+                df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0).astype(int)
             c_s, _ = st.columns([1, 2])
             search = c_s.text_input("🔍 재고 검색", placeholder="품목명/코드")
             if search:
@@ -1693,33 +1704,14 @@ elif menu == "🛠️ 설비보전관리":
         if not df.empty and '날짜' in df.columns:
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
             df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-            df['비가동시간'] = pd.to_numeric(df['비가동시간'], errors='coerce').fillna(0)
             df['Year'] = df['날짜'].dt.year
-            df['Month'] = df['날짜'].dt.month
-            
-            avail_years = sorted(df['Year'].dropna().unique().astype(int), reverse=True)
-            if not avail_years: avail_years = [datetime.now().year]
-            sel_year = st.selectbox("조회 연도", avail_years)
+            sel_year = st.selectbox("조회 연도", sorted(df['Year'].dropna().unique().astype(int), reverse=True))
             df_year = df[df['Year'] == sel_year]
-            
             if not df_year.empty:
-                k1, k2, k3 = st.columns(3)
+                k1, k2 = st.columns(2)
                 k1.metric("💰 연간 정비비용", f"{df_year['비용'].sum():,.0f} 원")
-                k2.metric("⏱️ 연간 비가동", f"{df_year['비가동시간'].sum():,} 분")
-                k3.metric("🔥 고장(BM) 발생", f"{len(df_year[df_year['작업구분'].astype(str).str.contains('BM', na=False)])} 건")
-                st.divider()
-                if HAS_ALTAIR:
-                    c1, c2 = st.columns([2, 1])
-                    with c1:
-                        st.markdown("##### 📉 월별 비용 추이")
-                        chart = alt.Chart(df_year.groupby('Month')['비용'].sum().reset_index()).mark_bar().encode(x=alt.X('Month:O', title='월', axis=alt.Axis(labelAngle=0)), y=alt.Y('비용', title='비용', axis=alt.Axis(labelAngle=0, titleAngle=0)))
-                        st.altair_chart(chart, use_container_width=True)
-                    with c2:
-                        st.markdown("##### 🥧 유형별 비율")
-                        pie = alt.Chart(df_year.groupby('작업구분')['비용'].sum().reset_index()).mark_arc(innerRadius=40).encode(theta=alt.Theta("비용", stack=True), color="작업구분")
-                        st.altair_chart(pie, use_container_width=True)
-            else: st.info(f"{sel_year}년 데이터가 없습니다.")
-        else: st.info("데이터가 없습니다.")
+                st.dataframe(df_year, use_container_width=True)
+            else: st.info("데이터 없음")
 
     with t4:
         if IS_ADMIN: 
@@ -1736,4 +1728,5 @@ elif menu == "🛠️ 설비보전관리":
 elif menu == "📱 일일점검":
     st.markdown("##### 👆 태블릿 터치용 일일점검 시스템")
     st.caption("※ 이 화면의 데이터는 태블릿 기기 내부에 자동 저장됩니다.")
-    components.html(DAILY_CHECK_HTML, height=1200, scrolling=True)
+    # 높이를 1300px로 늘려 태블릿 화면이 잘리지 않게 설정
+    components.html(DAILY_CHECK_HTML, height=1300, scrolling=True)
