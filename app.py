@@ -214,64 +214,76 @@ def get_daily_check_master_data():
         save_data(df, SHEET_CHECK_MASTER)
     return df
 
-def generate_daily_check_pdf(date_str, line_filter):
-    # 1. 마스터 데이터(전체 항목) 로드
+# [수정] PDF 전체 출력 로직
+def generate_all_daily_check_pdf(date_str):
+    # 1. 마스터 데이터(전체 항목) 로드 및 정렬 유지
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    df_m = df_m[df_m['line'] == line_filter]
     
     # 2. 결과 데이터 로드
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    df_r = df_r[(df_r['date'] == date_str) & (df_r['line'] == line_filter)]
+    df_r = df_r[df_r['date'] == date_str]
     
     # 3. 최신 결과만 남기기
     if not df_r.empty:
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-    # 4. 병합
-    df_final = pd.merge(df_m, df_r, on=['line', 'equip_id', 'item_name'], how='left')
-    df_final['value'] = df_final['value'].fillna('-')
-    df_final['ox'] = df_final['ox'].fillna('-')
-    df_final['checker'] = df_final['checker'].fillna('')
-
     # PDF 생성
     pdf = FPDF()
-    pdf.add_page()
-    
     font_path = 'NanumGothic.ttf' 
     if not os.path.exists(font_path): font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
     try:
         pdf.add_font('Korean', '', font_path, uni=True)
-        pdf.set_font('Korean', '', 16)
     except:
-        pdf.set_font('Arial', '', 16)
+        pass # 폰트 없으면 기본 폰트(한글 깨짐 주의)
 
-    pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
-    pdf.set_font_size(10)
-    pdf.cell(0, 10, f"Line: {line_filter}", ln=True)
-    pdf.ln(5)
+    # 마스터 데이터의 Line 순서대로 반복 (정렬 유지)
+    lines = df_m['line'].unique()
+    
+    for line in lines:
+        pdf.add_page()
+        
+        # 폰트 설정
+        try: pdf.set_font('Korean', '', 16)
+        except: pdf.set_font('Arial', '', 16)
+        
+        pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
+        pdf.set_font_size(12)
+        pdf.cell(0, 10, f"Line: {line}", ln=True)
+        pdf.ln(5)
 
-    pdf.set_fill_color(240, 240, 240)
-    pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
-    pdf.cell(60, 8, "점검항목", 1, 0, 'C', 1)
-    pdf.cell(30, 8, "측정값", 1, 0, 'C', 1)
-    pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
-    pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
+        # 헤더
+        pdf.set_font_size(10)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
+        pdf.cell(60, 8, "점검항목", 1, 0, 'C', 1)
+        pdf.cell(30, 8, "측정값", 1, 0, 'C', 1)
+        pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
+        pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
 
-    for _, row in df_final.iterrows():
-        equip_name = str(row['equip_name'])
-        if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
+        # 해당 라인 데이터 필터링
+        line_master = df_m[df_m['line'] == line]
         
-        pdf.cell(40, 8, equip_name, 1)
-        pdf.cell(60, 8, str(row['item_name']), 1)
-        pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
-        
-        ox = str(row['ox'])
-        if ox == 'NG': pdf.set_text_color(255, 0, 0)
-        else: pdf.set_text_color(0, 0, 0)
-        pdf.cell(20, 8, ox, 1, 0, 'C')
-        pdf.set_text_color(0, 0, 0)
-        
-        pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
+        # 병합 (Master 기준 Left Join -> 순서 유지됨)
+        df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
+        df_final['value'] = df_final['value'].fillna('-')
+        df_final['ox'] = df_final['ox'].fillna('-')
+        df_final['checker'] = df_final['checker'].fillna('')
+
+        for _, row in df_final.iterrows():
+            equip_name = str(row['equip_name'])
+            if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
+            
+            pdf.cell(40, 8, equip_name, 1)
+            pdf.cell(60, 8, str(row['item_name']), 1)
+            pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
+            
+            ox = str(row['ox'])
+            if ox == 'NG': pdf.set_text_color(255, 0, 0)
+            else: pdf.set_text_color(0, 0, 0)
+            pdf.cell(20, 8, ox, 1, 0, 'C')
+            pdf.set_text_color(0, 0, 0)
+            
+            pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
     return pdf.output(dest='S').encode('latin-1')
 
@@ -523,41 +535,13 @@ elif menu == "🛠 설비보전관리":
                 c = alt.Chart(df).mark_bar().encode(x='작업구분', y='비용', color='작업구분').interactive()
                 st.altair_chart(c, use_container_width=True)
 
-# [4] 일일점검관리 (Streamlit Native UI로 전면 교체)
+# [4] 일일점검관리
 elif menu == "✅ 일일점검관리":
-    tab1, tab2, tab3 = st.tabs(["📊 점검 현황", "📄 점검 이력 / PDF", "✍ 점검 입력 (Native)"])
+    # [수정] 탭 순서 변경 (입력 -> 현황 -> 이력/PDF)
+    tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
+    # 1. 점검 입력 (Native)
     with tab1:
-        st.markdown("##### 오늘의 점검 현황")
-        today = datetime.now().strftime("%Y-%m-%d")
-        df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-        df_today = df_res[df_res['date'] == today] if not df_res.empty else pd.DataFrame()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("대상 라인", "2개 라인") 
-        c2.metric("금일 점검 항목 수", f"{len(df_today)} 건")
-        ng_today = df_today[df_today['ox']=='NG'] if not df_today.empty else pd.DataFrame()
-        c3.metric("NG 발견", f"{len(ng_today)} 건")
-
-        if not ng_today.empty:
-            st.error("🚨 금일 NG 발생 항목")
-            st.dataframe(ng_today)
-        else: st.info("오늘 점검 데이터가 아직 없습니다.")
-
-    with tab2:
-        c1, c2 = st.columns([1, 2])
-        search_date = c1.date_input("조회 날짜", datetime.now())
-        search_line = c2.selectbox("라인 선택", ["1 LINE", "2 LINE", "AOI", "수삽 LINE", "MASK 세척기", "SOLDER 보관온도", "온,습도 CHECK", "인두기 CHECK"])
-        
-        if st.button("조회 및 PDF 생성"):
-            pdf_bytes = generate_daily_check_pdf(str(search_date), search_line)
-            if pdf_bytes:
-                st.download_button("📄 PDF 다운로드 (전체항목)", pdf_bytes, file_name=f"DailyCheck_{search_date}_{search_line}.pdf", mime='application/pdf')
-            else:
-                st.warning("데이터가 없습니다.")
-
-    # [수정된 부분] Native Streamlit 입력 화면
-    with tab3:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
         # 1. 설정 선택
@@ -565,57 +549,47 @@ elif menu == "✅ 일일점검관리":
         sel_line = c_l.selectbox("점검 라인 선택", ["1 LINE", "2 LINE", "AOI", "수삽 LINE", "MASK 세척기", "SOLDER 보관온도", "온,습도 CHECK", "인두기 CHECK"], key="chk_line")
         sel_date = c_d.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        # 2. 마스터 데이터 및 기존 결과 로드
+        # 2. 마스터 데이터 로드 (정렬 유지: sort=False가 중요하지 않음, 기본적으로 로드 순서임. 그룹핑때 sort=False 필수)
         df_master = get_daily_check_master_data()
         df_master = df_master[df_master['line'] == sel_line]
         
-        # 기존 결과 로드 (있으면 값 채우기 위함)
+        # 기존 결과 로드
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         prev_data = {}
         if not df_res.empty:
             df_filtered = df_res[(df_res['date'] == str(sel_date)) & (df_res['line'] == sel_line)]
             for _, r in df_filtered.iterrows():
-                # Key: Equip_Item
                 key = f"{r['equip_id']}_{r['item_name']}"
                 prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
-        # 일괄 합격 처리 로직
+        # 일괄 합격 처리
         if st.button("✅ 일괄 합격 처리 (빈 항목 OK 채우기)"):
             for _, row in df_master.iterrows():
-                k = f"{row['equip_id']}_{row['item_name']}"
-                if k not in st.session_state:
-                    # 세션스테이트 키 형식: check_val_{equip_id}_{item_name}
-                    widget_key = f"check_val_{row['equip_id']}_{row['item_name']}"
-                    # OX 타입만 OK로 강제 설정
-                    if row['check_type'] == 'OX':
-                        st.session_state[widget_key] = "OK"
+                widget_key = f"check_val_{row['equip_id']}_{row['item_name']}"
+                if row['check_type'] == 'OX':
+                    st.session_state[widget_key] = "OK"
             st.rerun()
 
         # 3. 입력 폼 생성
         with st.form("check_form"):
-            # 설비별 그룹핑
-            for equip_name, group in df_master.groupby("equip_name"):
-                st.subheader(f"🛠 {equip_name} ({group.iloc[0]['equip_id']})")
+            # [수정] sort=False로 엑셀 순서 유지
+            for equip_name, group in df_master.groupby("equip_name", sort=False):
+                st.subheader(f"🛠 {equip_name}")
                 
                 for _, row in group.iterrows():
-                    # Unique Key for Widget
                     uid = f"{row['equip_id']}_{row['item_name']}"
                     widget_key = f"check_val_{uid}"
                     
-                    # 초기값 결정
                     default_val = prev_data.get(uid, {}).get('val', None)
-                    default_ox = prev_data.get(uid, {}).get('ox', 'OK') # 기본 OK
                     
                     c1, c2, c3 = st.columns([2, 2, 1])
                     c1.markdown(f"**{row['item_name']}**\n\n<span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
                     
                     with c2:
                         if row['check_type'] == 'OX':
-                            # 라디오 버튼 인덱스 찾기
                             idx = 0 if default_val == "OK" else (1 if default_val == "NG" else 0)
                             st.radio("판정", ["OK", "NG"], key=widget_key, horizontal=True, index=idx, label_visibility="collapsed")
                         else:
-                            # 수치 입력
                             val = float(default_val) if default_val and default_val != '-' else 0.0
                             st.number_input(f"수치 ({row['unit']})", value=val, key=widget_key)
                     
@@ -634,20 +608,17 @@ elif menu == "✅ 일일점검관리":
                     rows_to_save = []
                     ng_list = []
                     
-                    # 폼 데이터 수집
                     for _, row in df_master.iterrows():
                         uid = f"{row['equip_id']}_{row['item_name']}"
                         w_key = f"check_val_{uid}"
                         val = st.session_state.get(w_key)
                         
-                        # OX 판정 로직
                         ox = "OK"
                         final_val = str(val)
                         
                         if row['check_type'] == 'OX':
                             if val == 'NG': ox = 'NG'
                         else:
-                            # 수치 판정
                             try:
                                 num_val = float(val)
                                 min_v = float(row['min_val']) if row['min_val'] else -999999
@@ -662,18 +633,44 @@ elif menu == "✅ 일일점검관리":
                             final_val, ox, signer_name, str(datetime.now())
                         ])
                     
-                    # 저장 실행
                     if rows_to_save:
                         append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                        # 서명 저장 (텍스트 기반)
                         sig_row = [str(sel_date), sel_line, signer_name, "Electronic Signature", str(datetime.now())]
                         append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                        
                         st.success("점검 결과가 저장되었습니다.")
-                        if ng_list:
-                            st.error(f"다음 항목에서 NG가 발생했습니다: {', '.join(ng_list)}")
-                else:
-                    st.warning("성명을 입력하고 확인란에 체크해주세요.")
+                        if ng_list: st.error(f"다음 항목에서 NG가 발생했습니다: {', '.join(ng_list)}")
+                else: st.warning("성명을 입력하고 확인란에 체크해주세요.")
+
+    # 2. 점검 현황
+    with tab2:
+        st.markdown("##### 오늘의 점검 현황")
+        today = datetime.now().strftime("%Y-%m-%d")
+        df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        df_today = df_res[df_res['date'] == today] if not df_res.empty else pd.DataFrame()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("대상 라인", "2개 라인") 
+        c2.metric("금일 점검 항목 수", f"{len(df_today)} 건")
+        ng_today = df_today[df_today['ox']=='NG'] if not df_today.empty else pd.DataFrame()
+        c3.metric("NG 발견", f"{len(ng_today)} 건")
+
+        if not ng_today.empty:
+            st.error("🚨 금일 NG 발생 항목")
+            st.dataframe(ng_today)
+        else: st.info("오늘 점검 데이터가 아직 없습니다.")
+
+    # 3. 이력/PDF (마지막 탭으로 이동)
+    with tab3:
+        c1, c2 = st.columns([1, 2])
+        search_date = c1.date_input("조회 날짜 (PDF출력)", datetime.now())
+        
+        # [수정] 전체 출력 버튼 (라인 선택 없이 날짜 기준 전체)
+        if st.button("📄 해당 날짜 전체 점검 리포트 생성 (PDF)"):
+            pdf_bytes = generate_all_daily_check_pdf(str(search_date))
+            if pdf_bytes:
+                st.download_button("PDF 다운로드", pdf_bytes, file_name=f"DailyCheck_All_{search_date}.pdf", mime='application/pdf')
+            else:
+                st.warning("데이터가 없습니다.")
 
 # [5] 기준정보관리
 elif menu == "⚙ 기준정보관리":
