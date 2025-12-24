@@ -590,18 +590,20 @@ elif menu == "✅ 일일점검관리":
                             idx = 0 if default_val == "OK" else (1 if default_val == "NG" else 0)
                             st.radio("판정", ["OK", "NG"], key=widget_key, horizontal=True, index=idx, label_visibility="collapsed")
                         else:
+                            # [수정] 수치 입력란에 step=0.1을 주어 모바일에서 숫자 키패드 유도 (Float 타입)
                             val = float(default_val) if default_val and default_val != '-' else 0.0
-                            st.number_input(f"수치 ({row['unit']})", value=val, key=widget_key)
+                            st.number_input(f"수치 ({row['unit']})", value=val, step=0.1, key=widget_key)
                     
                     with c3:
                         st.markdown(f"기준: {row['standard']}")
                 st.divider()
             
             # 서명 및 저장
-            st.markdown("#### ✍️ 점검자 서명")
+            st.markdown("#### ✍️ 전자 서명")
+            st.caption("※ 성명을 입력하고 확인란에 체크하면 전자 서명으로 갈음합니다.")
             c_s1, c_s2 = st.columns(2)
-            signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
-            confirm = c_s2.checkbox("위 내용대로 점검하였음을 확인합니다.")
+            signer_name = c_s1.text_input("점검자 성명 (키보드 입력)", value=st.session_state.user_info['name'])
+            confirm = c_s2.checkbox("✅ 위 내용대로 점검하였음을 확인합니다 (마우스 클릭)")
             
             if st.form_submit_button("💾 점검 결과 저장", type="primary", use_container_width=True):
                 if confirm and signer_name:
