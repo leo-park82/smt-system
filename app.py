@@ -61,14 +61,50 @@ COLS_EQUIPMENT = ["id", "name", "func"]
 COLS_CHECK_MASTER = ["line", "equip_id", "equip_name", "item_name", "check_content", "standard", "check_type", "min_val", "max_val", "unit"]
 COLS_CHECK_RESULT = ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp"]
 
-# 초기 마스터 데이터 (시트가 비어있을 경우 사용)
+# [복구] 초기 마스터 데이터 (기존 defaultLineData 내용 전체 이식)
 DEFAULT_CHECK_MASTER = [
-    {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "AIR 압력", "check_content": "게이지 확인", "standard": "0.5 MPa", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
-    {"line": "1 LINE", "equip_id": "HP-520S", "equip_name": "PRINTER", "item_name": "납 도포량", "check_content": "육안 및 SPI", "standard": "정상", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    # 1 LINE
+    {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "AIR 압력", "check_content": "압력 게이지 지침 확인", "standard": "0.5 MPa ± 0.1", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "수/자동 전환", "check_content": "MODE 전환 스위치 작동", "standard": "정상 동작", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "매거진 상태", "check_content": "Locking 마모, 휨, 흔들림", "standard": "마모/휨 없을 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "HP-520S", "equip_name": "SCREEN PRINTER", "item_name": "AIR 압력", "check_content": "압력 게이지 지침 확인", "standard": "0.5 MPa ± 0.1", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "HP-520S", "equip_name": "SCREEN PRINTER", "item_name": "테이블 오염", "check_content": "테이블 위 솔더/이물 청결", "standard": "청결할 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "S2", "equip_name": "CHIP MOUNTER", "item_name": "AIR 압력", "check_content": "메인 공압 게이지 확인", "standard": "5 Kg/cm² ± 0.5", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "S2", "equip_name": "CHIP MOUNTER", "item_name": "필터 및 노즐", "check_content": "Head Air 필터 및 노즐 오염", "standard": "오염 및 변형 없을 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "1 LINE", "equip_id": "1809MK", "equip_name": "REFLOW", "item_name": "N2 PPM", "check_content": "산소 농도 모니터 수치", "standard": "3000 ppm 이하", "check_type": "NUMBER", "min_val": "0", "max_val": "3000", "unit": "ppm"},
+    {"line": "1 LINE", "equip_id": "1809MK", "equip_name": "REFLOW", "item_name": "배기관 OPEN", "check_content": "배기 댐퍼 열림 위치", "standard": "오픈 위치", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    
+    # 2 LINE
+    {"line": "2 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "AIR 압력", "check_content": "게이지 지침 확인", "standard": "0.5 MPa ± 0.1", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "2 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "수/자동 전환", "check_content": "스위치 작동 확인", "standard": "정상 동작", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "2 LINE", "equip_id": "SBSF-200Y", "equip_name": "VACUUM LOADER", "item_name": "PCB 흡착 패드", "check_content": "패드 손상 여부", "standard": "찢어짐 없을 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    
+    # 공통/기타
+    {"line": "AOI", "equip_id": "ZENITH", "equip_name": "AOI 검사", "item_name": "카메라 LED", "check_content": "LED 조명 점등 상태", "standard": "정상 동작", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "AOI", "equip_id": "ZENITH", "equip_name": "AOI 검사", "item_name": "검사 상태", "check_content": "마스터 샘플 검출 여부", "standard": "정상 검사 완료", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    
+    {"line": "수삽 LINE", "equip_id": "SAF-700", "equip_name": "FLUX 도포기", "item_name": "플럭스 노즐", "check_content": "분사 상태 육안 확인", "standard": "육안 확인", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    {"line": "수삽 LINE", "equip_id": "SAS-680L", "equip_name": "자동납땜기", "item_name": "납조 상태", "check_content": "납조 찌꺼기 청결 상태", "standard": "청결", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
+    
+    {"line": "SOLDER 보관온도", "equip_id": "REF-01", "equip_name": "솔더크림 보관고", "item_name": "보관 온도", "check_content": "온도계 지침 확인", "standard": "0~10℃", "check_type": "NUMBER", "min_val": "0", "max_val": "10", "unit": "℃"},
+    {"line": "온,습도 CHECK", "equip_id": "ENV-01", "equip_name": "현장 온습도", "item_name": "실내 온도", "check_content": "온도 관리 기준", "standard": "24±5℃", "check_type": "NUMBER", "min_val": "19", "max_val": "29", "unit": "℃"},
+    {"line": "온,습도 CHECK", "equip_id": "ENV-01", "equip_name": "현장 온습도", "item_name": "실내 습도", "check_content": "습도 관리 기준", "standard": "40~60%", "check_type": "NUMBER", "min_val": "40", "max_val": "60", "unit": "%"}
 ]
+
+# [복구] 초기 설비 리스트
 DEFAULT_EQUIPMENT = [
-    {"id": "CIMON-SMT34", "name": "Loader (SLD-120Y)", "func": "메거진 로딩"},
-    {"id": "CIMON-SMT03", "name": "Screen Printer", "func": "솔더링 설비"}
+    {"id": "SML-120Y", "name": "IN LOADER (1/2 LINE)", "func": "PCB 공급"},
+    {"id": "SBSF-200", "name": "VACUUM LOADER", "func": "PCB 흡착 이송"},
+    {"id": "L5000", "name": "MARKING MACHINE", "func": "PCB 마킹"},
+    {"id": "HP-520S", "name": "SCREEN PRINTER", "func": "솔더 페이스트 도포"},
+    {"id": "TROL-7700EL", "name": "SPI", "func": "솔더 검사"},
+    {"id": "S2", "name": "CHIP MOUNTER (S2)", "func": "부품 실장"},
+    {"id": "L2", "name": "이형 MOUNTER (L2)", "func": "이형 부품 실장"},
+    {"id": "1809MK", "name": "REFLOW OVEN", "func": "솔더링 (경화)"},
+    {"id": "SMU-120Y", "name": "UN LOADER", "func": "PCB 적재"},
+    {"id": "ZENITH", "name": "AOI", "func": "외관 검사"},
+    {"id": "SAF-700", "name": "FLUX SPRAYER", "func": "플럭스 도포"},
+    {"id": "SAS-680L", "name": "WAVE SOLDER", "func": "웨이브 솔더링"}
 ]
 
 # ------------------------------------------------------------------
@@ -147,7 +183,6 @@ def append_rows(rows, sheet_name, cols):
         return True
     return False
 
-# [비즈니스 로직 복구] 재고 업데이트
 def update_inventory(code, name, change, reason, user):
     df = load_data(SHEET_INVENTORY, COLS_INVENTORY)
     if not df.empty:
@@ -170,7 +205,7 @@ def update_inventory(code, name, change, reason, user):
     append_data(hist, SHEET_INV_HISTORY)
 
 # ------------------------------------------------------------------
-# 3. HTML 템플릿 (V4의 경량화된 HTML 유지)
+# 3. HTML 템플릿 (경량화 + 데이터 주입 방식)
 # ------------------------------------------------------------------
 def get_input_html(master_json):
     return f"""
