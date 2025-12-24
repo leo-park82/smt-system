@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components # components 모듈 임포트 추가
 import pandas as pd
 from datetime import datetime, timedelta
 import time
