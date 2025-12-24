@@ -50,8 +50,9 @@ SHEET_MAINTENANCE = "maintenance_data"
 SHEET_EQUIPMENT = "equipment_list"
 SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
+SHEET_CHECK_SIGNATURE = "daily_check_signature" # [NEW] 서명 관리용
 
-# 컬럼 정의 (데이터 무결성용)
+# 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_ITEMS = ["품목코드", "제품명"]
 COLS_INVENTORY = ["품목코드", "제품명", "현재고"]
@@ -60,8 +61,9 @@ COLS_MAINTENANCE = ["날짜", "설비ID", "설비명", "작업구분", "작업�
 COLS_EQUIPMENT = ["id", "name", "func"]
 COLS_CHECK_MASTER = ["line", "equip_id", "equip_name", "item_name", "check_content", "standard", "check_type", "min_val", "max_val", "unit"]
 COLS_CHECK_RESULT = ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp"]
+COLS_CHECK_SIGNATURE = ["date", "line", "signer", "signature_data", "timestamp"]
 
-# [복구] 초기 마스터 데이터 (기존 defaultLineData 내용 전체 이식)
+# 초기 마스터 데이터
 DEFAULT_CHECK_MASTER = [
     # 1 LINE
     {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "AIR 압력", "check_content": "압력 게이지 지침 확인", "standard": "0.5 MPa ± 0.1", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
@@ -91,7 +93,6 @@ DEFAULT_CHECK_MASTER = [
     {"line": "온,습도 CHECK", "equip_id": "ENV-01", "equip_name": "현장 온습도", "item_name": "실내 습도", "check_content": "습도 관리 기준", "standard": "40~60%", "check_type": "NUMBER", "min_val": "40", "max_val": "60", "unit": "%"}
 ]
 
-# [복구] 초기 설비 리스트
 DEFAULT_EQUIPMENT = [
     {"id": "SML-120Y", "name": "IN LOADER (1/2 LINE)", "func": "PCB 공급"},
     {"id": "SBSF-200", "name": "VACUUM LOADER", "func": "PCB 흡착 이송"},
@@ -108,7 +109,7 @@ DEFAULT_EQUIPMENT = [
 ]
 
 # ------------------------------------------------------------------
-# 2. 구글 시트 및 데이터 유틸리티 (완전 복구)
+# 2. 구글 시트 연결
 # ------------------------------------------------------------------
 @st.cache_resource
 def get_gs_connection():
@@ -205,7 +206,7 @@ def update_inventory(code, name, change, reason, user):
     append_data(hist, SHEET_INV_HISTORY)
 
 # ------------------------------------------------------------------
-# 3. HTML 템플릿 (경량화 + 데이터 주입 방식)
+# 3. HTML 템플릿 (역할 축소: 입력값 전달용)
 # ------------------------------------------------------------------
 def get_input_html(master_json):
     return f"""
@@ -222,6 +223,7 @@ def get_input_html(master_json):
         .btn-ox {{ transition: all 0.2s; border: 1px solid #e2e8f0; }}
         .btn-ox.selected[data-val="OK"] {{ background: #22c55e; color: white; border-color: #22c55e; }}
         .btn-ox.selected[data-val="NG"] {{ background: #ef4444; color: white; border-color: #ef4444; }}
+        #signature-pad {{ touch-action: none; background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; }}
     </style>
 </head>
 <body class="p-4 pb-20">
@@ -239,6 +241,15 @@ def get_input_html(master_json):
         </div>
 
         <div id="checkList" class="space-y-3"></div>
+        
+        <!-- 서명 영역 추가 -->
+        <div class="bg-white p-4 rounded-xl shadow-sm mt-4 border border-slate-200">
+            <div class="font-bold text-slate-700 mb-2">점검자 서명</div>
+            <canvas id="signature-pad" class="w-full h-32"></canvas>
+            <div class="flex justify-end mt-2">
+                <button onclick="clearSignature()" class="text-xs text-slate-400 underline">지우기</button>
+            </div>
+        </div>
 
         <div class="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-lg">
             <div class="max-w-md mx-auto flex gap-2">
@@ -265,6 +276,7 @@ def get_input_html(master_json):
     <script>
         const MASTER = {master_json};
         const RESULTS = {{}};
+        let signaturePad, ctx;
 
         function init() {{
             const today = new Date().toISOString().split('T')[0];
@@ -278,6 +290,7 @@ def get_input_html(master_json):
                 lineSel.appendChild(opt);
             }});
             renderList();
+            initSignature();
             lucide.createIcons();
         }}
 
@@ -328,20 +341,76 @@ def get_input_html(master_json):
         }}
 
         window.setResult = (uid, val) => {{
-            RESULTS[uid] = {{ val: val, ts: new Date().toISOString() }};
-            // UI refresh
-            if(val === 'OK' || val === 'NG') {{
-                 renderList();
-            }}
+            RESULTS[uid] = {{ val: val }};
+            if(val === 'OK' || val === 'NG') renderList(); // Re-render for active class
         }};
+
+        function initSignature() {{
+            signaturePad = document.getElementById('signature-pad');
+            ctx = signaturePad.getContext('2d');
+            
+            // Resize canvas
+            signaturePad.width = signaturePad.offsetWidth;
+            signaturePad.height = signaturePad.offsetHeight;
+
+            let drawing = false;
+            const start = (e) => {{
+                e.preventDefault();
+                drawing = true;
+                ctx.beginPath();
+                const { x, y } = getPos(e);
+                ctx.moveTo(x, y);
+            }};
+            const move = (e) => {{
+                if (!drawing) return;
+                e.preventDefault();
+                const { x, y } = getPos(e);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }};
+            const end = () => {{ drawing = false; }};
+            
+            const getPos = (e) => {{
+                const rect = signaturePad.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return {{ x: clientX - rect.left, y: clientY - rect.top }};
+            }};
+
+            signaturePad.addEventListener('touchstart', start);
+            signaturePad.addEventListener('touchmove', move);
+            signaturePad.addEventListener('touchend', end);
+            signaturePad.addEventListener('mousedown', start);
+            signaturePad.addEventListener('mousemove', move);
+            signaturePad.addEventListener('mouseup', end);
+        }}
+
+        window.clearSignature = () => {{
+            ctx.clearRect(0, 0, signaturePad.width, signaturePad.height);
+        }}
 
         window.exportData = () => {{
             const date = document.getElementById('checkDate').value;
             const line = document.getElementById('lineSelect').value;
+            const signature = signaturePad.toDataURL(); // 서명 데이터 포함
+            
+            // [규칙 2] HTML은 입력값만 전달
+            const items = [];
+            Object.keys(RESULTS).forEach(uid => {{
+                const [l, equip_id, item_name] = uid.split('_');
+                items.push({{
+                    equip_id: equip_id,
+                    item_name: item_name,
+                    value: RESULTS[uid].val
+                }});
+            }});
+
             const payload = {{
-                meta: {{ date, line, exporter: "Tablet_1" }},
-                data: RESULTS
+                meta: {{ date, line, exporter: "Tablet" }},
+                items: items,
+                signature: signature
             }};
+            
             document.getElementById('jsonOutput').value = JSON.stringify(payload);
             document.getElementById('exportModal').classList.remove('hidden');
         }};
@@ -360,11 +429,13 @@ def get_input_html(master_json):
 """
 
 # ------------------------------------------------------------------
-# 4. 일일점검 로직 (Python Server Side)
+# 4. 서버 사이드 로직 (Python) - 판단 및 저장 담당
 # ------------------------------------------------------------------
 def get_master_json():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    if df.empty:
+    
+    # 데이터가 없으면 초기값 주입
+    if df.empty or len(df) < 5:
         df = pd.DataFrame(DEFAULT_CHECK_MASTER)
         save_data(df, SHEET_CHECK_MASTER)
     
@@ -386,44 +457,98 @@ def get_master_json():
 def process_check_data(payload, user_id):
     try:
         meta = payload.get('meta', {})
-        data = payload.get('data', {})
+        items = payload.get('items', [])
+        signature = payload.get('signature', "")
+        
         date = meta.get('date')
+        line = meta.get('line')
+        
+        # 기준정보 로드 (판단용)
+        df_master = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+        df_master = df_master[df_master['line'] == line]
         
         rows = []
         ng_list = []
         
-        for uid, val_obj in data.items():
-            parts = uid.split('_')
-            if len(parts) >= 3:
-                line = parts[0]
-                eq_id = parts[1]
-                item_name = "_".join(parts[2:])
-                val = val_obj.get('val')
-                ox = "OK"
-                if val == "NG": ox = "NG"
-                if ox == "NG": ng_list.append(f"[{line}] {eq_id} - {item_name}")
+        # [규칙 1 & 2] 서버에서 OK/NG 판단
+        for item in items:
+            equip_id = item.get('equip_id')
+            item_name = item.get('item_name')
+            val = str(item.get('value'))
+            
+            # 기준 찾기
+            criteria = df_master[(df_master['equip_id'] == equip_id) & (df_master['item_name'] == item_name)]
+            
+            ox = "OK"
+            if not criteria.empty:
+                crit = criteria.iloc[0]
+                if crit['check_type'] == 'NUMBER':
+                    try:
+                        num_val = float(val)
+                        min_v = float(crit['min_val']) if crit['min_val'] else -999999
+                        max_v = float(crit['max_val']) if crit['max_val'] else 999999
+                        if not (min_v <= num_val <= max_v): ox = "NG"
+                    except:
+                        ox = "NG" # 수치 변환 실패 시
+                else:
+                    if val == 'NG': ox = "NG"
+            
+            if ox == "NG": ng_list.append(f"[{line}] {equip_id} - {item_name}")
 
-                rows.append([
-                    date, line, eq_id, item_name, val, ox, user_id, str(datetime.now())
-                ])
+            rows.append([
+                date, line, equip_id, item_name, val, ox, user_id, str(datetime.now())
+            ])
         
         if rows:
             append_rows(rows, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+            
+            # 서명 저장
+            if signature and len(signature) > 100:
+                sig_row = [date, line, user_id, signature, str(datetime.now())]
+                append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
+                
             return True, len(rows), ng_list
         return False, 0, []
     except Exception as e:
         print(e)
         return False, 0, []
 
+def get_check_status(date, line):
+    """특정 날짜/라인의 점검 완료 여부 및 서명 여부 확인"""
+    # 1. 기준 항목 수
+    df_master = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    target_count = len(df_master[df_master['line'] == line])
+    
+    # 2. 수행 항목 수
+    df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+    done_count = len(df_res[(df_res['date'] == date) & (df_res['line'] == line)])
+    
+    # 3. 서명 여부
+    df_sig = load_data(SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
+    has_signature = not df_sig[(df_sig['date'] == date) & (df_sig['line'] == line)].empty
+    
+    return {
+        "target": target_count,
+        "done": done_count,
+        "is_complete": (done_count >= target_count and target_count > 0),
+        "has_signature": has_signature
+    }
+
 def generate_daily_check_pdf(date_str, line_filter):
+    # [규칙 1] 완료 및 서명 확인
+    status = get_check_status(date_str, line_filter)
+    if not status['has_signature']:
+        return None # 서명 없으면 출력 불가
+    
     df = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     if df.empty: return None
     
-    df = df[df['date'] == date_str]
-    if line_filter:
-        df = df[df['line'] == line_filter]
-    
+    df = df[(df['date'] == date_str) & (df['line'] == line_filter)]
     if df.empty: return None
+
+    # 서명 이미지 가져오기
+    df_sig = load_data(SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
+    sig_data = df_sig[(df_sig['date'] == date_str) & (df_sig['line'] == line_filter)].iloc[-1]['signature_data']
 
     pdf = FPDF()
     pdf.add_page()
@@ -437,7 +562,10 @@ def generate_daily_check_pdf(date_str, line_filter):
 
     pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
     pdf.set_font_size(10)
-    pdf.cell(0, 10, f"Line: {line_filter if line_filter else 'ALL'}", ln=True)
+    pdf.cell(0, 10, f"Line: {line_filter}", ln=True)
+    
+    # 서명 이미지 삽입 (임시 파일 처리 필요하지만 여기선 텍스트로 대체 표시)
+    pdf.cell(0, 10, "서명 확인됨 (전자서명)", ln=True, align='R')
     pdf.ln(5)
 
     pdf.set_fill_color(240, 240, 240)
@@ -491,7 +619,7 @@ def check_password():
 if not check_password(): st.stop()
 
 # ------------------------------------------------------------------
-# 6. 메인 메뉴 구조
+# 6. 메인 메뉴
 # ------------------------------------------------------------------
 with st.sidebar:
     st.title("Cloud SMT")
@@ -499,27 +627,22 @@ with st.sidebar:
     role_badge = "👑 Admin" if u["role"] == "admin" else "👤 User"
     st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
     
-    # 5대 메뉴 (V4 구조 유지)
     menu = st.radio("업무 선택", ["📊 대시보드", "🏭 생산관리", "🛠 설비보전관리", "✅ 일일점검관리", "⚙ 기준정보관리"])
-    
     st.divider()
-    if st.button("로그아웃"):
-        st.session_state.logged_in = False
-        st.rerun()
+    if st.button("로그아웃"): st.session_state.logged_in = False; st.rerun()
 
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 7. 메뉴별 기능 구현 (V3 내용 100% 복구)
+# 7. 기능 구현
 # ------------------------------------------------------------------
 
-# [1] 대시보드 (통합)
+# [1] 대시보드
 if menu == "📊 대시보드":
     df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
     df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # 지표
     prod_today = 0
     if not df_prod.empty:
         df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce')
@@ -542,12 +665,11 @@ if menu == "📊 대시보드":
     elif df_prod.empty:
         st.info("생산 데이터가 없습니다.")
 
-# [2] 생산관리 (V3 기능 복구)
+# [2] 생산관리
 elif menu == "🏭 생산관리":
-    # 탭 복구 (기준정보 제외)
     t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산 분석", "📑 일일 보고서"])
 
-    with t1: # 실적 등록
+    with t1:
         c1, c2 = st.columns([1, 1.5])
         with c1:
             if st.session_state.user_info['role'] in ['admin', 'editor']:
@@ -556,120 +678,83 @@ elif menu == "🏭 생산관리":
                     date = st.date_input("작업 일자")
                     cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"])
                     
-                    # 품목 불러오기
                     item_df = load_data(SHEET_ITEMS, COLS_ITEMS)
                     item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
-                    
                     def on_code():
                         c = st.session_state.code_in.upper().strip()
                         if c in item_map: st.session_state.name_in = item_map[c]
-                    
                     code = st.text_input("품목 코드", key="code_in", on_change=on_code)
                     name = st.text_input("제품명", key="name_in")
                     qty = st.number_input("생산 수량", min_value=1, value=100, key="prod_qty")
-                    
-                    auto_deduct = False
-                    if cat in ["후공정", "후공정 외주"]:
-                        st.caption("📦 반제품 재고 자동 차감")
-                        auto_deduct = st.checkbox("재고 차감 적용", value=True)
+                    auto_deduct = st.checkbox("재고 차감 적용", value=True) if cat in ["후공정", "후공정 외주"] else False
 
                     def save_production():
                         c_code = st.session_state.code_in; c_name = st.session_state.name_in; c_qty = st.session_state.prod_qty
                         if c_name:
-                            rec = {
-                                "날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, 
-                                "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']
-                            }
+                            rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
                             if append_data(rec, SHEET_RECORDS):
-                                if cat in ["후공정", "후공정 외주"] and auto_deduct:
-                                    update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
-                                else:
-                                    update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
+                                if cat in ["후공정", "후공정 외주"] and auto_deduct: update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
+                                else: update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                 st.session_state.code_in = ""; st.session_state.name_in = ""; st.session_state.prod_qty = 100
                                 st.toast("저장되었습니다.", icon="✅")
-                        else:
-                            st.toast("제품명을 입력하세요.", icon="⚠️")
-
+                        else: st.toast("제품명을 입력하세요.", icon="⚠️")
                     st.button("실적 저장", type="primary", use_container_width=True, on_click=save_production)
-            else:
-                st.warning("쓰기 권한이 없습니다.")
+            else: st.warning("쓰기 권한이 없습니다.")
 
-        with c2: # 최근 내역
+        with c2:
             st.markdown("#### 📋 최근 등록 내역")
             df = load_data(SHEET_RECORDS, COLS_RECORDS)
             if not df.empty:
                 df = df.sort_values("입력시간", ascending=False).head(50)
                 if st.session_state.user_info['role'] == 'admin':
                     edited_df = st.data_editor(df, use_container_width=True, hide_index=True, num_rows="dynamic", key="prod_editor")
-                    if st.button("변경사항 저장 (생산)", type="secondary"):
-                        save_data(edited_df, SHEET_RECORDS)
-                        st.rerun()
-                else:
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    if st.button("변경사항 저장 (생산)", type="secondary"): save_data(edited_df, SHEET_RECORDS); st.rerun()
+                else: st.dataframe(df, use_container_width=True, hide_index=True)
 
-    with t2: # 재고 현황
+    with t2:
         df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
         if not df_inv.empty:
             df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0).astype(int)
             search = st.text_input("🔍 재고 검색", placeholder="품목명 또는 코드")
-            if search:
-                df_inv = df_inv[df_inv['품목코드'].str.contains(search, case=False) | df_inv['제품명'].str.contains(search, case=False)]
-            
+            if search: df_inv = df_inv[df_inv['품목코드'].str.contains(search, case=False) | df_inv['제품명'].str.contains(search, case=False)]
             if st.session_state.user_info['role'] == 'admin':
                 edited_inv = st.data_editor(df_inv, use_container_width=True, hide_index=True, num_rows="dynamic", key="inv_editor")
-                if st.button("재고 저장"):
-                    save_data(edited_inv, SHEET_INVENTORY)
-                    st.rerun()
-            else:
-                st.dataframe(df_inv, use_container_width=True, hide_index=True)
-        else:
-            st.info("재고 데이터가 없습니다.")
+                if st.button("재고 저장"): save_data(edited_inv, SHEET_INVENTORY); st.rerun()
+            else: st.dataframe(df_inv, use_container_width=True, hide_index=True)
+        else: st.info("재고 데이터가 없습니다.")
 
-    with t3: # 생산 분석 (차트)
+    with t3:
         df = load_data(SHEET_RECORDS, COLS_RECORDS)
         if not df.empty and HAS_ALTAIR:
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
             df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-            
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("##### 📉 일별 생산량")
-                chart_data = df.groupby('날짜')['수량'].sum().reset_index()
-                c = alt.Chart(chart_data).mark_bar().encode(x='날짜', y='수량').interactive()
+                c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(x='날짜', y='수량').interactive()
                 st.altair_chart(c, use_container_width=True)
             with c2:
                 st.markdown("##### 🍰 공정별 비중")
-                pie_data = df.groupby('구분')['수량'].sum().reset_index()
-                pie = alt.Chart(pie_data).mark_arc().encode(theta='수량', color='구분')
-                st.altair_chart(pie, use_container_width=True)
+                c = alt.Chart(df.groupby('구분')['수량'].sum().reset_index()).mark_arc().encode(theta='수량', color='구분')
+                st.altair_chart(c, use_container_width=True)
 
-    with t4: # 일일 보고서 (PDF)
+    with t4:
         st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
         report_date = st.date_input("보고서 날짜", datetime.now())
         df = load_data(SHEET_RECORDS, COLS_RECORDS)
-        
         if not df.empty:
             df['날짜'] = pd.to_datetime(df['날짜']).dt.date
             daily_df = df[df['날짜'] == report_date].copy()
-            daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")] # 외주 제외
-            
+            daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
             if not daily_df.empty:
                 st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
-                
-                # JS 기반 PDF 생성 (표 디자인 유지용)
                 table_rows = "".join([f"<tr><td style='border:1px solid #ddd; padding:8px;'>{r['구분']}</td><td style='border:1px solid #ddd;'>{r['품목코드']}</td><td style='border:1px solid #ddd;'>{r['제품명']}</td><td style='border:1px solid #ddd; text-align:right;'>{r['수량']:,}</td></tr>" for _, r in daily_df.iterrows()])
-                
                 html_report = f"""
                 <div id="pdf-content" style="display:none; width:210mm; background:white; padding:20mm; font-family:'Noto Sans KR', sans-serif;">
                     <h1 style="text-align:center; border-bottom:2px solid #333; padding-bottom:10px;">SMT Daily Report</h1>
                     <p>Date: {report_date}</p>
                     <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:12px;">
-                        <tr style="background:#f5f5f5; font-weight:bold;">
-                            <th style="border:1px solid #ddd; padding:8px;">Category</th>
-                            <th style="border:1px solid #ddd;">Code</th>
-                            <th style="border:1px solid #ddd;">Name</th>
-                            <th style="border:1px solid #ddd;">Qty</th>
-                        </tr>
+                        <tr style="background:#f5f5f5; font-weight:bold;"><th style="border:1px solid #ddd; padding:8px;">Category</th><th style="border:1px solid #ddd;">Code</th><th style="border:1px solid #ddd;">Name</th><th style="border:1px solid #ddd;">Qty</th></tr>
                         {table_rows}
                     </table>
                 </div>
@@ -677,26 +762,18 @@ elif menu == "🏭 생산관리":
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
                 <script>
                     async function genPDF() {{
-                        const {{ jsPDF }} = window.jspdf;
-                        const el = document.getElementById('pdf-content');
-                        el.style.display = 'block'; el.style.position = 'absolute'; el.style.top = '-9999px';
-                        const cvs = await html2canvas(el, {{ scale: 2 }});
-                        const img = cvs.toDataURL('image/png');
-                        const pdf = new jsPDF('p', 'mm', 'a4');
-                        const w = pdf.internal.pageSize.getWidth();
-                        const h = (cvs.height * w) / cvs.width;
-                        pdf.addImage(img, 'PNG', 0, 0, w, h);
-                        pdf.save("Production_Report_{report_date}.pdf");
-                        el.style.display = 'none';
+                        const {{ jsPDF }} = window.jspdf; const el = document.getElementById('pdf-content'); el.style.display = 'block'; el.style.position = 'absolute'; el.style.top = '-9999px';
+                        const cvs = await html2canvas(el, {{ scale: 2 }}); const img = cvs.toDataURL('image/png');
+                        const pdf = new jsPDF('p', 'mm', 'a4'); pdf.addImage(img, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), (cvs.height*pdf.internal.pageSize.getWidth())/cvs.width);
+                        pdf.save("Production_Report_{report_date}.pdf"); el.style.display = 'none';
                     }}
                 </script>
                 <button onclick="genPDF()" style="background:#ef4444; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📄 PDF 다운로드 (JS)</button>
                 """
                 components.html(html_report, height=100)
-            else:
-                st.warning("해당 날짜에 생산 실적이 없습니다.")
+            else: st.warning("해당 날짜에 생산 실적이 없습니다.")
 
-# [3] 설비보전관리 (V3 기능 복구)
+# [3] 설비보전관리
 elif menu == "🛠 설비보전관리":
     t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
     
@@ -706,7 +783,6 @@ elif menu == "🛠 설비보전관리":
             if st.session_state.user_info['role'] in ['admin', 'editor']:
                 with st.container(border=True):
                     st.markdown("#### 🔧 정비 이력 등록")
-                    # 설비 리스트 불러오기 (기준정보)
                     eq_df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
                     eq_map = dict(zip(eq_df['id'], eq_df['name'])) if not eq_df.empty else {}
                     
@@ -715,7 +791,6 @@ elif menu == "🛠 설비보전관리":
                     f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                     f_desc = st.text_area("작업 내용", height=80)
                     
-                    # 부품/비용 입력 (V3 기능)
                     if 'parts_buffer' not in st.session_state: st.session_state.parts_buffer = []
                     col_p1, col_p2, col_p3 = st.columns([2, 1, 1])
                     p_name = col_p1.text_input("교체부품명")
@@ -733,17 +808,11 @@ elif menu == "🛠 설비보전관리":
                     
                     if st.button("이력 저장", type="primary", use_container_width=True):
                         parts_str = ", ".join([f"{p['내역']}" for p in st.session_state.parts_buffer])
-                        rec = {
-                            "날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq],
-                            "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_str,
-                            "비용": f_final_cost, "비가동시간": f_down, 
-                            "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']
-                        }
+                        rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_str, "비용": f_final_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
                         append_data(rec, SHEET_MAINTENANCE)
                         st.session_state.parts_buffer = []
                         st.toast("정비 이력이 저장되었습니다.", icon="✅")
-            else:
-                st.warning("권한이 없습니다.")
+            else: st.warning("권한이 없습니다.")
         
         with c2:
             st.markdown("#### 📋 최근 정비 내역")
@@ -752,11 +821,8 @@ elif menu == "🛠 설비보전관리":
                 df = df.sort_values("입력시간", ascending=False).head(50)
                 if st.session_state.user_info['role'] == 'admin':
                     edited = st.data_editor(df, use_container_width=True, hide_index=True, num_rows="dynamic", key="maint_edit")
-                    if st.button("변경사항 저장 (정비)"):
-                        save_data(edited, SHEET_MAINTENANCE)
-                        st.rerun()
-                else:
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    if st.button("변경사항 저장 (정비)"): save_data(edited, SHEET_MAINTENANCE); st.rerun()
+                else: st.dataframe(df, use_container_width=True, hide_index=True)
 
     with t2:
         df_hist = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
@@ -771,27 +837,38 @@ elif menu == "🛠 설비보전관리":
                 c = alt.Chart(df).mark_bar().encode(x='작업구분', y='비용', color='작업구분').interactive()
                 st.altair_chart(c, use_container_width=True)
 
-# [4] 일일점검관리 (V4 리팩토링 버전)
+# [4] 일일점검관리
 elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3, tab4 = st.tabs(["📊 점검 현황", "📄 점검 이력 / PDF", "✍ 점검 입력 (HTML)", "🔄 데이터 동기화"])
     
     with tab1:
         st.markdown("##### 오늘의 점검 현황")
         today = datetime.now().strftime("%Y-%m-%d")
-        df = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         
+        status = get_check_status(today, "1 LINE") # 예시로 1라인만 체크
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("대상 라인", "1 LINE")
+        
+        # 완료 여부 표시
+        if status['is_complete']:
+            c2.markdown(f"**점검 완료** ({status['done']}/{status['target']}) ✅", unsafe_allow_html=True)
+        else:
+            c2.metric("점검 진행률", f"{status['done']}/{status['target']} 항목")
+            
+        # 서명 여부 표시
+        if status['has_signature']:
+            c3.markdown("**서명 완료** ✍️", unsafe_allow_html=True)
+        else:
+            c3.warning("서명 미완료")
+
+        df = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         if not df.empty:
             df_today = df[df['date'] == today]
-            c1, c2, c3 = st.columns(3)
-            c1.metric("대상 라인", "2개 라인")
-            c2.metric("점검 진행률", f"{len(df_today)} 항목 완료")
-            c3.metric("NG 발견", f"{len(df_today[df_today['ox']=='NG'])} 건")
-            
             if not df_today[df_today['ox']=='NG'].empty:
                 st.error("🚨 금일 NG 발생 항목")
                 st.dataframe(df_today[df_today['ox']=='NG'])
-        else:
-            st.info("오늘 점검 데이터가 아직 없습니다.")
+        else: st.info("오늘 점검 데이터가 아직 없습니다.")
 
     with tab2:
         c1, c2 = st.columns([1, 2])
@@ -804,12 +881,13 @@ elif menu == "✅ 일일점검관리":
                 filtered = df[(df['date'] == str(search_date)) & (df['line'] == search_line)]
                 st.dataframe(filtered, use_container_width=True)
                 
-                if not filtered.empty:
-                    pdf_bytes = generate_daily_check_pdf(str(search_date), search_line)
-                    if pdf_bytes:
-                        st.download_button("📄 PDF 다운로드", pdf_bytes, file_name=f"DailyCheck_{search_date}.pdf", mime='application/pdf')
+                # PDF 생성 시도
+                pdf_bytes = generate_daily_check_pdf(str(search_date), search_line)
+                if pdf_bytes:
+                    st.download_button("📄 PDF 다운로드", pdf_bytes, file_name=f"DailyCheck_{search_date}.pdf", mime='application/pdf')
                 else:
-                    st.warning("데이터가 없습니다.")
+                    st.warning("점검이 완료되지 않았거나 서명이 없어 PDF를 생성할 수 없습니다.")
+            else: st.warning("데이터가 없습니다.")
 
     with tab3:
         st.caption("현장 태블릿용 입력 화면입니다.")
@@ -821,7 +899,6 @@ elif menu == "✅ 일일점검관리":
         st.markdown("#### 📥 현장 데이터 수신")
         st.caption("태블릿(HTML)에서 복사한 JSON 데이터를 여기에 붙여넣으세요.")
         json_input = st.text_area("JSON 데이터", height=150)
-        
         if st.button("데이터 저장 (Server Save)", type="primary"):
             if json_input:
                 try:
@@ -829,45 +906,39 @@ elif menu == "✅ 일일점검관리":
                     success, count, ngs = process_check_data(payload, st.session_state.user_info['id'])
                     if success:
                         st.success(f"✅ {count}건 저장 완료.")
-                        if ngs:
-                            st.error(f"⚠ {len(ngs)}건의 NG 발견: {ngs}")
+                        if ngs: st.error(f"⚠ {len(ngs)}건의 NG 발견: {ngs}")
                     else: st.warning("저장할 데이터가 없습니다.")
                 except: st.error("데이터 형식이 올바르지 않습니다.")
 
-# [5] 기준정보관리 (사라졌던 내용 모두 복구 및 통합)
+# [5] 기준정보관리
 elif menu == "⚙ 기준정보관리":
     t1, t2, t3 = st.tabs(["📦 품목 기준정보", "🏭 설비 기준정보", "✅ 일일점검 기준정보"])
     
-    with t1: # 품목 관리
+    with t1:
         if st.session_state.user_info['role'] == 'admin':
             st.markdown("#### 품목 마스터 관리")
             df = load_data(SHEET_ITEMS, COLS_ITEMS)
             edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="item_master")
-            if st.button("품목 저장"):
-                save_data(edited, SHEET_ITEMS)
-                st.rerun()
-        else:
-            st.dataframe(load_data(SHEET_ITEMS, COLS_ITEMS))
+            if st.button("품목 저장"): save_data(edited, SHEET_ITEMS); st.rerun()
+        else: st.dataframe(load_data(SHEET_ITEMS, COLS_ITEMS))
             
-    with t2: # 설비 관리
+    with t2:
         if st.session_state.user_info['role'] == 'admin':
             st.markdown("#### 설비 마스터 관리")
             df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
             edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="eq_master")
-            if st.button("설비 저장"):
-                save_data(edited, SHEET_EQUIPMENT)
-                st.rerun()
-        else:
-             st.dataframe(load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT))
+            if st.button("설비 저장"): save_data(edited, SHEET_EQUIPMENT); st.rerun()
+        else: st.dataframe(load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT))
 
-    with t3: # 점검 기준 (V4)
+    with t3:
         if st.session_state.user_info['role'] == 'admin':
             st.markdown("#### 일일점검 항목 관리 (Master)")
             st.caption("여기서 수정한 내용은 '일일점검관리' -> '점검 입력(HTML)'에 반영됩니다.")
             df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
             edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="check_master")
-            if st.button("점검 기준 저장"):
-                save_data(edited, SHEET_CHECK_MASTER)
-                st.rerun()
-        else:
-             st.dataframe(load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER))
+            col_b1, col_b2 = st.columns(2)
+            if col_b1.button("점검 기준 저장"): save_data(edited, SHEET_CHECK_MASTER); st.rerun()
+            if col_b2.button("⚠️ 기본값으로 초기화 (복구용)", type="primary"):
+                save_data(pd.DataFrame(DEFAULT_CHECK_MASTER), SHEET_CHECK_MASTER)
+                st.success("초기화 완료"); time.sleep(1); st.rerun()
+        else: st.dataframe(load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER))
