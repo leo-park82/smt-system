@@ -214,35 +214,27 @@ def get_daily_check_master_data():
         save_data(df, SHEET_CHECK_MASTER)
     return df
 
-# [수정] PDF 전체 출력 로직
 def generate_all_daily_check_pdf(date_str):
-    # 1. 마스터 데이터(전체 항목) 로드 및 정렬 유지
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     
-    # 2. 결과 데이터 로드
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     df_r = df_r[df_r['date'] == date_str]
     
-    # 3. 최신 결과만 남기기
     if not df_r.empty:
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-    # PDF 생성
     pdf = FPDF()
     font_path = 'NanumGothic.ttf' 
     if not os.path.exists(font_path): font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
     try:
         pdf.add_font('Korean', '', font_path, uni=True)
     except:
-        pass # 폰트 없으면 기본 폰트(한글 깨짐 주의)
+        pass
 
-    # 마스터 데이터의 Line 순서대로 반복 (정렬 유지)
     lines = df_m['line'].unique()
     
     for line in lines:
         pdf.add_page()
-        
-        # 폰트 설정
         try: pdf.set_font('Korean', '', 16)
         except: pdf.set_font('Arial', '', 16)
         
@@ -251,7 +243,6 @@ def generate_all_daily_check_pdf(date_str):
         pdf.cell(0, 10, f"Line: {line}", ln=True)
         pdf.ln(5)
 
-        # 헤더
         pdf.set_font_size(10)
         pdf.set_fill_color(240, 240, 240)
         pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
@@ -260,10 +251,7 @@ def generate_all_daily_check_pdf(date_str):
         pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
         pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
 
-        # 해당 라인 데이터 필터링
         line_master = df_m[df_m['line'] == line]
-        
-        # 병합 (Master 기준 Left Join -> 순서 유지됨)
         df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
         df_final['value'] = df_final['value'].fillna('-')
         df_final['ox'] = df_final['ox'].fillna('-')
@@ -549,7 +537,7 @@ elif menu == "✅ 일일점검관리":
         sel_line = c_l.selectbox("점검 라인 선택", ["1 LINE", "2 LINE", "AOI", "수삽 LINE", "MASK 세척기", "SOLDER 보관온도", "온,습도 CHECK", "인두기 CHECK"], key="chk_line")
         sel_date = c_d.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        # 2. 마스터 데이터 로드 (정렬 유지: sort=False가 중요하지 않음, 기본적으로 로드 순서임. 그룹핑때 sort=False 필수)
+        # 2. 마스터 데이터 로드 (정렬 유지)
         df_master = get_daily_check_master_data()
         df_master = df_master[df_master['line'] == sel_line]
         
@@ -572,7 +560,6 @@ elif menu == "✅ 일일점검관리":
 
         # 3. 입력 폼 생성
         with st.form("check_form"):
-            # [수정] sort=False로 엑셀 순서 유지
             for equip_name, group in df_master.groupby("equip_name", sort=False):
                 st.subheader(f"🛠 {equip_name}")
                 
@@ -587,26 +574,50 @@ elif menu == "✅ 일일점검관리":
                     
                     with c2:
                         if row['check_type'] == 'OX':
-                            idx = 0 if default_val == "OK" else (1 if default_val == "NG" else 0)
+                            idx = 0 
+                            if default_val == "NG": idx = 1
+                            if widget_key in st.session_state:
+                                if st.session_state[widget_key] == "OK": idx = 0
+                                elif st.session_state[widget_key] == "NG": idx = 1
+                            
                             st.radio("판정", ["OK", "NG"], key=widget_key, horizontal=True, index=idx, label_visibility="collapsed")
                         else:
-                            # [수정] 수치 입력란에 step=0.1을 주어 모바일에서 숫자 키패드 유도 (Float 타입)
-                            val = float(default_val) if default_val and default_val != '-' else 0.0
-                            st.number_input(f"수치 ({row['unit']})", value=val, step=0.1, key=widget_key)
+                            # [수정] 수치 입력란: value=None으로 설정하여 0.00 삭제 필요 없게 함
+                            val_init = None
+                            if default_val and default_val != '-' and default_val != 'None':
+                                try:
+                                    val_init = float(default_val)
+                                except:
+                                    val_init = None
+                            
+                            st.number_input(
+                                f"수치 ({row['unit']})", 
+                                value=val_init, 
+                                step=0.1, 
+                                key=widget_key, 
+                                placeholder="터치하여 입력"
+                            )
                     
                     with c3:
                         st.markdown(f"기준: {row['standard']}")
                 st.divider()
             
-            # 서명 및 저장
-            st.markdown("#### ✍️ 전자 서명")
-            st.caption("※ 성명을 입력하고 확인란에 체크하면 전자 서명으로 갈음합니다.")
-            c_s1, c_s2 = st.columns(2)
-            signer_name = c_s1.text_input("점검자 성명 (키보드 입력)", value=st.session_state.user_info['name'])
-            confirm = c_s2.checkbox("✅ 위 내용대로 점검하였음을 확인합니다 (마우스 클릭)")
+            # [수정] 서명란 개선: 체크박스 제거, 직관적인 입력 유도
+            st.markdown("#### ✍️ 전자 서명 (Sign)")
             
-            if st.form_submit_button("💾 점검 결과 저장", type="primary", use_container_width=True):
-                if confirm and signer_name:
+            sig_col1, sig_col2 = st.columns([3, 1])
+            with sig_col1:
+                signer_name = st.text_input("점검자 성명 (Name)", value=st.session_state.user_info['name'], placeholder="이름을 입력하세요")
+            with sig_col2:
+                if signer_name:
+                    st.success("서명 가능")
+                else:
+                    st.warning("이름 필요")
+
+            st.caption("※ 성명을 입력하고 아래 '서명 및 저장' 버튼을 누르면 전자 서명이 완료됩니다.")
+            
+            if st.form_submit_button("🖱️ 서명 및 저장 (Sign & Save)", type="primary", use_container_width=True):
+                if signer_name:
                     rows_to_save = []
                     ng_list = []
                     
@@ -616,17 +627,23 @@ elif menu == "✅ 일일점검관리":
                         val = st.session_state.get(w_key)
                         
                         ox = "OK"
-                        final_val = str(val)
+                        if val is None:
+                            final_val = ""
+                        else:
+                            final_val = str(val)
                         
                         if row['check_type'] == 'OX':
                             if val == 'NG': ox = 'NG'
                         else:
-                            try:
-                                num_val = float(val)
-                                min_v = float(row['min_val']) if row['min_val'] else -999999
-                                max_v = float(row['max_val']) if row['max_val'] else 999999
-                                if not (min_v <= num_val <= max_v): ox = 'NG'
-                            except: ox = 'NG'
+                            if val is None:
+                                ox = "OK" 
+                            else:
+                                try:
+                                    num_val = float(val)
+                                    min_v = float(row['min_val']) if row['min_val'] else -999999
+                                    max_v = float(row['max_val']) if row['max_val'] else 999999
+                                    if not (min_v <= num_val <= max_v): ox = 'NG'
+                                except: ox = 'NG'
                         
                         if ox == 'NG': ng_list.append(f"{row['item_name']}")
                         
@@ -637,11 +654,14 @@ elif menu == "✅ 일일점검관리":
                     
                     if rows_to_save:
                         append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                        sig_row = [str(sel_date), sel_line, signer_name, "Electronic Signature", str(datetime.now())]
+                        sig_row = [str(sel_date), sel_line, signer_name, "Electronic Signature (Native)", str(datetime.now())]
                         append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                        st.success("점검 결과가 저장되었습니다.")
+                        st.success("✅ 점검 결과 및 서명이 저장되었습니다.")
                         if ng_list: st.error(f"다음 항목에서 NG가 발생했습니다: {', '.join(ng_list)}")
-                else: st.warning("성명을 입력하고 확인란에 체크해주세요.")
+                        time.sleep(1)
+                        st.rerun()
+                else:
+                    st.error("⚠️ 성명을 입력해주세요.")
 
     # 2. 점검 현황
     with tab2:
@@ -661,12 +681,11 @@ elif menu == "✅ 일일점검관리":
             st.dataframe(ng_today)
         else: st.info("오늘 점검 데이터가 아직 없습니다.")
 
-    # 3. 이력/PDF (마지막 탭으로 이동)
+    # 3. 이력/PDF
     with tab3:
         c1, c2 = st.columns([1, 2])
         search_date = c1.date_input("조회 날짜 (PDF출력)", datetime.now())
         
-        # [수정] 전체 출력 버튼 (라인 선택 없이 날짜 기준 전체)
         if st.button("📄 해당 날짜 전체 점검 리포트 생성 (PDF)"):
             pdf_bytes = generate_all_daily_check_pdf(str(search_date))
             if pdf_bytes:
