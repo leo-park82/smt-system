@@ -50,7 +50,7 @@ SHEET_MAINTENANCE = "maintenance_data"
 SHEET_EQUIPMENT = "equipment_list"
 SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
-SHEET_CHECK_SIGNATURE = "daily_check_signature" # [NEW] 서명 관리용
+SHEET_CHECK_SIGNATURE = "daily_check_signature"
 
 # 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
@@ -206,7 +206,7 @@ def update_inventory(code, name, change, reason, user):
     append_data(hist, SHEET_INV_HISTORY)
 
 # ------------------------------------------------------------------
-# 3. HTML 템플릿 (역할 축소: 입력값 전달용)
+# 3. HTML 템플릿 (일괄 선택 버튼 추가)
 # ------------------------------------------------------------------
 def get_input_html(master_json):
     return f"""
@@ -238,11 +238,16 @@ def get_input_html(master_json):
                 </select>
                 <input type="date" id="checkDate" class="bg-slate-50 border p-2 rounded font-mono" />
             </div>
+            <!-- [NEW] 일괄 합격 버튼 -->
+            <div class="mt-2">
+                <button onclick="setAllOK()" class="w-full bg-green-100 text-green-700 border border-green-200 py-2 rounded-lg font-bold hover:bg-green-200 transition-colors flex items-center justify-center gap-2">
+                    <i data-lucide="check-check" class="w-4 h-4"></i> 전체 항목 OK 처리 (일괄)
+                </button>
+            </div>
         </div>
 
         <div id="checkList" class="space-y-3"></div>
         
-        <!-- 서명 영역 추가 -->
         <div class="bg-white p-4 rounded-xl shadow-sm mt-4 border border-slate-200">
             <div class="font-bold text-slate-700 mb-2">점검자 서명</div>
             <canvas id="signature-pad" class="w-full h-32"></canvas>
@@ -342,14 +347,29 @@ def get_input_html(master_json):
 
         window.setResult = (uid, val) => {{
             RESULTS[uid] = {{ val: val }};
-            if(val === 'OK' || val === 'NG') renderList(); // Re-render for active class
+            if(val === 'OK' || val === 'NG') renderList();
+        }};
+
+        // [NEW] 일괄 OK 설정 함수
+        window.setAllOK = () => {{
+            const line = document.getElementById('lineSelect').value;
+            const equipments = MASTER[line] || [];
+            
+            equipments.forEach(eq => {{
+                eq.items.forEach(item => {{
+                    const uid = `${{line}}_${{eq.id}}_${{item.name}}`;
+                    if(item.type === 'OX') {{
+                        setResult(uid, 'OK');
+                    }}
+                }});
+            }});
+            alert('모든 OX 항목이 OK로 설정되었습니다.');
         }};
 
         function initSignature() {{
             signaturePad = document.getElementById('signature-pad');
             ctx = signaturePad.getContext('2d');
             
-            // Resize canvas
             signaturePad.width = signaturePad.offsetWidth;
             signaturePad.height = signaturePad.offsetHeight;
 
@@ -392,9 +412,8 @@ def get_input_html(master_json):
         window.exportData = () => {{
             const date = document.getElementById('checkDate').value;
             const line = document.getElementById('lineSelect').value;
-            const signature = signaturePad.toDataURL(); // 서명 데이터 포함
+            const signature = signaturePad.toDataURL();
             
-            // [규칙 2] HTML은 입력값만 전달
             const items = [];
             Object.keys(RESULTS).forEach(uid => {{
                 const [l, equip_id, item_name] = uid.split('_');
@@ -434,7 +453,6 @@ def get_input_html(master_json):
 def get_master_json():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     
-    # 데이터가 없으면 초기값 주입
     if df.empty or len(df) < 5:
         df = pd.DataFrame(DEFAULT_CHECK_MASTER)
         save_data(df, SHEET_CHECK_MASTER)
@@ -463,20 +481,17 @@ def process_check_data(payload, user_id):
         date = meta.get('date')
         line = meta.get('line')
         
-        # 기준정보 로드 (판단용)
         df_master = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
         df_master = df_master[df_master['line'] == line]
         
         rows = []
         ng_list = []
         
-        # [규칙 1 & 2] 서버에서 OK/NG 판단
         for item in items:
             equip_id = item.get('equip_id')
             item_name = item.get('item_name')
             val = str(item.get('value'))
             
-            # 기준 찾기
             criteria = df_master[(df_master['equip_id'] == equip_id) & (df_master['item_name'] == item_name)]
             
             ox = "OK"
@@ -488,8 +503,7 @@ def process_check_data(payload, user_id):
                         min_v = float(crit['min_val']) if crit['min_val'] else -999999
                         max_v = float(crit['max_val']) if crit['max_val'] else 999999
                         if not (min_v <= num_val <= max_v): ox = "NG"
-                    except:
-                        ox = "NG" # 수치 변환 실패 시
+                    except: ox = "NG"
                 else:
                     if val == 'NG': ox = "NG"
             
@@ -501,8 +515,6 @@ def process_check_data(payload, user_id):
         
         if rows:
             append_rows(rows, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-            
-            # 서명 저장
             if signature and len(signature) > 100:
                 sig_row = [date, line, user_id, signature, str(datetime.now())]
                 append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
@@ -513,45 +525,32 @@ def process_check_data(payload, user_id):
         print(e)
         return False, 0, []
 
-def get_check_status(date, line):
-    """특정 날짜/라인의 점검 완료 여부 및 서명 여부 확인"""
-    # 1. 기준 항목 수
-    df_master = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    target_count = len(df_master[df_master['line'] == line])
-    
-    # 2. 수행 항목 수
-    df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    done_count = len(df_res[(df_res['date'] == date) & (df_res['line'] == line)])
-    
-    # 3. 서명 여부
-    df_sig = load_data(SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-    has_signature = not df_sig[(df_sig['date'] == date) & (df_sig['line'] == line)].empty
-    
-    return {
-        "target": target_count,
-        "done": done_count,
-        "is_complete": (done_count >= target_count and target_count > 0),
-        "has_signature": has_signature
-    }
-
+# [수정] PDF 생성 로직 (조건 완화 및 전체 출력)
 def generate_daily_check_pdf(date_str, line_filter):
-    # [규칙 1] 완료 및 서명 확인
-    status = get_check_status(date_str, line_filter)
-    if not status['has_signature']:
-        return None # 서명 없으면 출력 불가
+    # 1. 마스터 데이터(전체 항목) 로드
+    df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    df_m = df_m[df_m['line'] == line_filter]
     
-    df = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    if df.empty: return None
+    # 2. 결과 데이터 로드
+    df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+    df_r = df_r[(df_r['date'] == date_str) & (df_r['line'] == line_filter)]
     
-    df = df[(df['date'] == date_str) & (df['line'] == line_filter)]
-    if df.empty: return None
+    # 3. 최신 결과만 남기기 (중복 제거)
+    if not df_r.empty:
+        df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-    # 서명 이미지 가져오기
-    df_sig = load_data(SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-    sig_data = df_sig[(df_sig['date'] == date_str) & (df_sig['line'] == line_filter)].iloc[-1]['signature_data']
+    # 4. 마스터 기준 병합 (점검 안된 항목도 표시하기 위함)
+    df_final = pd.merge(df_m, df_r, on=['line', 'equip_id', 'item_name'], how='left')
+    
+    # NaN 처리
+    df_final['value'] = df_final['value'].fillna('-')
+    df_final['ox'] = df_final['ox'].fillna('-')
+    df_final['checker'] = df_final['checker'].fillna('')
 
+    # PDF 생성 시작
     pdf = FPDF()
     pdf.add_page()
+    
     font_path = 'NanumGothic.ttf' 
     if not os.path.exists(font_path): font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
     try:
@@ -563,27 +562,39 @@ def generate_daily_check_pdf(date_str, line_filter):
     pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
     pdf.set_font_size(10)
     pdf.cell(0, 10, f"Line: {line_filter}", ln=True)
-    
-    # 서명 이미지 삽입 (임시 파일 처리 필요하지만 여기선 텍스트로 대체 표시)
-    pdf.cell(0, 10, "서명 확인됨 (전자서명)", ln=True, align='R')
     pdf.ln(5)
 
+    # 테이블 헤더
     pdf.set_fill_color(240, 240, 240)
-    pdf.cell(30, 8, "설비", 1, 0, 'C', 1)
-    pdf.cell(60, 8, "항목", 1, 0, 'C', 1)
-    pdf.cell(30, 8, "값", 1, 0, 'C', 1)
+    pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
+    pdf.cell(60, 8, "점검항목", 1, 0, 'C', 1)
+    pdf.cell(30, 8, "측정값", 1, 0, 'C', 1)
     pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
     pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
 
-    for _, row in df.iterrows():
-        pdf.cell(30, 8, str(row['equip_id']), 1)
+    # 테이블 바디
+    for _, row in df_final.iterrows():
+        # 설비명 줄임 처리
+        equip_name = str(row['equip_name'])
+        if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
+        
+        pdf.cell(40, 8, equip_name, 1)
         pdf.cell(60, 8, str(row['item_name']), 1)
         pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
         
         ox = str(row['ox'])
-        pdf.set_text_color(255, 0, 0) if ox == 'NG' else pdf.set_text_color(0, 0, 0)
+        if ox == 'NG':
+            pdf.set_text_color(255, 0, 0)
+            pdf.set_font('Korean', 'B', 10) # 볼드체 시도 (폰트 지원 시)
+        else:
+            pdf.set_text_color(0, 0, 0)
+            
         pdf.cell(20, 8, ox, 1, 0, 'C')
+        
+        # 폰트/색상 복귀
         pdf.set_text_color(0, 0, 0)
+        try: pdf.set_font('Korean', '', 10) 
+        except: pass
         
         pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
@@ -845,29 +856,20 @@ elif menu == "✅ 일일점검관리":
         st.markdown("##### 오늘의 점검 현황")
         today = datetime.now().strftime("%Y-%m-%d")
         
-        status = get_check_status(today, "1 LINE") # 예시로 1라인만 체크
+        # 현황 체크 로직 수정 (단순화)
+        df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        df_today = df_res[df_res['date'] == today] if not df_res.empty else pd.DataFrame()
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("대상 라인", "1 LINE")
+        c1.metric("대상 라인", "2개 라인") # 임시 고정
+        c2.metric("금일 점검 항목 수", f"{len(df_today)} 건")
         
-        # 완료 여부 표시
-        if status['is_complete']:
-            c2.markdown(f"**점검 완료** ({status['done']}/{status['target']}) ✅", unsafe_allow_html=True)
-        else:
-            c2.metric("점검 진행률", f"{status['done']}/{status['target']} 항목")
-            
-        # 서명 여부 표시
-        if status['has_signature']:
-            c3.markdown("**서명 완료** ✍️", unsafe_allow_html=True)
-        else:
-            c3.warning("서명 미완료")
+        ng_today = df_today[df_today['ox']=='NG'] if not df_today.empty else pd.DataFrame()
+        c3.metric("NG 발견", f"{len(ng_today)} 건")
 
-        df = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-        if not df.empty:
-            df_today = df[df['date'] == today]
-            if not df_today[df_today['ox']=='NG'].empty:
-                st.error("🚨 금일 NG 발생 항목")
-                st.dataframe(df_today[df_today['ox']=='NG'])
+        if not ng_today.empty:
+            st.error("🚨 금일 NG 발생 항목")
+            st.dataframe(ng_today)
         else: st.info("오늘 점검 데이터가 아직 없습니다.")
 
     with tab2:
@@ -875,19 +877,12 @@ elif menu == "✅ 일일점검관리":
         search_date = c1.date_input("조회 날짜", datetime.now())
         search_line = c2.selectbox("라인 선택", ["1 LINE", "2 LINE"])
         
-        if st.button("조회 및 PDF 생성 준비"):
-            df = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-            if not df.empty:
-                filtered = df[(df['date'] == str(search_date)) & (df['line'] == search_line)]
-                st.dataframe(filtered, use_container_width=True)
-                
-                # PDF 생성 시도
-                pdf_bytes = generate_daily_check_pdf(str(search_date), search_line)
-                if pdf_bytes:
-                    st.download_button("📄 PDF 다운로드", pdf_bytes, file_name=f"DailyCheck_{search_date}.pdf", mime='application/pdf')
-                else:
-                    st.warning("점검이 완료되지 않았거나 서명이 없어 PDF를 생성할 수 없습니다.")
-            else: st.warning("데이터가 없습니다.")
+        if st.button("조회 및 PDF 생성"):
+            pdf_bytes = generate_daily_check_pdf(str(search_date), search_line)
+            if pdf_bytes:
+                st.download_button("📄 PDF 다운로드 (전체항목)", pdf_bytes, file_name=f"DailyCheck_{search_date}_{search_line}.pdf", mime='application/pdf')
+            else:
+                st.warning("데이터가 없습니다.")
 
     with tab3:
         st.caption("현장 태블릿용 입력 화면입니다.")
