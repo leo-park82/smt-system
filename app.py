@@ -5,7 +5,6 @@ import time
 import hashlib
 import json
 import os
-import streamlit.components.v1 as components
 from fpdf import FPDF
 
 # 구글 시트 연동 라이브러리
@@ -32,10 +31,10 @@ st.markdown("""
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     .metric-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    /* 탭 스타일 개선 */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: white; border-radius: 8px 8px 0px 0px; box-shadow: 0 -1px 2px rgba(0,0,0,0.05); }
-    .stTabs [aria-selected="true"] { background-color: #eff6ff; color: #1e40af; font-weight: bold; }
+    /* 라디오 버튼 가로 배치 스타일 */
+    div.row-widget.stRadio > div { flex-direction: row; gap: 10px; }
+    div.row-widget.stRadio > div > label { background-color: #fff; padding: 5px 15px; border-radius: 5px; border: 1px solid #e2e8f0; }
+    div.row-widget.stRadio > div > label[data-baseweb="radio"] { margin-right: 0; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -206,326 +205,15 @@ def update_inventory(code, name, change, reason, user):
     append_data(hist, SHEET_INV_HISTORY)
 
 # ------------------------------------------------------------------
-# 3. HTML 템플릿 (일괄 선택 버튼 추가)
+# 3. 서버 사이드 로직 (Python)
 # ------------------------------------------------------------------
-def get_input_html(master_json):
-    return f"""
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Check Input</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f8fafc; }}
-        .btn-ox {{ transition: all 0.2s; border: 1px solid #e2e8f0; }}
-        .btn-ox.selected[data-val="OK"] {{ background: #22c55e; color: white; border-color: #22c55e; }}
-        .btn-ox.selected[data-val="NG"] {{ background: #ef4444; color: white; border-color: #ef4444; }}
-        #signature-pad {{ touch-action: none; background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; }}
-    </style>
-</head>
-<body class="p-4 pb-20">
-    <div class="max-w-md mx-auto">
-        <div class="bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
-            <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <i data-lucide="clipboard-check" class="text-blue-600"></i> 일일점검 입력
-            </h1>
-            <div class="mt-2 flex gap-2">
-                <select id="lineSelect" class="bg-slate-50 border p-2 rounded w-full font-bold" onchange="renderList()">
-                    <!-- Options filled by JS -->
-                </select>
-                <input type="date" id="checkDate" class="bg-slate-50 border p-2 rounded font-mono" />
-            </div>
-            <!-- [NEW] 일괄 합격 버튼 -->
-            <div class="mt-2">
-                <button onclick="setAllOK()" class="w-full bg-green-100 text-green-700 border border-green-200 py-2 rounded-lg font-bold hover:bg-green-200 transition-colors flex items-center justify-center gap-2">
-                    <i data-lucide="check-check" class="w-4 h-4"></i> 전체 항목 OK 처리 (일괄)
-                </button>
-            </div>
-        </div>
-
-        <div id="checkList" class="space-y-3"></div>
-        
-        <div class="bg-white p-4 rounded-xl shadow-sm mt-4 border border-slate-200">
-            <div class="font-bold text-slate-700 mb-2">점검자 서명</div>
-            <canvas id="signature-pad" class="w-full h-32"></canvas>
-            <div class="flex justify-end mt-2">
-                <button onclick="clearSignature()" class="text-xs text-slate-400 underline">지우기</button>
-            </div>
-        </div>
-
-        <div class="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-lg">
-            <div class="max-w-md mx-auto flex gap-2">
-                <button onclick="exportData()" class="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-lg active:scale-95 transition-transform shadow-blue-200 shadow-lg">
-                    저장용 데이터 생성
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 데이터 내보내기 모달 -->
-    <div id="exportModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-xl w-full max-w-sm p-5 shadow-2xl">
-            <h3 class="font-bold text-lg mb-2">데이터 전송 준비</h3>
-            <p class="text-sm text-slate-500 mb-3">아래 코드를 복사하여 시스템의 <b>[데이터 동기화]</b> 탭에 붙여넣으세요.</p>
-            <textarea id="jsonOutput" class="w-full h-32 bg-slate-50 border rounded p-2 text-xs font-mono mb-3" readonly></textarea>
-            <div class="flex gap-2">
-                <button onclick="copyAndClose()" class="flex-1 bg-green-600 text-white py-2 rounded-lg font-bold">복사 및 닫기</button>
-                <button onclick="document.getElementById('exportModal').classList.add('hidden')" class="px-4 py-2 text-slate-500">취소</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const MASTER = {master_json};
-        const RESULTS = {{}};
-        let signaturePad, ctx;
-
-        function init() {{
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('checkDate').value = today;
-            
-            const lineSel = document.getElementById('lineSelect');
-            Object.keys(MASTER).forEach(line => {{
-                const opt = document.createElement('option');
-                opt.value = line;
-                opt.innerText = line;
-                lineSel.appendChild(opt);
-            }});
-            renderList();
-            initSignature();
-            lucide.createIcons();
-        }}
-
-        function renderList() {{
-            const line = document.getElementById('lineSelect').value;
-            const container = document.getElementById('checkList');
-            container.innerHTML = '';
-            
-            const equipments = MASTER[line] || [];
-            equipments.forEach(eq => {{
-                const card = document.createElement('div');
-                card.className = 'bg-white p-4 rounded-xl border border-slate-200 shadow-sm';
-                let html = `<div class='font-bold text-slate-700 mb-3 flex items-center gap-2'><i data-lucide='server' class='w-4 h-4 text-slate-400'></i> ${{eq.equip}}</div>`;
-                
-                eq.items.forEach(item => {{
-                    const uid = `${{line}}_${{eq.id}}_${{item.name}}`;
-                    const saved = RESULTS[uid] || {{}};
-                    
-                    let inputHtml = '';
-                    if(item.type === 'OX') {{
-                        inputHtml = `
-                            <div class="flex gap-1">
-                                <button onclick="setResult('${{uid}}', 'OK')" class="btn-ox px-3 py-1.5 rounded text-sm font-bold flex-1 ${{saved.val==='OK'?'selected':''}}" data-val="OK">OK</button>
-                                <button onclick="setResult('${{uid}}', 'NG')" class="btn-ox px-3 py-1.5 rounded text-sm font-bold flex-1 ${{saved.val==='NG'?'selected':''}}" data-val="NG">NG</button>
-                            </div>`;
-                    }} else {{
-                        inputHtml = `
-                            <div class="flex gap-2">
-                                <input type="number" placeholder="${{item.min}}~${{item.max}}" class="border rounded px-2 w-20 text-center font-bold" 
-                                    onchange="setResult('${{uid}}', this.value)" value="${{saved.val||''}}">
-                                <span class="text-xs text-slate-400 self-center">${{item.unit}}</span>
-                            </div>`;
-                    }}
-                    
-                    html += `
-                    <div class="py-2 border-t border-slate-50 flex justify-between items-center">
-                        <div>
-                            <div class="text-sm font-bold text-slate-700">${{item.name}}</div>
-                            <div class="text-xs text-slate-400">${{item.content}}</div>
-                        </div>
-                        ${{inputHtml}}
-                    </div>`;
-                }});
-                card.innerHTML = html;
-                container.appendChild(card);
-            }});
-            lucide.createIcons();
-        }}
-
-        window.setResult = (uid, val) => {{
-            RESULTS[uid] = {{ val: val }};
-            if(val === 'OK' || val === 'NG') renderList();
-        }};
-
-        // [NEW] 일괄 OK 설정 함수
-        window.setAllOK = () => {{
-            const line = document.getElementById('lineSelect').value;
-            const equipments = MASTER[line] || [];
-            
-            equipments.forEach(eq => {{
-                eq.items.forEach(item => {{
-                    const uid = `${{line}}_${{eq.id}}_${{item.name}}`;
-                    if(item.type === 'OX') {{
-                        setResult(uid, 'OK');
-                    }}
-                }});
-            }});
-            alert('모든 OX 항목이 OK로 설정되었습니다.');
-        }};
-
-        function initSignature() {{
-            signaturePad = document.getElementById('signature-pad');
-            ctx = signaturePad.getContext('2d');
-            
-            signaturePad.width = signaturePad.offsetWidth;
-            signaturePad.height = signaturePad.offsetHeight;
-
-            let drawing = false;
-            const start = (e) => {{
-                e.preventDefault();
-                drawing = true;
-                ctx.beginPath();
-                const {{ x, y }} = getPos(e);
-                ctx.moveTo(x, y);
-            }};
-            const move = (e) => {{
-                if (!drawing) return;
-                e.preventDefault();
-                const {{ x, y }} = getPos(e);
-                ctx.lineTo(x, y);
-                ctx.stroke();
-            }};
-            const end = () => {{ drawing = false; }};
-            
-            const getPos = (e) => {{
-                const rect = signaturePad.getBoundingClientRect();
-                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                return {{ x: clientX - rect.left, y: clientY - rect.top }};
-            }};
-
-            signaturePad.addEventListener('touchstart', start);
-            signaturePad.addEventListener('touchmove', move);
-            signaturePad.addEventListener('touchend', end);
-            signaturePad.addEventListener('mousedown', start);
-            signaturePad.addEventListener('mousemove', move);
-            signaturePad.addEventListener('mouseup', end);
-        }}
-
-        window.clearSignature = () => {{
-            ctx.clearRect(0, 0, signaturePad.width, signaturePad.height);
-        }}
-
-        window.exportData = () => {{
-            const date = document.getElementById('checkDate').value;
-            const line = document.getElementById('lineSelect').value;
-            const signature = signaturePad.toDataURL();
-            
-            const items = [];
-            Object.keys(RESULTS).forEach(uid => {{
-                const [l, equip_id, item_name] = uid.split('_');
-                items.push({{
-                    equip_id: equip_id,
-                    item_name: item_name,
-                    value: RESULTS[uid].val
-                }});
-            }});
-
-            const payload = {{
-                meta: {{ date, line, exporter: "Tablet" }},
-                items: items,
-                signature: signature
-            }};
-            
-            document.getElementById('jsonOutput').value = JSON.stringify(payload);
-            document.getElementById('exportModal').classList.remove('hidden');
-        }};
-
-        window.copyAndClose = () => {{
-            const txt = document.getElementById('jsonOutput');
-            txt.select();
-            document.execCommand('copy');
-            document.getElementById('exportModal').classList.add('hidden');
-        }};
-
-        init();
-    </script>
-</body>
-</html>
-"""
-
-# ------------------------------------------------------------------
-# 4. 서버 사이드 로직 (Python) - 판단 및 저장 담당
-# ------------------------------------------------------------------
-def get_master_json():
+def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    
     if df.empty or len(df) < 5:
         df = pd.DataFrame(DEFAULT_CHECK_MASTER)
         save_data(df, SHEET_CHECK_MASTER)
-    
-    config = {}
-    for line, g_line in df.groupby('line'):
-        equip_list = []
-        for equip, g_equip in g_line.groupby('equip_name'):
-            items = []
-            for _, row in g_equip.iterrows():
-                items.append({
-                    "name": row['item_name'], "content": row['check_content'],
-                    "type": row['check_type'], "min": row['min_val'], 
-                    "max": row['max_val'], "unit": row['unit']
-                })
-            equip_list.append({"equip": equip, "id": g_equip.iloc[0]['equip_id'], "items": items})
-        config[line] = equip_list
-    return json.dumps(config, ensure_ascii=False)
+    return df
 
-def process_check_data(payload, user_id):
-    try:
-        meta = payload.get('meta', {})
-        items = payload.get('items', [])
-        signature = payload.get('signature', "")
-        
-        date = meta.get('date')
-        line = meta.get('line')
-        
-        df_master = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-        df_master = df_master[df_master['line'] == line]
-        
-        rows = []
-        ng_list = []
-        
-        for item in items:
-            equip_id = item.get('equip_id')
-            item_name = item.get('item_name')
-            val = str(item.get('value'))
-            
-            criteria = df_master[(df_master['equip_id'] == equip_id) & (df_master['item_name'] == item_name)]
-            
-            ox = "OK"
-            if not criteria.empty:
-                crit = criteria.iloc[0]
-                if crit['check_type'] == 'NUMBER':
-                    try:
-                        num_val = float(val)
-                        min_v = float(crit['min_val']) if crit['min_val'] else -999999
-                        max_v = float(crit['max_val']) if crit['max_val'] else 999999
-                        if not (min_v <= num_val <= max_v): ox = "NG"
-                    except: ox = "NG"
-                else:
-                    if val == 'NG': ox = "NG"
-            
-            if ox == "NG": ng_list.append(f"[{line}] {equip_id} - {item_name}")
-
-            rows.append([
-                date, line, equip_id, item_name, val, ox, user_id, str(datetime.now())
-            ])
-        
-        if rows:
-            append_rows(rows, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-            if signature and len(signature) > 100:
-                sig_row = [date, line, user_id, signature, str(datetime.now())]
-                append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                
-            return True, len(rows), ng_list
-        return False, 0, []
-    except Exception as e:
-        print(e)
-        return False, 0, []
-
-# [수정] PDF 생성 로직 (조건 완화 및 전체 출력)
 def generate_daily_check_pdf(date_str, line_filter):
     # 1. 마스터 데이터(전체 항목) 로드
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
@@ -535,19 +223,17 @@ def generate_daily_check_pdf(date_str, line_filter):
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     df_r = df_r[(df_r['date'] == date_str) & (df_r['line'] == line_filter)]
     
-    # 3. 최신 결과만 남기기 (중복 제거)
+    # 3. 최신 결과만 남기기
     if not df_r.empty:
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-    # 4. 마스터 기준 병합 (점검 안된 항목도 표시하기 위함)
+    # 4. 병합
     df_final = pd.merge(df_m, df_r, on=['line', 'equip_id', 'item_name'], how='left')
-    
-    # NaN 처리
     df_final['value'] = df_final['value'].fillna('-')
     df_final['ox'] = df_final['ox'].fillna('-')
     df_final['checker'] = df_final['checker'].fillna('')
 
-    # PDF 생성 시작
+    # PDF 생성
     pdf = FPDF()
     pdf.add_page()
     
@@ -564,7 +250,6 @@ def generate_daily_check_pdf(date_str, line_filter):
     pdf.cell(0, 10, f"Line: {line_filter}", ln=True)
     pdf.ln(5)
 
-    # 테이블 헤더
     pdf.set_fill_color(240, 240, 240)
     pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
     pdf.cell(60, 8, "점검항목", 1, 0, 'C', 1)
@@ -572,9 +257,7 @@ def generate_daily_check_pdf(date_str, line_filter):
     pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
     pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
 
-    # 테이블 바디
     for _, row in df_final.iterrows():
-        # 설비명 줄임 처리
         equip_name = str(row['equip_name'])
         if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
         
@@ -583,25 +266,17 @@ def generate_daily_check_pdf(date_str, line_filter):
         pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
         
         ox = str(row['ox'])
-        if ox == 'NG':
-            pdf.set_text_color(255, 0, 0)
-            pdf.set_font('Korean', 'B', 10) # 볼드체 시도 (폰트 지원 시)
-        else:
-            pdf.set_text_color(0, 0, 0)
-            
+        if ox == 'NG': pdf.set_text_color(255, 0, 0)
+        else: pdf.set_text_color(0, 0, 0)
         pdf.cell(20, 8, ox, 1, 0, 'C')
-        
-        # 폰트/색상 복귀
         pdf.set_text_color(0, 0, 0)
-        try: pdf.set_font('Korean', '', 10) 
-        except: pass
         
         pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
     return pdf.output(dest='S').encode('latin-1')
 
 # ------------------------------------------------------------------
-# 5. 사용자 인증
+# 4. 사용자 인증
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
@@ -630,7 +305,7 @@ def check_password():
 if not check_password(): st.stop()
 
 # ------------------------------------------------------------------
-# 6. 메인 메뉴
+# 5. 메인 메뉴
 # ------------------------------------------------------------------
 with st.sidebar:
     st.title("Cloud SMT")
@@ -645,7 +320,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 7. 기능 구현
+# 6. 기능 구현
 # ------------------------------------------------------------------
 
 # [1] 대시보드
@@ -848,22 +523,19 @@ elif menu == "🛠 설비보전관리":
                 c = alt.Chart(df).mark_bar().encode(x='작업구분', y='비용', color='작업구분').interactive()
                 st.altair_chart(c, use_container_width=True)
 
-# [4] 일일점검관리
+# [4] 일일점검관리 (Streamlit Native UI로 전면 교체)
 elif menu == "✅ 일일점검관리":
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 점검 현황", "📄 점검 이력 / PDF", "✍ 점검 입력 (HTML)", "🔄 데이터 동기화"])
+    tab1, tab2, tab3 = st.tabs(["📊 점검 현황", "📄 점검 이력 / PDF", "✍ 점검 입력 (Native)"])
     
     with tab1:
         st.markdown("##### 오늘의 점검 현황")
         today = datetime.now().strftime("%Y-%m-%d")
-        
-        # 현황 체크 로직 수정 (단순화)
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         df_today = df_res[df_res['date'] == today] if not df_res.empty else pd.DataFrame()
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("대상 라인", "2개 라인") # 임시 고정
+        c1.metric("대상 라인", "2개 라인") 
         c2.metric("금일 점검 항목 수", f"{len(df_today)} 건")
-        
         ng_today = df_today[df_today['ox']=='NG'] if not df_today.empty else pd.DataFrame()
         c3.metric("NG 발견", f"{len(ng_today)} 건")
 
@@ -875,7 +547,7 @@ elif menu == "✅ 일일점검관리":
     with tab2:
         c1, c2 = st.columns([1, 2])
         search_date = c1.date_input("조회 날짜", datetime.now())
-        search_line = c2.selectbox("라인 선택", ["1 LINE", "2 LINE"])
+        search_line = c2.selectbox("라인 선택", ["1 LINE", "2 LINE", "AOI", "수삽 LINE", "MASK 세척기", "SOLDER 보관온도", "온,습도 CHECK", "인두기 CHECK"])
         
         if st.button("조회 및 PDF 생성"):
             pdf_bytes = generate_daily_check_pdf(str(search_date), search_line)
@@ -884,26 +556,124 @@ elif menu == "✅ 일일점검관리":
             else:
                 st.warning("데이터가 없습니다.")
 
+    # [수정된 부분] Native Streamlit 입력 화면
     with tab3:
-        st.caption("현장 태블릿용 입력 화면입니다.")
-        master_json = get_master_json()
-        html_code = get_input_html(master_json)
-        components.html(html_code, height=800, scrolling=True)
+        st.info("💡 PC/태블릿 공용 입력 화면입니다.")
+        
+        # 1. 설정 선택
+        c_l, c_d = st.columns(2)
+        sel_line = c_l.selectbox("점검 라인 선택", ["1 LINE", "2 LINE", "AOI", "수삽 LINE", "MASK 세척기", "SOLDER 보관온도", "온,습도 CHECK", "인두기 CHECK"], key="chk_line")
+        sel_date = c_d.date_input("점검 일자", datetime.now(), key="chk_date")
+        
+        # 2. 마스터 데이터 및 기존 결과 로드
+        df_master = get_daily_check_master_data()
+        df_master = df_master[df_master['line'] == sel_line]
+        
+        # 기존 결과 로드 (있으면 값 채우기 위함)
+        df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        prev_data = {}
+        if not df_res.empty:
+            df_filtered = df_res[(df_res['date'] == str(sel_date)) & (df_res['line'] == sel_line)]
+            for _, r in df_filtered.iterrows():
+                # Key: Equip_Item
+                key = f"{r['equip_id']}_{r['item_name']}"
+                prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
-    with tab4:
-        st.markdown("#### 📥 현장 데이터 수신")
-        st.caption("태블릿(HTML)에서 복사한 JSON 데이터를 여기에 붙여넣으세요.")
-        json_input = st.text_area("JSON 데이터", height=150)
-        if st.button("데이터 저장 (Server Save)", type="primary"):
-            if json_input:
-                try:
-                    payload = json.loads(json_input)
-                    success, count, ngs = process_check_data(payload, st.session_state.user_info['id'])
-                    if success:
-                        st.success(f"✅ {count}건 저장 완료.")
-                        if ngs: st.error(f"⚠ {len(ngs)}건의 NG 발견: {ngs}")
-                    else: st.warning("저장할 데이터가 없습니다.")
-                except: st.error("데이터 형식이 올바르지 않습니다.")
+        # 일괄 합격 처리 로직
+        if st.button("✅ 일괄 합격 처리 (빈 항목 OK 채우기)"):
+            for _, row in df_master.iterrows():
+                k = f"{row['equip_id']}_{row['item_name']}"
+                if k not in st.session_state:
+                    # 세션스테이트 키 형식: check_val_{equip_id}_{item_name}
+                    widget_key = f"check_val_{row['equip_id']}_{row['item_name']}"
+                    # OX 타입만 OK로 강제 설정
+                    if row['check_type'] == 'OX':
+                        st.session_state[widget_key] = "OK"
+            st.rerun()
+
+        # 3. 입력 폼 생성
+        with st.form("check_form"):
+            # 설비별 그룹핑
+            for equip_name, group in df_master.groupby("equip_name"):
+                st.subheader(f"🛠 {equip_name} ({group.iloc[0]['equip_id']})")
+                
+                for _, row in group.iterrows():
+                    # Unique Key for Widget
+                    uid = f"{row['equip_id']}_{row['item_name']}"
+                    widget_key = f"check_val_{uid}"
+                    
+                    # 초기값 결정
+                    default_val = prev_data.get(uid, {}).get('val', None)
+                    default_ox = prev_data.get(uid, {}).get('ox', 'OK') # 기본 OK
+                    
+                    c1, c2, c3 = st.columns([2, 2, 1])
+                    c1.markdown(f"**{row['item_name']}**\n\n<span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
+                    
+                    with c2:
+                        if row['check_type'] == 'OX':
+                            # 라디오 버튼 인덱스 찾기
+                            idx = 0 if default_val == "OK" else (1 if default_val == "NG" else 0)
+                            st.radio("판정", ["OK", "NG"], key=widget_key, horizontal=True, index=idx, label_visibility="collapsed")
+                        else:
+                            # 수치 입력
+                            val = float(default_val) if default_val and default_val != '-' else 0.0
+                            st.number_input(f"수치 ({row['unit']})", value=val, key=widget_key)
+                    
+                    with c3:
+                        st.markdown(f"기준: {row['standard']}")
+                st.divider()
+            
+            # 서명 및 저장
+            st.markdown("#### ✍️ 점검자 서명")
+            c_s1, c_s2 = st.columns(2)
+            signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
+            confirm = c_s2.checkbox("위 내용대로 점검하였음을 확인합니다.")
+            
+            if st.form_submit_button("💾 점검 결과 저장", type="primary", use_container_width=True):
+                if confirm and signer_name:
+                    rows_to_save = []
+                    ng_list = []
+                    
+                    # 폼 데이터 수집
+                    for _, row in df_master.iterrows():
+                        uid = f"{row['equip_id']}_{row['item_name']}"
+                        w_key = f"check_val_{uid}"
+                        val = st.session_state.get(w_key)
+                        
+                        # OX 판정 로직
+                        ox = "OK"
+                        final_val = str(val)
+                        
+                        if row['check_type'] == 'OX':
+                            if val == 'NG': ox = 'NG'
+                        else:
+                            # 수치 판정
+                            try:
+                                num_val = float(val)
+                                min_v = float(row['min_val']) if row['min_val'] else -999999
+                                max_v = float(row['max_val']) if row['max_val'] else 999999
+                                if not (min_v <= num_val <= max_v): ox = 'NG'
+                            except: ox = 'NG'
+                        
+                        if ox == 'NG': ng_list.append(f"{row['item_name']}")
+                        
+                        rows_to_save.append([
+                            str(sel_date), sel_line, row['equip_id'], row['item_name'], 
+                            final_val, ox, signer_name, str(datetime.now())
+                        ])
+                    
+                    # 저장 실행
+                    if rows_to_save:
+                        append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                        # 서명 저장 (텍스트 기반)
+                        sig_row = [str(sel_date), sel_line, signer_name, "Electronic Signature", str(datetime.now())]
+                        append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
+                        
+                        st.success("점검 결과가 저장되었습니다.")
+                        if ng_list:
+                            st.error(f"다음 항목에서 NG가 발생했습니다: {', '.join(ng_list)}")
+                else:
+                    st.warning("성명을 입력하고 확인란에 체크해주세요.")
 
 # [5] 기준정보관리
 elif menu == "⚙ 기준정보관리":
