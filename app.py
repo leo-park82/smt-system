@@ -358,13 +358,13 @@ def get_input_html(master_json):
                 e.preventDefault();
                 drawing = true;
                 ctx.beginPath();
-                const { x, y } = getPos(e);
+                const {{ x, y }} = getPos(e);
                 ctx.moveTo(x, y);
             }};
             const move = (e) => {{
                 if (!drawing) return;
                 e.preventDefault();
-                const { x, y } = getPos(e);
+                const {{ x, y }} = getPos(e);
                 ctx.lineTo(x, y);
                 ctx.stroke();
             }};
