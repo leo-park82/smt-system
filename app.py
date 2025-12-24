@@ -567,7 +567,8 @@ elif menu == "✅ 일일점검관리":
                     uid = f"{row['equip_id']}_{row['item_name']}"
                     widget_key = f"check_val_{uid}"
                     
-                    default_val = prev_data.get(uid, {}).get('val', None)
+                    default_val = prev_data.get(uid, {}).get('val', "") # 기본값 빈 문자열
+                    if default_val == "-": default_val = ""
                     
                     c1, c2, c3 = st.columns([2, 2, 1])
                     c1.markdown(f"**{row['item_name']}**\n\n<span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
@@ -582,40 +583,28 @@ elif menu == "✅ 일일점검관리":
                             
                             st.radio("판정", ["OK", "NG"], key=widget_key, horizontal=True, index=idx, label_visibility="collapsed")
                         else:
-                            # [수정] 수치 입력란: value=None으로 설정하여 0.00 삭제 필요 없게 함
-                            val_init = None
-                            if default_val and default_val != '-' and default_val != 'None':
-                                try:
-                                    val_init = float(default_val)
-                                except:
-                                    val_init = None
-                            
-                            st.number_input(
+                            # [수정] Text Input 사용 (초기값 빈 문자열 -> 0.00 삭제 불필요)
+                            st.text_input(
                                 f"수치 ({row['unit']})", 
-                                value=val_init, 
-                                step=0.1, 
+                                value=default_val, 
                                 key=widget_key, 
-                                placeholder="터치하여 입력"
+                                placeholder="클릭하여 입력"
                             )
                     
                     with c3:
                         st.markdown(f"기준: {row['standard']}")
                 st.divider()
             
-            # [수정] 서명란 개선: 체크박스 제거, 직관적인 입력 유도
+            # [수정] 서명란: 체크박스 완전 제거, 이름+버튼 방식
             st.markdown("#### ✍️ 전자 서명 (Sign)")
             
             sig_col1, sig_col2 = st.columns([3, 1])
             with sig_col1:
-                signer_name = st.text_input("점검자 성명 (Name)", value=st.session_state.user_info['name'], placeholder="이름을 입력하세요")
-            with sig_col2:
-                if signer_name:
-                    st.success("서명 가능")
-                else:
-                    st.warning("이름 필요")
-
-            st.caption("※ 성명을 입력하고 아래 '서명 및 저장' 버튼을 누르면 전자 서명이 완료됩니다.")
+                signer_name = st.text_input("점검자 성명 (Name)", value=st.session_state.user_info['name'], placeholder="성명을 입력하세요")
             
+            st.caption("※ 성명 입력 후 아래 버튼을 누르면 점검 결과와 서명이 함께 저장됩니다.")
+            
+            # 버튼 클릭이 곧 서명
             if st.form_submit_button("🖱️ 서명 및 저장 (Sign & Save)", type="primary", use_container_width=True):
                 if signer_name:
                     rows_to_save = []
@@ -627,19 +616,16 @@ elif menu == "✅ 일일점검관리":
                         val = st.session_state.get(w_key)
                         
                         ox = "OK"
-                        if val is None:
-                            final_val = ""
-                        else:
-                            final_val = str(val)
+                        final_val = str(val) if val is not None else ""
                         
                         if row['check_type'] == 'OX':
                             if val == 'NG': ox = 'NG'
                         else:
-                            if val is None:
+                            if not final_val: # 빈 값이면 OK (혹은 스킵)
                                 ox = "OK" 
                             else:
                                 try:
-                                    num_val = float(val)
+                                    num_val = float(final_val)
                                     min_v = float(row['min_val']) if row['min_val'] else -999999
                                     max_v = float(row['max_val']) if row['max_val'] else 999999
                                     if not (min_v <= num_val <= max_v): ox = 'NG'
