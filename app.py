@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import hashlib
 import json
@@ -178,19 +178,20 @@ def safe_float(value, default_val=None):
     except: return default_val
 
 # ------------------------------------------------------------------
-# 3. PDF 생성 로직 (임시 파일 사용, 한글 폰트 지원)
+# 3. PDF 생성 로직 (Modern Design)
 # ------------------------------------------------------------------
 def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if not df_m.empty:
+        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
+        
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    
     if not df_r.empty:
         df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
-        # 최신 데이터만 유지
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-    # 폰트 다운로드 (나눔고딕)
+    # 폰트 다운로드
     font_filename = 'NanumGothic.ttf'
     if not os.path.exists(font_filename):
         try:
@@ -198,35 +199,38 @@ def generate_all_daily_check_pdf(date_str):
             urllib.request.urlretrieve(url, font_filename)
         except: pass
 
+    # PDF 생성
     pdf = FPDF()
+    font_name = 'Arial'
     try:
         pdf.add_font('Korean', '', font_filename, uni=True)
-    except:
-        pass # 폰트 실패 시 기본 폰트
+        font_name = 'Korean'
+    except: pass
 
     lines = df_m['line'].unique()
+    
     for line in lines:
         pdf.add_page()
-        try: pdf.set_font('Korean', '', 16)
-        except: pdf.set_font('Arial', '', 16)
         
-        pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
-        pdf.set_font_size(12)
-        pdf.cell(0, 10, f"Line: {line}", ln=True)
-        pdf.ln(5)
-
-        pdf.set_font_size(10)
-        pdf.set_fill_color(240, 240, 240)
-        # 헤더
-        headers = ["설비명", "점검항목", "측정값", "판정", "점검자"]
-        widths = [40, 60, 30, 20, 30]
+        # [Design] 상단 컬러 헤더 바
+        pdf.set_fill_color(63, 81, 181) # Indigo color
+        pdf.rect(0, 0, 210, 25, 'F')
         
-        for h, w in zip(headers, widths):
-            pdf.cell(w, 8, h, 1, 0, 'C', 1)
-        pdf.ln()
-
+        # [Design] 타이틀
+        pdf.set_font(font_name, '', 20)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(10, 5)
+        pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
+        
+        # [Design] 우측 상단 정보
+        pdf.set_font(font_name, '', 10)
+        pdf.set_xy(10, 5)
+        pdf.cell(0, 15, f"Date: {date_str}  |  Line: {line}", 0, 0, 'R')
+        
+        pdf.ln(25)
+        
+        # [Design] 통계 요약 박스
         line_master = df_m[df_m['line'] == line]
-        # 순서 유지를 위해 Master 기준 병합
         if not df_r.empty:
             df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
         else:
@@ -234,37 +238,75 @@ def generate_all_daily_check_pdf(date_str):
             df_final['value'] = '-'
             df_final['ox'] = '-'
             df_final['checker'] = ''
-
+        
         df_final = df_final.fillna({'value': '-', 'ox': '-', 'checker': ''})
+        
+        total = len(df_final)
+        ok = len(df_final[df_final['ox'] == 'OK'])
+        ng = len(df_final[df_final['ox'] == 'NG'])
+        
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(font_name, '', 12)
+        pdf.cell(0, 10, f"Summary: Total {total}  /  Pass {ok}  /  Fail {ng}", 0, 1, 'L')
+        pdf.ln(2)
 
+        # [Design] 테이블 헤더
+        pdf.set_fill_color(240, 242, 245) # Light Gray
+        pdf.set_text_color(60, 60, 60)
+        pdf.set_draw_color(220, 220, 220)
+        pdf.set_line_width(0.3)
+        pdf.set_font(font_name, '', 10)
+        
+        cols = [("설비명", 45), ("점검항목", 65), ("기준", 30), ("측정값", 20), ("판정", 15), ("점검자", 15)]
+        
+        for name, width in cols:
+            pdf.cell(width, 10, name, 1, 0, 'C', 1)
+        pdf.ln()
+
+        # [Design] 테이블 바디 (Zebra Striping)
+        fill = False
+        pdf.set_fill_color(250, 250, 250) # Very Light Gray for alternate rows
+        
         for _, row in df_final.iterrows():
             equip_name = str(row['equip_name'])
-            if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
+            if len(equip_name) > 18: equip_name = equip_name[:17] + ".."
             
-            pdf.cell(40, 8, equip_name, 1)
-            pdf.cell(60, 8, str(row['item_name']), 1)
-            pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
+            pdf.cell(45, 8, equip_name, 1, 0, 'L', fill)
+            pdf.cell(65, 8, str(row['item_name']), 1, 0, 'L', fill)
+            pdf.cell(30, 8, str(row['standard']), 1, 0, 'C', fill)
+            pdf.cell(20, 8, str(row['value']), 1, 0, 'C', fill)
             
+            # 판정 컬러링
             ox = str(row['ox'])
             if ox == 'NG': 
-                pdf.set_text_color(255, 0, 0)
-                pdf.set_font('', 'U')
-            else: 
-                pdf.set_text_color(0, 0, 0)
-                pdf.set_font('', '')
+                pdf.set_text_color(220, 38, 38) # Red
+                pdf.set_font(font_name, 'U', 10)
+            elif ox == 'OK':
+                pdf.set_text_color(22, 163, 74) # Green
+                pdf.set_font(font_name, '', 10)
+            else:
+                pdf.set_text_color(150, 150, 150)
+                pdf.set_font(font_name, '', 10)
+                
+            pdf.cell(15, 8, ox, 1, 0, 'C', fill)
             
-            pdf.cell(20, 8, ox, 1, 0, 'C')
-            
+            # Reset text color
             pdf.set_text_color(0, 0, 0)
-            pdf.set_font('', '')
-            pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
+            pdf.set_font(font_name, '', 10)
+            pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
+            
+            pdf.ln()
+            fill = not fill # Toggle fill
 
-    # [핵심] 임시 파일 저장 후 바이너리 읽기 (인코딩 오류 방지)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        pdf.output(tmp.name)
-        with open(tmp.name, "rb") as f:
+        # Footer space
+        pdf.ln(10)
+
+    # 임시 파일 저장 후 바이너리 읽기
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        pdf.output(tmp_file.name)
+        with open(tmp_file.name, "rb") as f:
             pdf_bytes = f.read()
-    os.unlink(tmp.name)
+    os.unlink(tmp_file.name)
     return pdf_bytes
 
 # ------------------------------------------------------------------
@@ -397,7 +439,6 @@ elif menu == "🏭 생산관리":
         st.info("PDF 출력 기능")
 
 elif menu == "🛠 설비보전관리":
-    # (기존 설비보전관리 코드 유지)
     t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
     with t1:
         c1, c2 = st.columns([1, 1.5])
@@ -411,10 +452,21 @@ elif menu == "🛠 설비보전관리":
                     f_eq = st.selectbox("대상 설비", list(eq_map.keys()), format_func=lambda x: f"[{x}] {eq_map[x]}")
                     f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                     f_desc = st.text_area("작업 내용", height=80)
-                    total_cost = st.number_input("총 소요 비용", value=0)
+                    if 'parts_buffer' not in st.session_state: st.session_state.parts_buffer = []
+                    col_p1, col_p2, col_p3 = st.columns([2, 1, 1])
+                    p_name = col_p1.text_input("교체부품명")
+                    p_cost = col_p2.number_input("비용", step=1000)
+                    if col_p3.button("부품 추가"):
+                        if p_name: st.session_state.parts_buffer.append({"내역": p_name, "비용": int(p_cost)})
+                    if st.session_state.parts_buffer:
+                        st.dataframe(pd.DataFrame(st.session_state.parts_buffer), use_container_width=True, hide_index=True)
+                        if st.button("목록 초기화"): st.session_state.parts_buffer = []
+                    total_cost = sum([p['비용'] for p in st.session_state.parts_buffer])
+                    f_final_cost = st.number_input("총 소요 비용", value=total_cost)
                     f_down = st.number_input("비가동 시간(분)", step=10)
                     if st.button("이력 저장", type="primary", use_container_width=True):
-                        rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": "", "비용": total_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                        parts_str = ", ".join([f"{p['내역']}" for p in st.session_state.parts_buffer])
+                        rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_str, "비용": f_final_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
                         append_data(rec, SHEET_MAINTENANCE)
                         st.toast("정비 이력이 저장되었습니다.", icon="✅")
             else: st.warning("권한이 없습니다.")
@@ -440,11 +492,10 @@ elif menu == "✅ 일일점검관리":
     with tab1:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
-        c_date = st.columns([1])[0]
+        c_date, c_btn = st.columns([2, 1])
         sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        # 전체 마스터 데이터 로드 (정렬 X -> 시트 순서 유지)
-        df_master_all = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+        df_master_all = get_daily_check_master_data()
         
         if df_master_all.empty:
             st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 항목을 추가해주세요.")
@@ -452,6 +503,19 @@ elif menu == "✅ 일일점검관리":
         # 라인별 탭 생성
         lines = df_master_all['line'].unique()
         if len(lines) > 0:
+            # [수정] 일괄 합격 버튼을 상단에 배치
+            with c_btn:
+                st.write("") # Spacer
+                st.write("") 
+                if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
+                    for _, row in df_master_all.iterrows():
+                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                        widget_key = f"val_{uid}_{sel_date}"
+                        if row['check_type'] == 'OX' and '온,습도' not in row['line']:
+                             if widget_key not in st.session_state:
+                                 st.session_state[widget_key] = "OK"
+                    st.rerun()
+
             line_tabs = st.tabs([f"📍 {l}" for l in lines])
             
             # 기존 결과 로드 (입력값 복원용)
@@ -466,60 +530,41 @@ elif menu == "✅ 일일점검관리":
                     key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
                     prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # [New] 일괄 합격 버튼 (세션 스테이트 업데이트)
-            if st.button("✅ 일괄 합격 처리 (빈 항목 OK 채우기)"):
-                for _, row in df_master_all.iterrows():
-                    uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                    widget_key = f"val_{uid}_{sel_date}"
-                    
-                    if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                         # 기존 값이 없으면 OK 설정
-                         if widget_key not in st.session_state:
-                             st.session_state[widget_key] = "OK"
-                st.rerun()
-
             # 라인별 탭 내부에 입력 폼 렌더링
             with st.form("main_check_form"):
                 for i, line in enumerate(lines):
                     with line_tabs[i]:
                         line_data = df_master_all[df_master_all['line'] == line]
                         
-                        # 설비별 그룹핑
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
                             
                             for _, row in group.iterrows():
                                 uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                                # [핵심] 키에 날짜 포함
                                 widget_key = f"val_{uid}_{sel_date}"
                                 
-                                # 이전 데이터가 있으면 그것을, 없으면 None
-                                saved_val = prev_data.get(uid, {}).get('val', None)
-                                saved_ox = prev_data.get(uid, {}).get('ox', None)
+                                default_val = prev_data.get(uid, {}).get('val', None)
                                 
                                 c1, c2, c3 = st.columns([2, 2, 1])
                                 c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
                                 
-                                # 온,습도 예외처리
                                 check_type = row['check_type']
                                 if '온,습도' in row['line'] or '온습도' in row['line']:
                                     check_type = 'NUMBER'
 
                                 with c2:
                                     if check_type == 'OX':
-                                        # 기본값 설정
                                         idx = None
-                                        if saved_val == 'OK': idx = 0
-                                        elif saved_val == 'NG': idx = 1
-                                        
-                                        # 일괄 합격 처리 등으로 세션에 값이 들어와 있으면 우선 적용
-                                        if widget_key in st.session_state and st.session_state[widget_key] in ["OK", "NG"]:
+                                        if default_val == 'OK': idx = 0
+                                        elif default_val == 'NG': idx = 1
+                                        # Session State Check
+                                        if widget_key in st.session_state:
                                             if st.session_state[widget_key] == "OK": idx = 0
-                                            else: idx = 1
+                                            elif st.session_state[widget_key] == "NG": idx = 1
 
                                         st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
                                     else:
-                                        val_str = str(saved_val) if saved_val and saved_val != 'nan' else ""
+                                        val_str = str(default_val) if default_val and default_val != 'nan' else ""
                                         st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder="입력")
                                 
                                 with c3:
@@ -550,7 +595,6 @@ elif menu == "✅ 일일점검관리":
                         rows_to_save = []
                         ng_list = []
                         
-                        # [핵심] 덮어쓰기를 위해 기존 데이터 로드 및 현재 날짜 데이터 제거
                         df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                         if not df_existing.empty:
                             df_existing['date'] = df_existing['date'].astype(str)
@@ -566,7 +610,7 @@ elif menu == "✅ 일일점검관리":
                             
                             if row['check_type'] == 'OX' and ('온,습도' not in row['line']):
                                 if val == 'NG': ox = 'NG'
-                                elif val is None: ox = "NG" # 미입력 시 NG 처리
+                                elif val is None: ox = "NG" 
                             else:
                                 if not final_val: 
                                     ox = "NG" 
@@ -586,12 +630,10 @@ elif menu == "✅ 일일점검관리":
                             ])
                         
                         if rows_to_save:
-                            # 기존 데이터(df_existing) + 새 데이터(rows_to_save) 합쳐서 저장
                             df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
                             df_final = pd.concat([df_existing, df_new], ignore_index=True)
                             save_data(df_final, SHEET_CHECK_RESULT)
                             
-                            # 서명 저장
                             sig_type = "Canvas Signature" if signature_data else "Text Signature"
                             sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
                             append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
@@ -611,20 +653,17 @@ elif menu == "✅ 일일점검관리":
         today = datetime.now().strftime("%Y-%m-%d")
         
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-        df_master = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+        df_master = get_daily_check_master_data()
         
         if not df_res.empty:
             df_res['date'] = df_res['date'].astype(str)
             df_today = df_res[df_res['date'] == today]
-            # [핵심] 중복 제거
             if not df_today.empty:
                 df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                 
-                # [핵심] 마스터에 있는 것만 카운트 (삭제된 항목 제외)
-                if not df_master.empty:
-                    df_master['key'] = df_master['line'] + df_master['equip_id'] + df_master['item_name']
-                    df_today['key'] = df_today['line'] + df_today['equip_id'] + df_today['item_name']
-                    df_today = df_today[df_today['key'].isin(df_master['key'])]
+                df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
+                df_today['key'] = df_today['line'] + "_" + df_today['equip_id'] + "_" + df_today['item_name']
+                df_today = df_today[df_today['key'].isin(df_master['key'])]
         else:
             df_today = pd.DataFrame()
 
