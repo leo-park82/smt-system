@@ -186,14 +186,19 @@ def get_daily_check_master_data():
     return df
 
 def generate_all_daily_check_pdf(date_str):
+    # 1. 마스터 데이터 로드 (정렬됨)
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if not df_m.empty:
+        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
+        
+    # 2. 결과 데이터 로드
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    
     if not df_r.empty:
         df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
+    # 3. 폰트 다운로드
     font_filename = 'NanumGothic.ttf'
     if not os.path.exists(font_filename):
         try:
@@ -201,6 +206,7 @@ def generate_all_daily_check_pdf(date_str):
             urllib.request.urlretrieve(url, font_filename)
         except: pass
 
+    # 4. PDF 생성
     pdf = FPDF()
     font_name = 'Arial'
     try:
@@ -213,20 +219,24 @@ def generate_all_daily_check_pdf(date_str):
     for line in lines:
         pdf.add_page()
         
+        # [Design] 상단 헤더 바
         pdf.set_fill_color(63, 81, 181) 
         pdf.rect(0, 0, 210, 25, 'F')
         
+        # [Design] 타이틀
         pdf.set_font(font_name, '', 20)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
         
+        # [Design] 우측 상단 정보 (라인명 제거, 날짜만)
         pdf.set_font(font_name, '', 10)
         pdf.set_xy(10, 5)
-        pdf.cell(0, 15, f"Date: {date_str}  |  Line: {line}", 0, 0, 'R')
+        pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
         
         pdf.ln(25)
         
+        # 데이터 병합 및 통계
         line_master = df_m[df_m['line'] == line]
         if not df_r.empty:
             df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
@@ -243,10 +253,20 @@ def generate_all_daily_check_pdf(date_str):
         ng = len(df_final[df_final['ox'] == 'NG'])
         
         pdf.set_text_color(0, 0, 0)
-        pdf.set_font(font_name, '', 12)
-        pdf.cell(0, 10, f"Summary: Total {total}  /  Pass {ok}  /  Fail {ng}", 0, 1, 'L')
-        pdf.ln(2)
+        
+        # [Design] Summary 대신 라인명 크게 표시
+        pdf.set_font(font_name, '', 16)
+        pdf.cell(0, 10, f"{line}", 0, 1, 'L')
+        
+        # [Design] 하단 통계 작게 표시
+        pdf.set_font(font_name, '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Total: {total}  |  OK: {ok}  |  NG: {ng}", 0, 1, 'L')
+        pdf.ln(4)
+        
+        pdf.set_text_color(0, 0, 0) # 색상 복귀
 
+        # [Design] 테이블 헤더
         pdf.set_fill_color(240, 242, 245)
         pdf.set_text_color(60, 60, 60)
         pdf.set_draw_color(220, 220, 220)
@@ -260,6 +280,7 @@ def generate_all_daily_check_pdf(date_str):
             pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
         pdf.ln()
 
+        # [Design] 테이블 바디 (Zebra)
         fill = False
         pdf.set_fill_color(250, 250, 250) 
         
@@ -294,6 +315,7 @@ def generate_all_daily_check_pdf(date_str):
 
         pdf.ln(10)
 
+    # 임시 파일 저장 후 바이너리 읽기
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
         with open(tmp_file.name, "rb") as f:
@@ -490,7 +512,7 @@ elif menu == "🛠 설비보전관리":
 elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
-    # 1. 점검 입력
+    # 1. 점검 입력 (Native UI - One Page Save with Tabs)
     with tab1:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
@@ -498,43 +520,23 @@ elif menu == "✅ 일일점검관리":
         with c_date:
             sel_date = st.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        # [복구] 날짜 선택 시 상태 표시
-        df_res_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-        df_master_check = get_daily_check_master_data()
+        df_master_all = get_daily_check_master_data()
         
-        total_count = len(df_master_check)
-        current_count = 0
-        if not df_res_check.empty:
-             df_res_check['date'] = df_res_check['date'].astype(str)
-             df_done = df_res_check[df_res_check['date'] == str(sel_date)]
-             df_done = df_done.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-             current_count = len(df_done)
-        
-        if total_count > 0:
-            progress = current_count / total_count
-            if progress >= 1.0:
-                st.success(f"✅ {sel_date} : 점검 완료 ({current_count}/{total_count})")
-            elif progress > 0:
-                st.warning(f"⚠️ {sel_date} : 점검 진행 중 ({current_count}/{total_count})")
-            else:
-                st.info(f"⬜ {sel_date} : 미점검 ({current_count}/{total_count})")
-        
-        if df_master_check.empty:
+        if df_master_all.empty:
             st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 항목을 추가해주세요.")
         
-        lines = df_master_check['line'].unique()
+        lines = df_master_all['line'].unique()
         if len(lines) > 0:
             with c_btn:
                 st.write("") 
                 st.write("") 
-                # [Fix] 일괄 합격 (값 없는 것만 OK로)
+                # [Fix] 일괄 합격 (키 일치)
                 if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
-                    for _, row in df_master_check.iterrows():
+                    for _, row in df_master_all.iterrows():
                         uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}"
+                        widget_key = f"val_{uid}_{sel_date}" # 키 매칭
                         if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                             # session_state에 값이 없거나 None이면 OK 설정
-                             if st.session_state.get(widget_key) is None:
+                             if widget_key not in st.session_state:
                                  st.session_state[widget_key] = "OK"
                     st.rerun()
 
@@ -553,7 +555,7 @@ elif menu == "✅ 일일점검관리":
             with st.form("main_check_form"):
                 for i, line in enumerate(lines):
                     with line_tabs[i]:
-                        line_data = df_master_check[df_master_check['line'] == line]
+                        line_data = df_master_all[df_master_all['line'] == line]
                         
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
@@ -616,7 +618,7 @@ elif menu == "✅ 일일점검관리":
                             df_existing['date'] = df_existing['date'].astype(str)
                             df_existing = df_existing[df_existing['date'] != str(sel_date)]
                         
-                        for _, row in df_master_check.iterrows():
+                        for _, row in df_master_all.iterrows():
                             uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
                             widget_key = f"val_{uid}_{sel_date}"
                             val = st.session_state.get(widget_key)
