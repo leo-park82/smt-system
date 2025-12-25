@@ -76,7 +76,6 @@ COLS_CHECK_SIGNATURE = ["date", "line", "signer", "signature_data", "timestamp"]
 
 # 초기 마스터 데이터
 DEFAULT_CHECK_MASTER = [
-    # 1 LINE
     {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "AIR 압력", "check_content": "압력 게이지 지침 확인", "standard": "0.5 MPa ± 0.1", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
     {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "수/자동 전환", "check_content": "MODE 전환 스위치 작동", "standard": "정상 동작", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
     {"line": "1 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "매거진 상태", "check_content": "Locking 마모, 휨, 흔들림", "standard": "마모/휨 없을 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
@@ -86,14 +85,9 @@ DEFAULT_CHECK_MASTER = [
     {"line": "1 LINE", "equip_id": "S2", "equip_name": "CHIP MOUNTER", "item_name": "필터 및 노즐", "check_content": "Head Air 필터 및 노즐 오염", "standard": "오염 및 변형 없을 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
     {"line": "1 LINE", "equip_id": "1809MK", "equip_name": "REFLOW", "item_name": "N2 PPM", "check_content": "산소 농도 모니터 수치", "standard": "3000 ppm 이하", "check_type": "NUMBER", "min_val": "0", "max_val": "3000", "unit": "ppm"},
     {"line": "1 LINE", "equip_id": "1809MK", "equip_name": "REFLOW", "item_name": "배기관 OPEN", "check_content": "배기 댐퍼 열림 위치", "standard": "오픈 위치", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
-    
-    # 2 LINE
-    {"line": "2 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "AIR 압력", "check_content": "게이지 지침 확인", "standard": "0.5 MPa ± 0.1", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
-    {"line": "2 LINE", "equip_id": "SML-120Y", "equip_name": "IN LOADER", "item_name": "수/자동 전환", "check_content": "스위치 작동 확인", "standard": "정상 동작", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
-    {"line": "2 LINE", "equip_id": "SBSF-200Y", "equip_name": "VACUUM LOADER", "item_name": "PCB 흡착 패드", "check_content": "패드 손상 여부", "standard": "찢어짐 없을 것", "check_type": "OX", "min_val": "", "max_val": "", "unit": ""},
 ]
 
-DEFAULT_EQUIPMENT = [{"id": "SML-120Y", "name": "IN LOADER (1/2 LINE)", "func": "PCB 공급"}]
+DEFAULT_EQUIPMENT = [{"id": "SML-120Y", "name": "IN LOADER", "func": "PCB 공급"}]
 
 # ------------------------------------------------------------------
 # 2. 구글 시트 연결
@@ -113,7 +107,8 @@ def get_worksheet(sheet_name, create_cols=None):
     if not client: return None
     try:
         sh = client.open(GOOGLE_SHEET_NAME)
-    except: return None
+    except:
+        return None
     try:
         return sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
@@ -123,6 +118,8 @@ def get_worksheet(sheet_name, create_cols=None):
             return ws
         return None
 
+# [Fix] 여기에 @st.cache_data 데코레이터 추가하여 AttributeError 해결
+@st.cache_data(ttl=5)
 def load_data(sheet_name, cols=None):
     ws = get_worksheet(sheet_name, create_cols=cols)
     if not ws: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
@@ -191,10 +188,11 @@ def get_daily_check_master_data():
 
 def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    df_r = df_r[df_r['date'] == date_str]
+    if df_m.empty: df_m = pd.DataFrame(DEFAULT_CHECK_MASTER)
     
+    df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     if not df_r.empty:
+        df_r = df_r[df_r['date'] == date_str]
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
     pdf = FPDF()
@@ -238,6 +236,7 @@ def generate_all_daily_check_pdf(date_str):
         for _, row in df_final.iterrows():
             equip_name = str(row['equip_name'])
             if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
+            
             pdf.cell(40, 8, equip_name, 1)
             pdf.cell(60, 8, str(row['item_name']), 1)
             pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
@@ -247,6 +246,7 @@ def generate_all_daily_check_pdf(date_str):
             else: pdf.set_text_color(0, 0, 0)
             pdf.cell(20, 8, ox, 1, 0, 'C')
             pdf.set_text_color(0, 0, 0)
+            
             pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
     return pdf.output(dest='S').encode('latin-1')
@@ -280,9 +280,6 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# ------------------------------------------------------------------
-# 5. 메인 메뉴
-# ------------------------------------------------------------------
 with st.sidebar:
     st.title("Cloud SMT")
     u = st.session_state.user_info
@@ -316,6 +313,14 @@ if menu == "📊 대시보드":
     col1.metric("오늘 생산량", f"{prod_today:,.0f} EA")
     col2.metric("일일점검 완료", f"{check_today} 건")
     col3.metric("NG 발생", f"{ng_today} 건", delta_color="inverse")
+
+    st.markdown("#### 📅 주간 생산 추이")
+    if not df_prod.empty and HAS_ALTAIR:
+        chart_data = df_prod.groupby('날짜')['수량'].sum().reset_index()
+        c = alt.Chart(chart_data).mark_line(point=True).encode(x='날짜', y='수량', tooltip=['날짜', '수량']).interactive()
+        st.altair_chart(c, use_container_width=True)
+    elif df_prod.empty:
+        st.info("생산 데이터가 없습니다.")
 
 elif menu == "🏭 생산관리":
     t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산 분석", "📑 일일 보고서"])
@@ -392,7 +397,6 @@ elif menu == "🏭 생산관리":
             daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
             if not daily_df.empty:
                 st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
-                # HTML 없이 순수 Python 로직으로 처리하기 위해 PDF 다운로드 버튼만 제공 (JS Canvas 사용 X)
                 st.warning("이 메뉴의 PDF 출력은 '일일점검관리' 탭에서 통합 제공됩니다.")
             else: st.warning("해당 날짜에 생산 실적이 없습니다.")
 
@@ -453,7 +457,7 @@ elif menu == "🛠 설비보전관리":
 elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
-    # 1. 점검 입력 (Native, 0.0 제거, 그리기 서명 사용 시도, 실패시 대체)
+    # 1. 점검 입력 (Native)
     with tab1:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
@@ -462,7 +466,10 @@ elif menu == "✅ 일일점검관리":
         sel_date = c_d.date_input("점검 일자", datetime.now(), key="chk_date")
         
         df_master = get_daily_check_master_data()
-        df_master = df_master[df_master['line'] == sel_line]
+        if not df_master.empty:
+            df_master = df_master[df_master['line'] == sel_line]
+        else:
+            st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 초기화해주세요.")
         
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         prev_data = {}
@@ -479,7 +486,6 @@ elif menu == "✅ 일일점검관리":
             st.rerun()
 
         with st.form("check_form"):
-            # sort=False로 엑셀 순서 유지
             for equip_name, group in df_master.groupby("equip_name", sort=False):
                 st.subheader(f"🛠 {equip_name}")
                 for _, row in group.iterrows():
@@ -499,19 +505,18 @@ elif menu == "✅ 일일점검관리":
                                 elif st.session_state[widget_key] == "NG": idx = 1
                             st.radio("판정", ["OK", "NG"], key=widget_key, horizontal=True, index=idx, label_visibility="collapsed")
                         else:
-                            # [핵심] 0.00 제거 -> Text Input으로 변경하여 placeholder 표시
+                            # [Fix] 0.00 제거 -> Text Input으로 변경하여 placeholder 표시
                             # 초기값이 없으면 None으로 두어 빈칸이 되게 함
                             val_str = str(default_val) if default_val and default_val != 'nan' else ""
                             st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder="입력")
                     with c3: st.markdown(f"기준: {row['standard']}")
                 st.divider()
             
-            # [핵심] 서명란 개선 (Canvas or Text)
+            # [Fix] 서명란 개선 (Canvas or Text)
             st.markdown("#### ✍️ 전자 서명")
             
             signature_data = None
             if HAS_CANVAS:
-                # 라이브러리가 있으면 그리기 서명 사용
                 st.caption("아래 박스에 마우스나 터치로 서명하세요.")
                 canvas_result = st_canvas(
                     fill_color="rgba(255, 165, 0, 0.3)",
@@ -524,17 +529,11 @@ elif menu == "✅ 일일점검관리":
                     key="canvas_signature",
                 )
                 if canvas_result.image_data is not None:
-                    # 이미지 데이터가 있으면 서명된 것으로 간주
-                    # 실제 저장을 위해선 base64 변환 등이 필요하나 여기선 존재 여부만 체크
                     signature_data = "Signed via Canvas" 
             
-            # 텍스트 서명 (항상 표시, 백업용)
             c_s1, c_s2 = st.columns([3, 1])
             signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
             
-            # 캔버스가 없거나 서명을 안했으면 텍스트 서명으로 갈음
-            final_signature = signature_data if signature_data else signer_name
-
             if st.form_submit_button("💾 점검 결과 및 서명 저장", type="primary", use_container_width=True):
                 if signer_name:
                     rows_to_save = []
@@ -550,7 +549,7 @@ elif menu == "✅ 일일점검관리":
                         if row['check_type'] == 'OX':
                             if val == 'NG': ox = 'NG'
                         else:
-                            if not final_val: ox = "OK" # 빈값은 일단 OK (현장 요청에 따라 변경 가능)
+                            if not final_val: ox = "OK" 
                             else:
                                 try:
                                     num_val = float(final_val)
@@ -563,7 +562,6 @@ elif menu == "✅ 일일점검관리":
                     
                     if rows_to_save:
                         append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                        # 서명 저장 (텍스트/캔버스 무관하게 기록)
                         sig_type = "Canvas Signature" if signature_data else "Text Signature"
                         sig_row = [str(sel_date), sel_line, signer_name, sig_type, str(datetime.now())]
                         append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
