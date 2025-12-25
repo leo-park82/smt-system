@@ -101,8 +101,7 @@ def get_worksheet(sheet_name, create_cols=None):
     if not client: return None
     try:
         sh = client.open(GOOGLE_SHEET_NAME)
-    except:
-        return None
+    except: return None
     try:
         return sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
@@ -179,16 +178,14 @@ def safe_float(value, default_val=None):
     except: return default_val
 
 # ------------------------------------------------------------------
-# 3. 서버 사이드 로직 (Helper)
+# 3. PDF 생성 로직 (Windows 호환성 Fix)
 # ------------------------------------------------------------------
-def get_daily_check_master_data():
-    df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    return df
-
 def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if not df_m.empty:
+        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
+        
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    
     if not df_r.empty:
         df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
@@ -294,15 +291,35 @@ def generate_all_daily_check_pdf(date_str):
 
         pdf.ln(10)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        pdf.output(tmp_file.name)
-        with open(tmp_file.name, "rb") as f:
-            pdf_bytes = f.read()
-    os.unlink(tmp_file.name)
+    # [Fix] 윈도우 호환성을 위한 파일 처리 방식 변경
+    # 파일을 닫은 후 경로를 통해 FPDF가 쓰게 하거나, 바이트로 읽어야 함
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp_name = tmp.name
+    
+    # FPDF output
+    pdf.output(tmp_name)
+    
+    # Read binary
+    with open(tmp_name, "rb") as f:
+        pdf_bytes = f.read()
+    
+    # Cleanup
+    try:
+        os.unlink(tmp_name)
+    except:
+        pass
+        
     return pdf_bytes
 
 # ------------------------------------------------------------------
-# 4. 사용자 인증
+# 4. 서버 사이드 로직 (데이터 로드)
+# ------------------------------------------------------------------
+def get_daily_check_master_data():
+    df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    return df
+
+# ------------------------------------------------------------------
+# 5. 사용자 인증 및 메인 메뉴
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
@@ -342,7 +359,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 5. 기능 구현 (메인)
+# 6. 기능 구현
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
@@ -490,7 +507,7 @@ elif menu == "🛠 설비보전관리":
 elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
-    # 1. 점검 입력 (Native UI)
+    # 1. 점검 입력
     with tab1:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
@@ -498,16 +515,6 @@ elif menu == "✅ 일일점검관리":
         with c_date:
             sel_date = st.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        # [New] 날짜 선택 시 바로 점검 상태 표시
-        df_check_result = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-        is_checked = False
-        if not df_check_result.empty:
-             if str(sel_date) in df_check_result['date'].astype(str).values:
-                 st.success(f"✅ {sel_date} : 점검 이력이 존재합니다.")
-                 is_checked = True
-             else:
-                 st.warning(f"⬜ {sel_date} : 점검 이력이 없습니다.")
-
         df_master_all = get_daily_check_master_data()
         
         if df_master_all.empty:
@@ -518,18 +525,21 @@ elif menu == "✅ 일일점검관리":
             with c_btn:
                 st.write("") 
                 st.write("") 
-                # [Fix] 일괄 합격 (키 일치)
-                if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
+                # [Fix] 일괄 합격 버튼 (값 미입력인 OX 항목만 OK로 채움)
+                if st.button("✅ 일괄 합격 (빈 항목 OK 채우기)", type="secondary", use_container_width=True):
                     for _, row in df_master_all.iterrows():
                         uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}" # 키 매칭
+                        widget_key = f"val_{uid}_{sel_date}"
+                        
                         if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                             if widget_key not in st.session_state:
-                                 st.session_state[widget_key] = "OK"
+                            # 값이 없으면 OK 설정 (session_state 직접 조작)
+                            if st.session_state.get(widget_key) is None:
+                                st.session_state[widget_key] = "OK"
                     st.rerun()
 
             line_tabs = st.tabs([f"📍 {l}" for l in lines])
             
+            # 기존 결과 로드 (입력값 복원)
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
             prev_data = {}
             if not df_res.empty:
@@ -545,6 +555,7 @@ elif menu == "✅ 일일점검관리":
                     with line_tabs[i]:
                         line_data = df_master_all[df_master_all['line'] == line]
                         
+                        # 설비별 그룹핑 (정렬됨)
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
                             
@@ -552,6 +563,7 @@ elif menu == "✅ 일일점검관리":
                                 uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
                                 widget_key = f"val_{uid}_{sel_date}"
                                 
+                                # 이전 값 가져오기
                                 default_val = prev_data.get(uid, {}).get('val', None)
                                 
                                 c1, c2, c3 = st.columns([2, 2, 1])
@@ -563,16 +575,21 @@ elif menu == "✅ 일일점검관리":
 
                                 with c2:
                                     if check_type == 'OX':
+                                        # 기본값 설정
                                         idx = None
                                         if default_val == 'OK': idx = 0
                                         elif default_val == 'NG': idx = 1
-                                        if widget_key in st.session_state:
+                                        
+                                        # 일괄 합격 등으로 세션에 값이 있으면 우선 적용
+                                        if widget_key in st.session_state and st.session_state[widget_key] in ["OK", "NG"]:
                                             if st.session_state[widget_key] == "OK": idx = 0
-                                            elif st.session_state[widget_key] == "NG": idx = 1
+                                            else: idx = 1
+
                                         st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
                                     else:
                                         val_str = str(default_val) if default_val and default_val != 'nan' else ""
                                         st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder="입력")
+                                
                                 with c3:
                                     st.caption(f"기준: {row['standard']}")
                             st.divider()
@@ -601,6 +618,7 @@ elif menu == "✅ 일일점검관리":
                         rows_to_save = []
                         ng_list = []
                         
+                        # 기존 데이터 삭제 (Overwrite)
                         df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                         if not df_existing.empty:
                             df_existing['date'] = df_existing['date'].astype(str)
@@ -653,6 +671,7 @@ elif menu == "✅ 일일점검관리":
         else:
             st.info("표시할 라인 정보가 없습니다.")
 
+    # 2. 점검 현황
     with tab2:
         st.markdown("##### 오늘의 점검 현황")
         today = datetime.now().strftime("%Y-%m-%d")
@@ -666,6 +685,7 @@ elif menu == "✅ 일일점검관리":
             if not df_today.empty:
                 df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                 
+                # 마스터 키와 매칭하여 정확한 수량 계산
                 df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
                 df_today['key'] = df_today['line'] + "_" + df_today['equip_id'] + "_" + df_today['item_name']
                 df_today = df_today[df_today['key'].isin(df_master['key'])]
@@ -689,6 +709,7 @@ elif menu == "✅ 일일점검관리":
             if done_items == 0: st.info("오늘 점검 데이터가 아직 없습니다.")
             elif done_items >= total_items * 0.9: st.success("오늘의 점검이 완료되었습니다.")
 
+    # 3. 이력/PDF
     with tab3:
         c1, c2 = st.columns([1, 2])
         search_date = c1.date_input("조회 날짜 (PDF출력)", datetime.now())
