@@ -183,10 +183,12 @@ def safe_float(value, default_val=None):
 # ------------------------------------------------------------------
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if not df.empty:
+        df = df.sort_values(by=['line', 'equip_name', 'item_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
-    # 1. 마스터 데이터 로드 (정렬됨)
+    # 1. 마스터 데이터 로드
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     if not df_m.empty:
         df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
@@ -229,7 +231,7 @@ def generate_all_daily_check_pdf(date_str):
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
         
-        # [Design] 우측 상단 정보 (라인명 제거, 날짜만)
+        # [Design] 우측 상단 정보
         pdf.set_font(font_name, '', 10)
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
@@ -254,19 +256,19 @@ def generate_all_daily_check_pdf(date_str):
         
         pdf.set_text_color(0, 0, 0)
         
-        # [Design] Summary 대신 라인명 크게 표시
+        # [Design] Line Name
         pdf.set_font(font_name, '', 16)
         pdf.cell(0, 10, f"{line}", 0, 1, 'L')
         
-        # [Design] 하단 통계 작게 표시
+        # [Design] Statistics
         pdf.set_font(font_name, '', 10)
         pdf.set_text_color(100, 100, 100)
         pdf.cell(0, 6, f"Total: {total}  |  OK: {ok}  |  NG: {ng}", 0, 1, 'L')
         pdf.ln(4)
         
-        pdf.set_text_color(0, 0, 0) # 색상 복귀
+        pdf.set_text_color(0, 0, 0)
 
-        # [Design] 테이블 헤더
+        # [Design] Header
         pdf.set_fill_color(240, 242, 245)
         pdf.set_text_color(60, 60, 60)
         pdf.set_draw_color(220, 220, 220)
@@ -280,7 +282,7 @@ def generate_all_daily_check_pdf(date_str):
             pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
         pdf.ln()
 
-        # [Design] 테이블 바디 (Zebra)
+        # [Design] Body
         fill = False
         pdf.set_fill_color(250, 250, 250) 
         
@@ -315,7 +317,6 @@ def generate_all_daily_check_pdf(date_str):
 
         pdf.ln(10)
 
-    # 임시 파일 저장 후 바이너리 읽기
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
         with open(tmp_file.name, "rb") as f:
@@ -512,31 +513,53 @@ elif menu == "🛠 설비보전관리":
 elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
-    # 1. 점검 입력 (Native UI - One Page Save with Tabs)
+    # 1. 점검 입력
     with tab1:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
-        c_date, c_btn = st.columns([1, 1])
+        c_date, c_btn = st.columns([2, 1])
         with c_date:
             sel_date = st.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        df_master_all = get_daily_check_master_data()
+        # [복구] 날짜 선택 시 상태 표시 로직
+        df_res_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        df_master_check = get_daily_check_master_data()
         
-        if df_master_all.empty:
+        total_count = len(df_master_check)
+        current_count = 0
+        
+        if not df_res_check.empty:
+             df_res_check['date'] = df_res_check['date'].astype(str)
+             df_done = df_res_check[df_res_check['date'] == str(sel_date)]
+             # 중복 제거 후 카운트
+             if not df_done.empty:
+                df_done = df_done.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+                current_count = len(df_done)
+        
+        if total_count > 0:
+            progress = current_count / total_count
+            if progress >= 1.0:
+                st.success(f"✅ {sel_date} : 점검 완료 ({current_count}/{total_count})")
+            elif current_count > 0:
+                st.warning(f"⚠️ {sel_date} : 점검 진행 중 ({current_count}/{total_count})")
+            else:
+                st.info(f"⬜ {sel_date} : 미점검 ({current_count}/{total_count})")
+        
+        if df_master_check.empty:
             st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 항목을 추가해주세요.")
         
-        lines = df_master_all['line'].unique()
+        lines = df_master_check['line'].unique()
         if len(lines) > 0:
+            # [유지] 일괄 합격 버튼 (상단)
             with c_btn:
                 st.write("") 
                 st.write("") 
-                # [Fix] 일괄 합격 (키 일치)
                 if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
-                    for _, row in df_master_all.iterrows():
+                    for _, row in df_master_check.iterrows():
                         uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}" # 키 매칭
+                        widget_key = f"val_{uid}_{sel_date}"
                         if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                             if widget_key not in st.session_state:
+                             if st.session_state.get(widget_key) is None:
                                  st.session_state[widget_key] = "OK"
                     st.rerun()
 
@@ -555,7 +578,7 @@ elif menu == "✅ 일일점검관리":
             with st.form("main_check_form"):
                 for i, line in enumerate(lines):
                     with line_tabs[i]:
-                        line_data = df_master_all[df_master_all['line'] == line]
+                        line_data = df_master_check[df_master_check['line'] == line]
                         
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
@@ -618,7 +641,7 @@ elif menu == "✅ 일일점검관리":
                             df_existing['date'] = df_existing['date'].astype(str)
                             df_existing = df_existing[df_existing['date'] != str(sel_date)]
                         
-                        for _, row in df_master_all.iterrows():
+                        for _, row in df_master_check.iterrows():
                             uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
                             widget_key = f"val_{uid}_{sel_date}"
                             val = st.session_state.get(widget_key)
