@@ -7,7 +7,7 @@ import json
 import os
 from fpdf import FPDF
 
-# [선택] 그리기 서명 라이브러리 (설치된 경우에만 사용, 없으면 텍스트 서명으로 대체)
+# [선택] 그리기 서명 라이브러리
 try:
     from streamlit_drawable_canvas import st_canvas
     HAS_CANVAS = True
@@ -77,10 +77,6 @@ COLS_EQUIPMENT = ["id", "name", "func"]
 COLS_CHECK_MASTER = ["line", "equip_id", "equip_name", "item_name", "check_content", "standard", "check_type", "min_val", "max_val", "unit"]
 COLS_CHECK_RESULT = ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp"]
 COLS_CHECK_SIGNATURE = ["date", "line", "signer", "signature_data", "timestamp"]
-
-# [수정] 초기 마스터 데이터 제거 (구글 시트 데이터만 사용)
-DEFAULT_CHECK_MASTER = [] 
-DEFAULT_EQUIPMENT = []
 
 # ------------------------------------------------------------------
 # 2. 구글 시트 연결
@@ -172,12 +168,14 @@ def update_inventory(code, name, change, reason, user):
 # 3. 서버 사이드 로직
 # ------------------------------------------------------------------
 def get_daily_check_master_data():
-    # [수정] 초기화 로직 삭제: 오직 구글 시트 데이터만 로드
+    # [완전 수정] 오직 구글 시트 데이터만 로드 (초기화 로직 제거)
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     return df
 
 def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if df_m.empty: return None # 데이터 없으면 리턴
+
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     if not df_r.empty:
         df_r = df_r[df_r['date'] == date_str]
@@ -280,7 +278,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 5. 기능 구현
+# 5. 기능 구현 (메인)
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
@@ -294,6 +292,7 @@ if menu == "📊 대시보드":
         df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
         prod_today = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today]['수량'].sum()
     
+    # 점검 현황 집계 (중복 제거)
     check_today = 0
     ng_today = 0
     if not df_check.empty:
