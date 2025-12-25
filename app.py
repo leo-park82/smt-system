@@ -117,6 +117,10 @@ def load_data(sheet_name, cols=None):
     try:
         df = get_as_dataframe(ws, evaluate_formulas=True)
         df = df.dropna(how='all').dropna(axis=1, how='all')
+        
+        # [핵심 수정] NaN 값을 빈 문자열로 변환 (JSON 에러 방지)
+        df = df.fillna("") 
+        
         if cols:
             for c in cols: 
                 if c not in df.columns: df[c] = ""
@@ -129,6 +133,8 @@ def clear_cache():
 def save_data(df, sheet_name):
     ws = get_worksheet(sheet_name)
     if ws:
+        # [안전] 저장 전 NaN 처리
+        df = df.fillna("")
         ws.clear()
         set_with_dataframe(ws, df)
         clear_cache()
@@ -148,7 +154,9 @@ def append_data(data_dict, sheet_name):
 def append_rows(rows, sheet_name, cols):
     ws = get_worksheet(sheet_name, create_cols=cols)
     if ws:
-        ws.append_rows(rows)
+        # [핵심 수정] 모든 데이터를 강제로 문자열로 변환하여 JSON 에러 원천 차단
+        safe_rows = [[str(cell) if cell is not None else "" for cell in row] for row in rows]
+        ws.append_rows(safe_rows)
         clear_cache()
         return True
     return False
@@ -170,7 +178,6 @@ def update_inventory(code, name, change, reason, user):
 # ------------------------------------------------------------------
 # 3. 서버 사이드 로직 (Helper)
 # ------------------------------------------------------------------
-# [Fix] 안전한 실수 변환 (저장 오류 방지)
 def safe_float(value, default_val=None):
     try:
         if value is None or value == "" or pd.isna(value): return default_val
@@ -180,7 +187,6 @@ def safe_float(value, default_val=None):
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     if not df.empty:
-        # [Fix] 설비명 기준 정렬 (수분상태 2호기 분리 문제 해결)
         df = df.sort_values(by=['line', 'equip_name', 'item_name'])
     return df
 
@@ -235,7 +241,6 @@ def generate_all_daily_check_pdf(date_str):
         for _, row in df_final.iterrows():
             equip_name = str(row['equip_name'])
             if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
-            
             pdf.cell(40, 8, equip_name, 1)
             pdf.cell(60, 8, str(row['item_name']), 1)
             pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
@@ -291,7 +296,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 5. 기능 구현
+# 5. 기능 구현 (메인)
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
@@ -467,6 +472,7 @@ elif menu == "✅ 일일점검관리":
         sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
         
         df_master_all = get_daily_check_master_data()
+        
         if df_master_all.empty:
             st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 항목을 추가해주세요.")
         
@@ -492,7 +498,7 @@ elif menu == "✅ 일일점검관리":
                     with line_tabs[i]:
                         line_data = df_master_all[df_master_all['line'] == line]
                         
-                        # [Fix] 설비별 그룹핑 (정렬됨)
+                        # 설비별 그룹핑
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
                             
@@ -510,6 +516,7 @@ elif menu == "✅ 일일점검관리":
                                     if row['check_type'] == 'OX':
                                         idx = 0 if default_val == 'OK' else (1 if default_val == 'NG' else 0)
                                         st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
+                                    
                                     else:
                                         # 수치 입력 (Text Input)
                                         val_str = str(default_val) if default_val and default_val != 'nan' else ""
@@ -519,7 +526,7 @@ elif menu == "✅ 일일점검관리":
                                     st.caption(f"기준: {row['standard']}")
                             st.divider()
 
-                # [공통] 서명 및 전체 저장 (폼 내부 맨 아래)
+                # [공통] 서명 및 전체 저장 (탭 밖, 맨 아래)
                 st.markdown("---")
                 st.markdown("#### ✍️ 전자 서명 및 저장")
                 
@@ -537,10 +544,7 @@ elif menu == "✅ 일일점검관리":
                 c_s1, c_s2 = st.columns([3, 1])
                 signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
                 
-                # Form Submit Button
-                submitted = st.form_submit_button("💾 점검 결과 전체 저장 (All Lines)", type="primary", use_container_width=True)
-                
-                if submitted:
+                if st.form_submit_button("💾 점검 결과 전체 저장 (All Lines)", type="primary", use_container_width=True):
                     if signer_name:
                         rows_to_save = []
                         ng_list = []
@@ -559,7 +563,7 @@ elif menu == "✅ 일일점검관리":
                             if row['check_type'] == 'OX':
                                 if val == 'NG': ox = 'NG'
                             else:
-                                # 수치 입력 검증 [Fix] safe_float 사용
+                                # 수치 입력 검증 [Fix: safe_float 사용]
                                 if not final_val: 
                                     ox = "NG" # 빈 값은 NG
                                 else:
@@ -578,7 +582,9 @@ elif menu == "✅ 일일점검관리":
                             ])
                         
                         if rows_to_save:
+                            # [핵심 Fix] append_rows의 이중 안전장치 호출
                             append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                            
                             sig_type = "Canvas Signature" if signature_data else "Text Signature"
                             sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
                             append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
