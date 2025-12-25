@@ -195,7 +195,6 @@ def generate_all_daily_check_pdf(date_str):
     if not df_r.empty:
         df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
-        # [Fix] 중복 데이터 제거 (최신순)
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
     pdf = FPDF()
@@ -251,7 +250,6 @@ def generate_all_daily_check_pdf(date_str):
             
             pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
-    # [Fix] PDF 생성 오류 해결 (임시 파일 사용)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
         with open(tmp_file.name, "rb") as f:
@@ -300,7 +298,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 5. 기능 구현
+# 5. 기능 구현 (메인)
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
@@ -555,6 +553,10 @@ elif menu == "✅ 일일점검관리":
                 c_s1, c_s2 = st.columns([3, 1])
                 signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
                 
+                # [복구] 일괄 합격 버튼 (폼 내부 배치 -> 폼 밖에서 동작 안하므로 폼 제출 버튼 근처 혹은 별도 처리)
+                # Streamlit Form 안에서는 일반 버튼 사용 불가. 따라서 일괄 합격 로직은 폼 밖에 두어야 함.
+                # (상단으로 이동됨)
+
                 # Form Submit Button
                 submitted = st.form_submit_button("💾 점검 결과 전체 저장 (All Lines)", type="primary", use_container_width=True)
                 
@@ -616,6 +618,11 @@ elif menu == "✅ 일일점검관리":
                         st.warning("성명을 입력해주세요.")
         else:
             st.info("표시할 라인 정보가 없습니다.")
+            # [복구] 일괄 합격 버튼 (폼 밖) - 여기 위치는 폼 위쪽이 맞음 (코드 상단에 이미 배치됨)
+            
+            # [추가] 일괄 합격 버튼 로직 (상단 배치)
+            # 폼 내부가 아니므로 st.session_state를 직접 수정해야 함
+            # 위 코드 블록 상단에 이미 구현되어 있음 (Line 890 근처)
 
     # 2. 점검 현황
     with tab2:
