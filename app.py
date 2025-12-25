@@ -101,7 +101,8 @@ def get_worksheet(sheet_name, create_cols=None):
     if not client: return None
     try:
         sh = client.open(GOOGLE_SHEET_NAME)
-    except: return None
+    except:
+        return None
     try:
         return sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
@@ -178,30 +179,21 @@ def safe_float(value, default_val=None):
     except: return default_val
 
 # ------------------------------------------------------------------
-# 3. 서버 사이드 로직 (누락된 함수 복구)
+# 3. 서버 사이드 로직 (Helper)
 # ------------------------------------------------------------------
 def get_daily_check_master_data():
-    """
-    일일점검 마스터 데이터를 로드합니다.
-    사용자의 요청에 따라 강제 정렬을 하지 않고, 구글 시트 입력 순서를 그대로 유지합니다.
-    """
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     return df
 
-# ------------------------------------------------------------------
-# 4. PDF 생성 로직 (Modern Design + 오류 해결)
-# ------------------------------------------------------------------
 def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    # [중요] 정렬 로직 제거: 구글 시트 순서 유지
-    
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+    
     if not df_r.empty:
         df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-    # 폰트 다운로드
     font_filename = 'NanumGothic.ttf'
     if not os.path.exists(font_filename):
         try:
@@ -209,7 +201,6 @@ def generate_all_daily_check_pdf(date_str):
             urllib.request.urlretrieve(url, font_filename)
         except: pass
 
-    # PDF 생성
     pdf = FPDF()
     font_name = 'Arial'
     try:
@@ -222,24 +213,20 @@ def generate_all_daily_check_pdf(date_str):
     for line in lines:
         pdf.add_page()
         
-        # [Design] 상단 컬러 헤더 바
         pdf.set_fill_color(63, 81, 181) 
         pdf.rect(0, 0, 210, 25, 'F')
         
-        # [Design] 타이틀
         pdf.set_font(font_name, '', 20)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
         
-        # [Design] 우측 상단 정보
         pdf.set_font(font_name, '', 10)
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, f"Date: {date_str}  |  Line: {line}", 0, 0, 'R')
         
         pdf.ln(25)
         
-        # [Design] 통계 요약 박스
         line_master = df_m[df_m['line'] == line]
         if not df_r.empty:
             df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
@@ -260,14 +247,12 @@ def generate_all_daily_check_pdf(date_str):
         pdf.cell(0, 10, f"Summary: Total {total}  /  Pass {ok}  /  Fail {ng}", 0, 1, 'L')
         pdf.ln(2)
 
-        # [Design] 테이블 헤더
         pdf.set_fill_color(240, 242, 245)
         pdf.set_text_color(60, 60, 60)
         pdf.set_draw_color(220, 220, 220)
         pdf.set_line_width(0.3)
         pdf.set_font(font_name, '', 10)
         
-        # 헤더 출력 (한글/영문)
         headers = ["설비명", "점검항목", "기준", "측정값", "판정", "점검자"]
         widths = [45, 65, 30, 20, 15, 15]
         
@@ -275,7 +260,6 @@ def generate_all_daily_check_pdf(date_str):
             pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
         pdf.ln()
 
-        # [Design] 테이블 바디 (Zebra Striping)
         fill = False
         pdf.set_fill_color(250, 250, 250) 
         
@@ -288,13 +272,12 @@ def generate_all_daily_check_pdf(date_str):
             pdf.cell(30, 8, str(row['standard']), 1, 0, 'C', fill)
             pdf.cell(20, 8, str(row['value']), 1, 0, 'C', fill)
             
-            # 판정 컬러링
             ox = str(row['ox'])
             if ox == 'NG': 
-                pdf.set_text_color(220, 38, 38) # Red
+                pdf.set_text_color(220, 38, 38)
                 pdf.set_font(font_name, 'U', 10)
             elif ox == 'OK':
-                pdf.set_text_color(22, 163, 74) # Green
+                pdf.set_text_color(22, 163, 74)
                 pdf.set_font(font_name, '', 10)
             else:
                 pdf.set_text_color(150, 150, 150)
@@ -302,7 +285,6 @@ def generate_all_daily_check_pdf(date_str):
                 
             pdf.cell(15, 8, ox, 1, 0, 'C', fill)
             
-            # Reset text color
             pdf.set_text_color(0, 0, 0)
             pdf.set_font(font_name, '', 10)
             pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
@@ -312,7 +294,6 @@ def generate_all_daily_check_pdf(date_str):
 
         pdf.ln(10)
 
-    # 임시 파일 저장 후 바이너리 읽기
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
         with open(tmp_file.name, "rb") as f:
@@ -321,7 +302,7 @@ def generate_all_daily_check_pdf(date_str):
     return pdf_bytes
 
 # ------------------------------------------------------------------
-# 5. 사용자 인증 및 메인 메뉴
+# 4. 사용자 인증
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
@@ -361,7 +342,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 6. 기능 구현
+# 5. 기능 구현 (메인)
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
@@ -445,7 +426,16 @@ elif menu == "🏭 생산관리":
             df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
             st.altair_chart(alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(x='날짜', y='수량').interactive(), use_container_width=True)
     with t4:
-        st.info("PDF 출력은 '일일점검관리' 탭에서 통합 제공됩니다.")
+        st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
+        report_date = st.date_input("보고서 날짜", datetime.now())
+        df = load_data(SHEET_RECORDS, COLS_RECORDS)
+        if not df.empty:
+            df['날짜'] = pd.to_datetime(df['날짜']).dt.date
+            daily_df = df[df['날짜'] == report_date].copy()
+            daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
+            if not daily_df.empty:
+                st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
+            else: st.warning("해당 날짜에 생산 실적이 없습니다.")
 
 elif menu == "🛠 설비보전관리":
     t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
@@ -461,14 +451,26 @@ elif menu == "🛠 설비보전관리":
                     f_eq = st.selectbox("대상 설비", list(eq_map.keys()), format_func=lambda x: f"[{x}] {eq_map[x]}")
                     f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                     f_desc = st.text_area("작업 내용", height=80)
-                    total_cost = st.number_input("총 소요 비용", value=0)
+                    if 'parts_buffer' not in st.session_state: st.session_state.parts_buffer = []
+                    col_p1, col_p2, col_p3 = st.columns([2, 1, 1])
+                    p_name = col_p1.text_input("교체부품명")
+                    p_cost = col_p2.number_input("비용", step=1000)
+                    if col_p3.button("부품 추가"):
+                        if p_name: st.session_state.parts_buffer.append({"내역": p_name, "비용": int(p_cost)})
+                    if st.session_state.parts_buffer:
+                        st.dataframe(pd.DataFrame(st.session_state.parts_buffer), use_container_width=True, hide_index=True)
+                        if st.button("목록 초기화"): st.session_state.parts_buffer = []
+                    total_cost = sum([p['비용'] for p in st.session_state.parts_buffer])
+                    f_final_cost = st.number_input("총 소요 비용", value=total_cost)
                     f_down = st.number_input("비가동 시간(분)", step=10)
                     if st.button("이력 저장", type="primary", use_container_width=True):
-                        rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": "", "비용": total_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                        parts_str = ", ".join([f"{p['내역']}" for p in st.session_state.parts_buffer])
+                        rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_str, "비용": f_final_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
                         append_data(rec, SHEET_MAINTENANCE)
                         st.toast("정비 이력이 저장되었습니다.", icon="✅")
             else: st.warning("권한이 없습니다.")
         with c2:
+            st.markdown("#### 📋 최근 정비 내역")
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df = df.sort_values("입력시간", ascending=False).head(50)
@@ -477,21 +479,35 @@ elif menu == "🛠 설비보전관리":
         df_hist = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
         st.dataframe(df_hist, use_container_width=True)
     with t3:
+        st.markdown("#### 📊 설비 고장 분석")
         df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
         if not df.empty:
             df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
             if HAS_ALTAIR:
-                st.altair_chart(alt.Chart(df).mark_bar().encode(x='작업구분', y='비용', color='작업구분').interactive(), use_container_width=True)
+                c = alt.Chart(df).mark_bar().encode(x='작업구분', y='비용', color='작업구분').interactive()
+                st.altair_chart(c, use_container_width=True)
 
 elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
+    # 1. 점검 입력 (Native UI)
     with tab1:
         st.info("💡 PC/태블릿 공용 입력 화면입니다.")
         
-        c_date, c_btn = st.columns([2, 1])
-        sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
+        c_date, c_btn = st.columns([1, 1])
+        with c_date:
+            sel_date = st.date_input("점검 일자", datetime.now(), key="chk_date")
         
+        # [New] 날짜 선택 시 바로 점검 상태 표시
+        df_check_result = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        is_checked = False
+        if not df_check_result.empty:
+             if str(sel_date) in df_check_result['date'].astype(str).values:
+                 st.success(f"✅ {sel_date} : 점검 이력이 존재합니다.")
+                 is_checked = True
+             else:
+                 st.warning(f"⬜ {sel_date} : 점검 이력이 없습니다.")
+
         df_master_all = get_daily_check_master_data()
         
         if df_master_all.empty:
@@ -502,10 +518,11 @@ elif menu == "✅ 일일점검관리":
             with c_btn:
                 st.write("") 
                 st.write("") 
+                # [Fix] 일괄 합격 (키 일치)
                 if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
                     for _, row in df_master_all.iterrows():
                         uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}"
+                        widget_key = f"val_{uid}_{sel_date}" # 키 매칭
                         if row['check_type'] == 'OX' and '온,습도' not in row['line']:
                              if widget_key not in st.session_state:
                                  st.session_state[widget_key] = "OK"
@@ -528,7 +545,6 @@ elif menu == "✅ 일일점검관리":
                     with line_tabs[i]:
                         line_data = df_master_all[df_master_all['line'] == line]
                         
-                        # [Fix] sort=False로 시트 순서 유지 (핵심)
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
                             
