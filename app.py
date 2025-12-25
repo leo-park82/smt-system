@@ -527,12 +527,14 @@ elif menu == "✅ 일일점검관리":
             with c_btn:
                 st.write("") 
                 st.write("") 
+                # [Fix] 일괄 합격 (값 없는 것만 OK로)
                 if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
                     for _, row in df_master_check.iterrows():
                         uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
                         widget_key = f"val_{uid}_{sel_date}"
                         if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                             if widget_key not in st.session_state:
+                             # session_state에 값이 없거나 None이면 OK 설정
+                             if st.session_state.get(widget_key) is None:
                                  st.session_state[widget_key] = "OK"
                     st.rerun()
 
