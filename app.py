@@ -5,7 +5,7 @@ import time
 import hashlib
 import json
 import os
-import urllib.request  # [추가] 폰트 다운로드용
+import tempfile # [추가] PDF 생성을 위한 임시파일 모듈
 from fpdf import FPDF
 
 # [선택] 그리기 서명 라이브러리
@@ -182,78 +182,47 @@ def safe_float(value, default_val=None):
 
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if not df.empty:
+        df = df.sort_values(by=['line', 'equip_name', 'item_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
-    # 1. 데이터 준비
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    if not df_m.empty:
+        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
+    
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    
     if not df_r.empty:
+        df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
+        # [Fix] 중복 데이터 제거 (최신순)
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-    
-    # 2. 폰트 준비 (자동 다운로드)
-    font_filename = 'NanumGothic.ttf'
-    if not os.path.exists(font_filename):
-        # 구글 폰트에서 나눔고딕 다운로드
-        font_url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
-        try:
-            urllib.request.urlretrieve(font_url, font_filename)
-        except:
-            pass # 다운로드 실패 시 기본 폰트 사용 (한글 깨질 수 있음)
 
     pdf = FPDF()
-    has_korean_font = False
-    
-    try:
-        if os.path.exists(font_filename):
-            pdf.add_font('Korean', '', font_filename, uni=True)
-            has_korean_font = True
-        else:
-            # 윈도우 로컬 테스트용
-            if os.path.exists('C:\\Windows\\Fonts\\malgun.ttf'):
-                pdf.add_font('Korean', '', 'C:\\Windows\\Fonts\\malgun.ttf', uni=True)
-                has_korean_font = True
-    except:
-        has_korean_font = False
+    font_path = 'NanumGothic.ttf' 
+    if not os.path.exists(font_path): font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
+    try: pdf.add_font('Korean', '', font_path, uni=True)
+    except: pass
 
-    # 3. PDF 생성
-    lines = df_m['line'].unique() if not df_m.empty else []
-    
-    if len(lines) == 0:
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt="No Data Available", ln=True, align='C')
-        return pdf.output(dest='S').encode('latin-1')
-
+    lines = df_m['line'].unique()
     for line in lines:
         pdf.add_page()
+        try: pdf.set_font('Korean', '', 16)
+        except: pdf.set_font('Arial', '', 16)
         
-        if has_korean_font:
-            pdf.set_font('Korean', '', 16)
-        else:
-            pdf.set_font('Arial', '', 16)
-        
-        # 타이틀
-        pdf.cell(0, 10, f"Daily Check Report ({date_str})", ln=True, align='C')
+        pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
         pdf.set_font_size(12)
         pdf.cell(0, 10, f"Line: {line}", ln=True)
         pdf.ln(5)
 
-        # 테이블 헤더
         pdf.set_font_size(10)
         pdf.set_fill_color(240, 240, 240)
-        # 영어로 헤더 변경 (폰트 없을 때 대비) 혹은 한글 사용
-        headers = ["Equip", "Item", "Value", "Result", "Checker"] if not has_korean_font else ["설비명", "점검항목", "측정값", "판정", "점검자"]
-        
-        pdf.cell(40, 8, headers[0], 1, 0, 'C', 1)
-        pdf.cell(60, 8, headers[1], 1, 0, 'C', 1)
-        pdf.cell(30, 8, headers[2], 1, 0, 'C', 1)
-        pdf.cell(20, 8, headers[3], 1, 0, 'C', 1)
-        pdf.cell(30, 8, headers[4], 1, 1, 'C', 1)
+        pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
+        pdf.cell(60, 8, "점검항목", 1, 0, 'C', 1)
+        pdf.cell(30, 8, "측정값", 1, 0, 'C', 1)
+        pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
+        pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
 
-        # 데이터 매핑
         line_master = df_m[df_m['line'] == line]
         if not df_r.empty:
             df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
@@ -269,19 +238,9 @@ def generate_all_daily_check_pdf(date_str):
 
         for _, row in df_final.iterrows():
             equip_name = str(row['equip_name'])
-            item_name = str(row['item_name'])
-            checker = str(row['checker'])
-            
-            # 폰트 없으면 한글 제거 (오류 방지)
-            if not has_korean_font:
-                equip_name = equip_name.encode('latin-1', 'ignore').decode('latin-1')
-                item_name = item_name.encode('latin-1', 'ignore').decode('latin-1')
-                checker = checker.encode('latin-1', 'ignore').decode('latin-1')
-            
             if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
-            
             pdf.cell(40, 8, equip_name, 1)
-            pdf.cell(60, 8, item_name, 1)
+            pdf.cell(60, 8, str(row['item_name']), 1)
             pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
             
             ox = str(row['ox'])
@@ -290,17 +249,15 @@ def generate_all_daily_check_pdf(date_str):
             pdf.cell(20, 8, ox, 1, 0, 'C')
             pdf.set_text_color(0, 0, 0)
             
-            pdf.cell(30, 8, checker, 1, 1, 'C')
+            pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
-    # [핵심 수정] 인코딩 오류 방지 (latin-1 강제 변환 제거 및 바이너리 반환)
-    # FPDF 1.7.2의 output(dest='S')는 string을 반환하지만 내부적으로 latin1 인코딩 된 바이트 스트림임
-    # 따라서 encode('latin-1')을 해서 bytes로 만들어야 Streamlit이 받아줌.
-    # 하지만 한글이 섞여있으면 latin-1 범위 밖이라 에러가 남.
-    # 해결: output(dest='S')로 나온 string을 latin-1로 인코딩하되, 'replace'나 'ignore'가 아닌
-    #       정상적인 bytearray 변환이 필요함. 
-    #       FPDF에서 uni=True를 쓰면 output() 결과물은 이미 인코딩된 바이너리임 (Python 3에서는 latin1으로 디코딩된 str 형태)
-    
-    return pdf.output(dest='S').encode('latin-1')
+    # [Fix] PDF 생성 오류 해결 (임시 파일 사용)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        pdf.output(tmp_file.name)
+        with open(tmp_file.name, "rb") as f:
+            pdf_bytes = f.read()
+    os.unlink(tmp_file.name)
+    return pdf_bytes
 
 # ------------------------------------------------------------------
 # 4. 사용자 인증
@@ -343,7 +300,7 @@ with st.sidebar:
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 5. 기능 구현 (메인)
+# 5. 기능 구현
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
@@ -360,6 +317,7 @@ if menu == "📊 대시보드":
     check_today = 0
     ng_today = 0
     if not df_check.empty:
+        df_check['date'] = df_check['date'].astype(str)
         df_check_today = df_check[df_check['date'] == today]
         if not df_check_today.empty:
             df_unique = df_check_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
@@ -532,6 +490,7 @@ elif menu == "✅ 일일점검관리":
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
             prev_data = {}
             if not df_res.empty:
+                df_res['date'] = df_res['date'].astype(str)
                 df_filtered = df_res[df_res['date'] == str(sel_date)]
                 for _, r in df_filtered.iterrows():
                     key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
@@ -566,7 +525,9 @@ elif menu == "✅ 일일점검관리":
 
                                 with c2:
                                     if check_type == 'OX':
-                                        idx = 0 if default_val == 'OK' else (1 if default_val == 'NG' else 0)
+                                        idx = None
+                                        if default_val == 'OK': idx = 0
+                                        elif default_val == 'NG': idx = 1
                                         st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
                                     else:
                                         val_str = str(default_val) if default_val and default_val != 'nan' else ""
@@ -604,7 +565,9 @@ elif menu == "✅ 일일점검관리":
                         
                         # [Fix] 저장 전 기존 데이터 삭제 로직을 위해 현재 날짜 데이터 로드
                         df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                        df_existing = df_existing[df_existing['date'] != str(sel_date)]
+                        if not df_existing.empty:
+                            df_existing['date'] = df_existing['date'].astype(str)
+                            df_existing = df_existing[df_existing['date'] != str(sel_date)]
                         
                         for _, row in df_master_all.iterrows():
                             uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
@@ -616,6 +579,7 @@ elif menu == "✅ 일일점검관리":
                             
                             if row['check_type'] == 'OX' and ('온,습도' not in row['line']):
                                 if val == 'NG': ox = 'NG'
+                                elif val is None: ox = "NG" # 빈 값은 NG 처리
                             else:
                                 if not final_val: 
                                     ox = "NG" 
@@ -661,19 +625,19 @@ elif menu == "✅ 일일점검관리":
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         df_master = get_daily_check_master_data()
         
-        df_today = df_res[df_res['date'] == today]
-        
-        # [Fix] 중복 제거 및 정확한 집계
-        if not df_today.empty:
-            # 1. 최신 데이터만 남김
-            df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-            
-            # 2. 마스터 데이터에 존재하는 유효한 항목만 필터링 (삭제된 항목 제외)
-            if not df_master.empty:
-                # 고유 키 생성 (Line + Equip + Item)
+        if not df_res.empty:
+            df_res['date'] = df_res['date'].astype(str)
+            df_today = df_res[df_res['date'] == today]
+            if not df_today.empty:
+                # [Fix] 중복 제거 및 정확한 집계
+                df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+                
+                # [Fix] 마스터 데이터와 조인하여 정확한 개수 카운트
                 df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
                 df_today['key'] = df_today['line'] + "_" + df_today['equip_id'] + "_" + df_today['item_name']
                 df_today = df_today[df_today['key'].isin(df_master['key'])]
+        else:
+            df_today = pd.DataFrame()
 
         total_items = len(df_master)
         done_items = len(df_today)
