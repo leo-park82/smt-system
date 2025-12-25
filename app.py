@@ -171,16 +171,24 @@ def update_inventory(code, name, change, reason, user):
     append_data(hist, SHEET_INV_HISTORY)
 
 # ------------------------------------------------------------------
-# 3. 서버 사이드 로직
+# 3. 서버 사이드 로직 (Helper)
 # ------------------------------------------------------------------
+def safe_float(value, default_val=None):
+    try:
+        if value is None or value == "" or pd.isna(value): return default_val
+        return float(value)
+    except: return default_val
+
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    # [수정] 정렬 제거 (구글 시트 순서 유지)
+    if not df.empty:
+        df = df.sort_values(by=['line', 'equip_name', 'item_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    # [수정] 정렬 제거
+    if not df_m.empty:
+        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
     
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     if not df_r.empty:
@@ -240,13 +248,8 @@ def generate_all_daily_check_pdf(date_str):
             
             pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
 
-    return pdf.output(dest='S').encode('latin-1')
-
-def safe_float(value, default_val=None):
-    try:
-        if value is None or value == "" or pd.isna(value): return default_val
-        return float(value)
-    except: return default_val
+    # [수정] 인코딩 오류 해결 (바이너리 반환)
+    return pdf.output(dest='S')
 
 # ------------------------------------------------------------------
 # 4. 사용자 인증
@@ -303,6 +306,7 @@ if menu == "📊 대시보드":
         df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
         prod_today = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today]['수량'].sum()
     
+    # 점검 현황 집계
     check_today = 0
     ng_today = 0
     if not df_check.empty:
@@ -464,7 +468,6 @@ elif menu == "✅ 일일점검관리":
         c_date = st.columns([1])[0]
         sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        # [핵심] 전체 마스터 데이터 로드 (정렬 X -> 시트 순서 유지)
         df_master_all = get_daily_check_master_data()
         
         if df_master_all.empty:
@@ -485,12 +488,14 @@ elif menu == "✅ 일일점검관리":
                     prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
             # 라인별 탭 내부에 입력 폼 렌더링
+            # [중요] st.form은 전체를 감싸야 탭 이동 시 데이터가 유지됨
             with st.form("main_check_form"):
                 for i, line in enumerate(lines):
+                    # 탭 내부에서 컴포넌트 렌더링
                     with line_tabs[i]:
                         line_data = df_master_all[df_master_all['line'] == line]
                         
-                        # [Fix] sort=False로 시트 순서 유지
+                        # 설비별 그룹핑
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
                             
@@ -503,16 +508,18 @@ elif menu == "✅ 일일점검관리":
                                 c1, c2, c3 = st.columns([2, 2, 1])
                                 c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
                                 
+                                # [수정] 온,습도 관련 항목 강제 NUMBER 처리 (OK/NG 버튼 숨김)
+                                check_type = row['check_type']
+                                if '온,습도' in row['line'] or '온습도' in row['line']:
+                                    check_type = 'NUMBER'
+
                                 with c2:
-                                    if row['check_type'] == 'OX':
+                                    if check_type == 'OX':
                                         idx = 0 if default_val == 'OK' else (1 if default_val == 'NG' else 0)
                                         st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
                                     else:
-                                        # [수정] 수치 입력인 경우 (OX 버튼 없이 입력창만)
                                         val_str = str(default_val) if default_val and default_val != 'nan' else ""
                                         st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder="입력")
-                                        # OX 라디오 판단을 위한 키 할당 (기본값 OK로 세팅하여 오류 방지)
-                                        # (수치 입력은 저장 로직에서 자동 판단하므로 여기서는 UI 없음)
                                 
                                 with c3:
                                     st.caption(f"기준: {row['standard']}")
@@ -536,10 +543,17 @@ elif menu == "✅ 일일점검관리":
                 c_s1, c_s2 = st.columns([3, 1])
                 signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
                 
-                if st.form_submit_button("💾 점검 결과 전체 저장 (All Lines)", type="primary", use_container_width=True):
+                # Form Submit Button
+                submitted = st.form_submit_button("💾 점검 결과 전체 저장 (All Lines)", type="primary", use_container_width=True)
+                
+                if submitted:
                     if signer_name:
                         rows_to_save = []
                         ng_list = []
+                        
+                        # [Fix] 저장 전 기존 데이터 삭제 로직을 위해 현재 날짜 데이터 로드
+                        df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                        df_existing = df_existing[df_existing['date'] != str(sel_date)]
                         
                         for _, row in df_master_all.iterrows():
                             uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
@@ -549,12 +563,11 @@ elif menu == "✅ 일일점검관리":
                             ox = "OK"
                             final_val = str(val) if val is not None else ""
                             
-                            if row['check_type'] == 'OX':
+                            if row['check_type'] == 'OX' and ('온,습도' not in row['line']):
                                 if val == 'NG': ox = 'NG'
                             else:
-                                # [수정] 수치 입력일 때 자동 판정 (OK/NG 버튼 없음)
                                 if not final_val: 
-                                    ox = "NG" # 빈 값은 NG
+                                    ox = "NG" 
                                 else:
                                     try:
                                         num_val = float(final_val)
@@ -571,7 +584,12 @@ elif menu == "✅ 일일점검관리":
                             ])
                         
                         if rows_to_save:
-                            append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                            # [Fix] Overwrite Logic
+                            df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
+                            df_final = pd.concat([df_existing, df_new], ignore_index=True)
+                            save_data(df_final, SHEET_CHECK_RESULT)
+                            
+                            # Signature Save
                             sig_type = "Canvas Signature" if signature_data else "Text Signature"
                             sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
                             append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
@@ -589,20 +607,20 @@ elif menu == "✅ 일일점검관리":
     with tab2:
         st.markdown("##### 오늘의 점검 현황")
         today = datetime.now().strftime("%Y-%m-%d")
+        
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         df_master = get_daily_check_master_data()
         
-        if not df_res.empty:
-            df_today = df_res[df_res['date'] == today]
-            if not df_today.empty:
-                df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-        else:
-            df_today = pd.DataFrame()
-
+        df_today = df_res[df_res['date'] == today]
+        
+        # [Fix] 중복 제거 및 정확한 집계
+        if not df_today.empty:
+            df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+            
         total_items = len(df_master)
-        done_items = len(df_today)
-        ok_items = len(df_today[df_today['ox'] == 'OK']) if not df_today.empty else 0
-        ng_items = len(df_today[df_today['ox'] == 'NG']) if not df_today.empty else 0
+        ok_items = len(df_today[df_today['ox'] == 'OK'])
+        ng_items = len(df_today[df_today['ox'] == 'NG'])
+        done_items = ok_items + ng_items
         
         c1, c2, c3 = st.columns(3)
         c1.metric("진행률", f"{done_items} / {total_items}")
