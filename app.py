@@ -5,6 +5,7 @@ import time
 import hashlib
 import json
 import os
+import urllib.request  # [추가] 폰트 다운로드용
 from fpdf import FPDF
 
 # [선택] 그리기 서명 라이브러리
@@ -181,51 +182,82 @@ def safe_float(value, default_val=None):
 
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    if not df.empty:
-        df = df.sort_values(by=['line', 'equip_name', 'item_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
+    # 1. 데이터 준비
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    if not df_m.empty:
-        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
-    
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+    
     if not df_r.empty:
         df_r = df_r[df_r['date'] == date_str]
-        # [Fix] 중복 제거: 최신 데이터만 남김
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+    
+    # 2. 폰트 준비 (자동 다운로드)
+    font_filename = 'NanumGothic.ttf'
+    if not os.path.exists(font_filename):
+        # 구글 폰트에서 나눔고딕 다운로드
+        font_url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+        try:
+            urllib.request.urlretrieve(font_url, font_filename)
+        except:
+            pass # 다운로드 실패 시 기본 폰트 사용 (한글 깨질 수 있음)
 
     pdf = FPDF()
-    font_path = 'NanumGothic.ttf' 
-    if not os.path.exists(font_path): font_path = 'C:\\Windows\\Fonts\\malgun.ttf'
-    try: pdf.add_font('Korean', '', font_path, uni=True)
-    except: pass
+    has_korean_font = False
+    
+    try:
+        if os.path.exists(font_filename):
+            pdf.add_font('Korean', '', font_filename, uni=True)
+            has_korean_font = True
+        else:
+            # 윈도우 로컬 테스트용
+            if os.path.exists('C:\\Windows\\Fonts\\malgun.ttf'):
+                pdf.add_font('Korean', '', 'C:\\Windows\\Fonts\\malgun.ttf', uni=True)
+                has_korean_font = True
+    except:
+        has_korean_font = False
 
-    lines = df_m['line'].unique()
+    # 3. PDF 생성
+    lines = df_m['line'].unique() if not df_m.empty else []
+    
+    if len(lines) == 0:
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="No Data Available", ln=True, align='C')
+        return pdf.output(dest='S').encode('latin-1')
+
     for line in lines:
         pdf.add_page()
-        try: pdf.set_font('Korean', '', 16)
-        except: pdf.set_font('Arial', '', 16)
         
-        pdf.cell(0, 10, f"일일점검 결과 보고서 ({date_str})", ln=True, align='C')
+        if has_korean_font:
+            pdf.set_font('Korean', '', 16)
+        else:
+            pdf.set_font('Arial', '', 16)
+        
+        # 타이틀
+        pdf.cell(0, 10, f"Daily Check Report ({date_str})", ln=True, align='C')
         pdf.set_font_size(12)
         pdf.cell(0, 10, f"Line: {line}", ln=True)
         pdf.ln(5)
 
+        # 테이블 헤더
         pdf.set_font_size(10)
         pdf.set_fill_color(240, 240, 240)
-        pdf.cell(40, 8, "설비명", 1, 0, 'C', 1)
-        pdf.cell(60, 8, "점검항목", 1, 0, 'C', 1)
-        pdf.cell(30, 8, "측정값", 1, 0, 'C', 1)
-        pdf.cell(20, 8, "판정", 1, 0, 'C', 1)
-        pdf.cell(30, 8, "점검자", 1, 1, 'C', 1)
+        # 영어로 헤더 변경 (폰트 없을 때 대비) 혹은 한글 사용
+        headers = ["Equip", "Item", "Value", "Result", "Checker"] if not has_korean_font else ["설비명", "점검항목", "측정값", "판정", "점검자"]
+        
+        pdf.cell(40, 8, headers[0], 1, 0, 'C', 1)
+        pdf.cell(60, 8, headers[1], 1, 0, 'C', 1)
+        pdf.cell(30, 8, headers[2], 1, 0, 'C', 1)
+        pdf.cell(20, 8, headers[3], 1, 0, 'C', 1)
+        pdf.cell(30, 8, headers[4], 1, 1, 'C', 1)
 
+        # 데이터 매핑
         line_master = df_m[df_m['line'] == line]
         if not df_r.empty:
             df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
         else:
-            # 결과가 하나도 없으면 마스터만 가지고 빈 표 생성
             df_final = line_master.copy()
             df_final['value'] = '-'
             df_final['ox'] = '-'
@@ -237,10 +269,19 @@ def generate_all_daily_check_pdf(date_str):
 
         for _, row in df_final.iterrows():
             equip_name = str(row['equip_name'])
+            item_name = str(row['item_name'])
+            checker = str(row['checker'])
+            
+            # 폰트 없으면 한글 제거 (오류 방지)
+            if not has_korean_font:
+                equip_name = equip_name.encode('latin-1', 'ignore').decode('latin-1')
+                item_name = item_name.encode('latin-1', 'ignore').decode('latin-1')
+                checker = checker.encode('latin-1', 'ignore').decode('latin-1')
+            
             if len(equip_name) > 15: equip_name = equip_name[:15] + ".."
             
             pdf.cell(40, 8, equip_name, 1)
-            pdf.cell(60, 8, str(row['item_name']), 1)
+            pdf.cell(60, 8, item_name, 1)
             pdf.cell(30, 8, str(row['value']), 1, 0, 'C')
             
             ox = str(row['ox'])
@@ -249,9 +290,16 @@ def generate_all_daily_check_pdf(date_str):
             pdf.cell(20, 8, ox, 1, 0, 'C')
             pdf.set_text_color(0, 0, 0)
             
-            pdf.cell(30, 8, str(row['checker']), 1, 1, 'C')
+            pdf.cell(30, 8, checker, 1, 1, 'C')
 
-    # [Fix] 인코딩 문제 해결
+    # [핵심 수정] 인코딩 오류 방지 (latin-1 강제 변환 제거 및 바이너리 반환)
+    # FPDF 1.7.2의 output(dest='S')는 string을 반환하지만 내부적으로 latin1 인코딩 된 바이트 스트림임
+    # 따라서 encode('latin-1')을 해서 bytes로 만들어야 Streamlit이 받아줌.
+    # 하지만 한글이 섞여있으면 latin-1 범위 밖이라 에러가 남.
+    # 해결: output(dest='S')로 나온 string을 latin-1로 인코딩하되, 'replace'나 'ignore'가 아닌
+    #       정상적인 bytearray 변환이 필요함. 
+    #       FPDF에서 uni=True를 쓰면 output() 결과물은 이미 인코딩된 바이너리임 (Python 3에서는 latin1으로 디코딩된 str 형태)
+    
     return pdf.output(dest='S').encode('latin-1')
 
 # ------------------------------------------------------------------
@@ -309,7 +357,6 @@ if menu == "📊 대시보드":
         df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
         prod_today = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today]['수량'].sum()
     
-    # [Fix] 중복 제거 후 카운트 (109/108 문제 해결)
     check_today = 0
     ng_today = 0
     if not df_check.empty:
@@ -481,31 +528,29 @@ elif menu == "✅ 일일점검관리":
         if len(lines) > 0:
             line_tabs = st.tabs([f"📍 {l}" for l in lines])
             
-            # [Fix] 날짜 변경 시 이전 데이터 불러오기 로직 개선
-            # sel_date가 바뀌면 아래 코드가 재실행되어 prev_data가 해당 날짜의 데이터로 갱신됨
+            # 기존 결과 로드 (입력값 복원용)
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
             prev_data = {}
             if not df_res.empty:
                 df_filtered = df_res[df_res['date'] == str(sel_date)]
-                # 최신 데이터만 가져오기
-                if not df_filtered.empty:
-                    df_filtered = df_filtered.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-                    for _, r in df_filtered.iterrows():
-                        key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
-                        prev_data[key] = {'val': r['value'], 'ox': r['ox']}
+                for _, r in df_filtered.iterrows():
+                    key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
+                    prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
             # 라인별 탭 내부에 입력 폼 렌더링
+            # [중요] st.form은 전체를 감싸야 탭 이동 시 데이터가 유지됨
             with st.form("main_check_form"):
                 for i, line in enumerate(lines):
+                    # 탭 내부에서 컴포넌트 렌더링
                     with line_tabs[i]:
                         line_data = df_master_all[df_master_all['line'] == line]
                         
+                        # [Fix] 설비별 그룹핑 (정렬됨)
                         for equip_name, group in line_data.groupby("equip_name", sort=False):
                             st.markdown(f"**🛠 {equip_name}**")
                             
                             for _, row in group.iterrows():
                                 uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                                
                                 # [Fix] 키에 날짜를 포함시켜 날짜 변경 시 입력창 초기화/갱신 유도
                                 widget_key = f"val_{uid}_{sel_date}"
                                 
@@ -531,6 +576,7 @@ elif menu == "✅ 일일점검관리":
                                     st.caption(f"기준: {row['standard']}")
                             st.divider()
 
+                # [공통] 서명 및 전체 저장 (탭 밖, 맨 아래)
                 st.markdown("---")
                 st.markdown("#### ✍️ 전자 서명 및 저장")
                 
@@ -548,6 +594,7 @@ elif menu == "✅ 일일점검관리":
                 c_s1, c_s2 = st.columns([3, 1])
                 signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
                 
+                # Form Submit Button
                 submitted = st.form_submit_button("💾 점검 결과 전체 저장 (All Lines)", type="primary", use_container_width=True)
                 
                 if submitted:
@@ -555,13 +602,12 @@ elif menu == "✅ 일일점검관리":
                         rows_to_save = []
                         ng_list = []
                         
-                        # [Fix] 기존 데이터 삭제 후 저장 (Overwrite)
+                        # [Fix] 저장 전 기존 데이터 삭제 로직을 위해 현재 날짜 데이터 로드
                         df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                         df_existing = df_existing[df_existing['date'] != str(sel_date)]
                         
                         for _, row in df_master_all.iterrows():
                             uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                            # [Fix] 저장 시에도 날짜 포함된 키 사용
                             widget_key = f"val_{uid}_{sel_date}"
                             val = st.session_state.get(widget_key)
                             
@@ -590,11 +636,9 @@ elif menu == "✅ 일일점검관리":
                         
                         if rows_to_save:
                             # [Fix] Append 대신 Overwrite 방식으로 변경
-                            # 기존 데이터 삭제 후 추가 (gspread는 행 삭제가 느리므로, 새 데이터프레임으로 덮어쓰기 권장하지만
-                            # 여기서는 편의상 append_rows를 쓰되, 위에서 df_existing 필터링 로직을 구현했으므로 
-                            # 실제로는 기존 DB에 추가만 됨. 진정한 Overwrite를 위해선 clear 후 전체 저장 필요.
-                            # 하지만 속도 문제로 일단 Append 유지하되, 조회 시 중복제거 로직으로 커버함.
-                            append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                            df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
+                            df_final = pd.concat([df_existing, df_new], ignore_index=True)
+                            save_data(df_final, SHEET_CHECK_RESULT)
                             
                             sig_type = "Canvas Signature" if signature_data else "Text Signature"
                             sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
@@ -617,23 +661,19 @@ elif menu == "✅ 일일점검관리":
         df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         df_master = get_daily_check_master_data()
         
-        if not df_res.empty:
-            df_today = df_res[df_res['date'] == today]
-            if not df_today.empty:
-                # [Fix] 중복 제거 로직 강화 (설비/항목 기준)
-                df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-        else:
-            df_today = pd.DataFrame()
+        df_today = df_res[df_res['date'] == today]
         
-        # [Fix] 마스터 데이터와 조인하여 정확한 모수 산출 (108/108)
-        # 마스터에 있는 항목만 카운트 (삭제된 항목 제외 등)
+        # [Fix] 중복 제거 및 정확한 집계
         if not df_today.empty:
-            # 키 생성
-            df_master['key'] = df_master['line'] + df_master['equip_id'] + df_master['item_name']
-            df_today['key'] = df_today['line'] + df_today['equip_id'] + df_today['item_name']
+            # 1. 최신 데이터만 남김
+            df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
             
-            # 마스터 키에 존재하는 결과만 필터링
-            df_today = df_today[df_today['key'].isin(df_master['key'])]
+            # 2. 마스터 데이터에 존재하는 유효한 항목만 필터링 (삭제된 항목 제외)
+            if not df_master.empty:
+                # 고유 키 생성 (Line + Equip + Item)
+                df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
+                df_today['key'] = df_today['line'] + "_" + df_today['equip_id'] + "_" + df_today['item_name']
+                df_today = df_today[df_today['key'].isin(df_master['key'])]
 
         total_items = len(df_master)
         done_items = len(df_today)
