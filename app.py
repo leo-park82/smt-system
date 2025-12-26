@@ -9,7 +9,7 @@ import tempfile
 import urllib.request  # 폰트 다운로드용
 from fpdf import FPDF
 
-# [선택] 그리기 서명 라이브러리
+# [선택] 그리기 서명 라이브러리 (태블릿 터치 서명용)
 try:
     from streamlit_drawable_canvas import st_canvas
     HAS_CANVAS = True
@@ -175,14 +175,17 @@ def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     
-    # 해당 날짜 데이터 필터링
-    if not df_r.empty:
-        df_r['date'] = df_r['date'].astype(str)
-        df_r = df_r[df_r['date'] == date_str]
-        df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+    # 1. 해당 날짜 데이터 필터링
+    if df_r.empty:
+        return None
+    
+    df_r['date'] = df_r['date'].astype(str)
+    df_r = df_r[df_r['date'] == date_str]
     
     if df_r.empty:
         return None
+        
+    df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
     # 폰트 설정
     font_filename = 'NanumGothic.ttf'
@@ -199,7 +202,8 @@ def generate_all_daily_check_pdf(date_str):
         font_name = 'Korean'
     except: pass
 
-    # [Fix 4] 점검 결과가 존재하는 라인만 출력 (Master 기준 X -> Result 기준 O)
+    # [수정 4] PDF 생성이 "Master 기준" -> "Result 기준" (점검한 라인만 출력)
+    # 실제 점검 데이터가 있는 라인만 추출
     lines_with_data = df_r['line'].unique()
     
     for line in lines_with_data:
@@ -217,7 +221,8 @@ def generate_all_daily_check_pdf(date_str):
         pdf.cell(0, 15, f"Date: {date_str}  |  Line: {line}", 0, 0, 'R')
         pdf.ln(25)
         
-        # 데이터 병합 (Master Left Join Result) - 해당 라인의 모든 항목 표시
+        # 데이터 병합 (Master Left Join Result)
+        # 해당 라인의 마스터 항목을 불러오되, 결과가 없으면 '-' 표시
         line_master = df_m[df_m['line'] == line]
         df_merged = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
         df_merged = df_merged.fillna({'value':'-', 'ox':'-', 'checker':''})
@@ -478,7 +483,7 @@ elif menu == "🛠 설비보전관리":
                 st.altair_chart(c, use_container_width=True)
 
 elif menu == "✅ 일일점검관리":
-    # [Fix 1, 5] st.data_editor를 활용한 고성능 점검 입력 인터페이스
+    # [수정 1] HTML 재렌더링 없는 st.data_editor 사용
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Smart)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
     with tab1:
@@ -493,7 +498,6 @@ elif menu == "✅ 일일점검관리":
             lines = df_master_all['line'].unique()
             sel_line = c_line.selectbox("라인 선택", lines)
             
-            # 1. 데이터 준비 (Master + Result 병합)
             df_master_line = df_master_all[df_master_all['line'] == sel_line].copy()
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
             
@@ -508,15 +512,14 @@ elif menu == "✅ 일일점검관리":
                         key = f"{r['equip_id']}_{r['item_name']}"
                         current_vals[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # Editor용 데이터프레임 생성
+            # Editor용 데이터프레임
             editor_rows = []
             for _, row in df_master_line.iterrows():
                 key = f"{row['equip_id']}_{row['item_name']}"
                 prev = current_vals.get(key, {})
                 
-                # 기본값 설정
                 val = prev.get('val', "")
-                ox = prev.get('ox', "OK") # 기본은 OK로 두되, 저장 시 검증
+                ox = prev.get('ox', "OK") 
                 
                 editor_rows.append({
                     "설비명": row['equip_name'],
@@ -526,18 +529,18 @@ elif menu == "✅ 일일점검관리":
                     "입력값": val,
                     "판정": ox,
                     "unit": row['unit'],
-                    "equip_id": row['equip_id'], # Hidden
-                    "min": row['min_val'],       # Hidden
-                    "max": row['max_val'],       # Hidden
-                    "type": row['check_type']    # Hidden
+                    "equip_id": row['equip_id'], 
+                    "min": row['min_val'],       
+                    "max": row['max_val'],       
+                    "type": row['check_type']    
                 })
             
             df_editor = pd.DataFrame(editor_rows)
 
             st.markdown("##### 📝 점검 결과 입력")
-            st.caption("표에서 직접 값을 수정하고 엔터를 치세요. (Excel 스타일)")
-
-            # [Fix 1] data_editor로 고성능 렌더링 (재렌더링 문제 해결)
+            
+            # [수정 2] HTML 레벨 유효성 검사: validate regex 사용 (숫자 or 빈값만 허용, 문자 차단)
+            # validate=r"^$|^-?\d+(\.\d+)?$" -> 빈 문자열 OR 숫자만 허용
             edited_df = st.data_editor(
                 df_editor,
                 column_config={
@@ -545,9 +548,12 @@ elif menu == "✅ 일일점검관리":
                     "점검항목": st.column_config.TextColumn(disabled=True),
                     "점검내용": st.column_config.TextColumn(disabled=True, width="medium"),
                     "기준": st.column_config.TextColumn(disabled=True),
-                    "입력값": st.column_config.TextColumn(help="수치 또는 상태 입력"),
+                    "입력값": st.column_config.TextColumn(
+                        help="수치 입력 (문자 불가)", 
+                        validate=r"^$|^-?\d+(\.\d+)?$" 
+                    ),
                     "판정": st.column_config.SelectboxColumn(options=["OK", "NG"], required=True),
-                    "unit": None, "equip_id": None, "min": None, "max": None, "type": None # 숨김 처리
+                    "unit": None, "equip_id": None, "min": None, "max": None, "type": None 
                 },
                 hide_index=True,
                 use_container_width=True,
@@ -557,12 +563,12 @@ elif menu == "✅ 일일점검관리":
 
             st.divider()
             
-            # 서명 및 저장 영역
             col_sig, col_act = st.columns([1, 1])
             
             signature_data = None
             with col_sig:
-                st.write("전자 서명")
+                st.write("전자 서명 (필수)")
+                # [수정 5] 터치 지원 Canvas
                 if HAS_CANVAS:
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
@@ -570,7 +576,6 @@ elif menu == "✅ 일일점검관리":
                         key=f"sig_{sel_line}",
                     )
                     if canvas_result.image_data is not None:
-                        # 캔버스가 비어있는지 확인하는 간단한 로직 (numpy 필요하나, 여기선 길이로 대체)
                         if canvas_result.json_data and len(canvas_result.json_data['objects']) > 0:
                             signature_data = "Signed"
             
@@ -579,31 +584,33 @@ elif menu == "✅ 일일점검관리":
                 signer = st.text_input("점검자", value=st.session_state.user_info['name'])
                 
                 if st.button("💾 점검 완료 및 저장", type="primary", use_container_width=True):
-                    # [Fix 3] 서명 필수 체크
+                    # [수정 3] 서명 필수 체크 (강력)
                     if not signature_data:
-                        st.error("🚨 서명이 필요합니다. 서명란에 서명해주세요.")
+                        st.error("🚨 서명이 누락되었습니다. 서명 후 다시 시도해주세요.")
                     else:
-                        # [Fix 2] 데이터 검증 및 저장 로직 (HTML JS 유효성 검사 대체)
                         rows_to_save = []
                         ng_list = []
+                        save_flag = True
                         
                         for _, row in edited_df.iterrows():
                             val = str(row['입력값']).strip()
                             ox = row['판정']
                             
-                            # 수치형인데 값이 입력된 경우, 숫자 검증
-                            if row['type'] != 'OX' and val:
-                                try:
-                                    f_val = float(val)
-                                    min_v = safe_float(row['min'], -999999)
-                                    max_v = safe_float(row['max'], 999999)
-                                    # 자동 판정 로직 (사용자가 OK로 뒀어도 수치가 벗어나면 NG 강제할 수도 있음, 여기선 경고만)
-                                    if not (min_v <= f_val <= max_v) and ox == 'OK':
-                                        ox = 'NG' # 시스템 강제 판정
-                                except ValueError:
-                                    st.warning(f"⚠️ [{row['점검항목']}] 수치 입력란에 문자가 있습니다. 확인해주세요.")
-                                    # 여기서는 저장 진행하되 NG 처리하거나, 저장을 막을 수 있음. 현재는 NG 처리.
-                                    ox = 'NG'
+                            # [수정 2] Python 레벨 유효성 검사: 빈 값 X (수치형인데 값 없으면 에러)
+                            if row['type'] != 'OX':
+                                if not val:
+                                    st.error(f"⚠️ [{row['점검항목']}] 수치 입력값이 누락되었습니다.")
+                                    save_flag = False
+                                else:
+                                    try:
+                                        f_val = float(val)
+                                        min_v = safe_float(row['min'], -999999)
+                                        max_v = safe_float(row['max'], 999999)
+                                        if not (min_v <= f_val <= max_v) and ox == 'OK':
+                                            ox = 'NG' 
+                                    except ValueError:
+                                        st.error(f"⚠️ [{row['점검항목']}] 잘못된 수치 형식입니다.")
+                                        save_flag = False
                             
                             if ox == 'NG':
                                 ng_list.append(f"{row['점검항목']}")
@@ -613,23 +620,18 @@ elif menu == "✅ 일일점검관리":
                                 val, ox, signer, str(datetime.now())
                             ])
                         
-                        # 기존 데이터 삭제 (해당 날짜/라인) 로직은 복잡하므로 Append Only 후 최신값 조회 방식 유지
-                        # 또는 전체 저장 시 덮어쓰기 로직 필요. 여기서는 Append 방식.
-                        
-                        df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
-                        
-                        # 시트 저장
-                        append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                        
-                        # 서명 저장
-                        sig_row = [str(sel_date), sel_line, signer, "Canvas Signed", str(datetime.now())]
-                        append_data(dict(zip(COLS_CHECK_SIGNATURE, sig_row)), SHEET_CHECK_SIGNATURE)
-                        
-                        st.success("✅ 저장이 완료되었습니다.")
-                        if ng_list:
-                            st.error(f"NG 항목이 포함되어 있습니다: {', '.join(ng_list)}")
-                        time.sleep(1.5)
-                        st.rerun()
+                        if save_flag:
+                            df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
+                            append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                            
+                            sig_row = [str(sel_date), sel_line, signer, "Canvas Signed", str(datetime.now())]
+                            append_data(dict(zip(COLS_CHECK_SIGNATURE, sig_row)), SHEET_CHECK_SIGNATURE)
+                            
+                            st.success("✅ 점검 결과가 저장되었습니다.")
+                            if ng_list:
+                                st.error(f"NG 항목이 포함되어 있습니다: {', '.join(ng_list)}")
+                            time.sleep(1.5)
+                            st.rerun()
 
     with tab2:
         st.markdown("##### 오늘의 점검 현황")
@@ -643,7 +645,6 @@ elif menu == "✅ 일일점검관리":
             df_today = df_res[df_res['date'] == today]
             if not df_today.empty:
                 df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-                # 마스터 키와 매칭하여 유효한 항목만 카운트
                 df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
                 df_today['key'] = df_today['line'] + "_" + df_today['equip_id'] + "_" + df_today['item_name']
                 df_today = df_today[df_today['key'].isin(df_master['key'])]
