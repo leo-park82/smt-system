@@ -8,6 +8,7 @@ import os
 import tempfile
 import urllib.request
 from fpdf import FPDF
+import streamlit.components.v1 as components  # [추가] 스크롤 제어를 위한 컴포넌트
 
 # [선택] 그리기 서명 라이브러리
 try:
@@ -518,6 +519,19 @@ elif menu == "✅ 일일점검관리":
     
     # 1. 점검 입력
     with tab1:
+        # [NEW] 저장 후 스크롤 상단 이동 로직 (JavaScript 주입)
+        if st.session_state.get('scroll_to_top'):
+            components.html(
+                """
+                <script>
+                    var body = window.parent.document.querySelector(".main");
+                    if (body) { body.scrollTop = 0; }
+                </script>
+                """,
+                height=0
+            )
+            st.session_state['scroll_to_top'] = False
+
         st.info("💡 PC/태블릿 공용 입력 화면입니다. (입력 시 깜빡임을 최소화했습니다)")
         
         c_date, c_btn = st.columns([2, 1])
@@ -579,6 +593,7 @@ elif menu == "✅ 일일점검관리":
                     prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
             # [핵심 1] st.form 사용으로 전체 재렌더링 방지
+            # form 안에서는 Enter 키가 Submit(저장)을 트리거할 수 있지만, 일반적인 값 입력 시에는 새로고침되지 않습니다.
             with st.form("main_check_form"):
                 for i, line in enumerate(lines):
                     with line_tabs[i]:
@@ -715,6 +730,10 @@ elif menu == "✅ 일일점검관리":
                             
                             st.success("✅ 전체 점검 결과가 저장되었습니다.")
                             if ng_list: st.error(f"NG 항목 발견: {', '.join(ng_list)}")
+                            
+                            # [NEW] 저장 후 스크롤 상단 이동 플래그 설정
+                            st.session_state['scroll_to_top'] = True
+                            
                             time.sleep(1)
                             st.rerun()
         else:
