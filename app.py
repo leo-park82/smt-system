@@ -205,7 +205,6 @@ def generate_all_daily_check_pdf(date_str):
         if not df_r.empty:
             df_r['date_only'] = df_r['date'].astype(str).str.split().str[0]
             df_r = df_r[df_r['date_only'] == date_str]
-            # [수정] PDF 생성 시에도 날짜 변환 후 정렬 (최신 반영)
             df_r['timestamp'] = pd.to_datetime(df_r['timestamp'], errors='coerce')
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
@@ -372,46 +371,144 @@ st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow
 
 if menu == "📊 대시보드":
     try:
+        # 데이터 로드
         df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
         df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-        today = datetime.now().strftime("%Y-%m-%d")
+        df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
         
-        prod_today = 0
+        # 날짜 처리
+        today = datetime.now()
+        today_str = today.strftime("%Y-%m-%d")
+        yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # 1. 생산량 KPI (전일 대비)
+        prod_today_val = 0
+        prod_yesterday_val = 0
+        
         if not df_prod.empty:
             df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce')
             df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
-            prod_today = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today]['수량'].sum()
+            
+            prod_today_val = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today_str]['수량'].sum()
+            prod_yesterday_val = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == yesterday_str]['수량'].sum()
         
-        check_today = 0
-        ng_today = 0
+        delta_prod = prod_today_val - prod_yesterday_val
+        
+        # 2. 품질 KPI (NG율)
+        check_today_cnt = 0
+        ng_today_cnt = 0
+        ng_rate = 0.0
+        
         if not df_check.empty:
             df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
-            df_check_today = df_check[df_check['date_only'] == today]
-            if not df_check_today.empty:
-                # [수정] timestamp를 datetime으로 변환 후 정렬 (정확한 최신값 확보)
-                df_check_today['timestamp'] = pd.to_datetime(df_check_today['timestamp'], errors='coerce')
-                df_unique = df_check_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-                check_today = len(df_unique)
-                ng_today = len(df_unique[df_unique['ox'] == 'NG'])
+            df_check['timestamp'] = pd.to_datetime(df_check['timestamp'], errors='coerce')
+            
+            # 오늘자 최신 데이터
+            df_today_chk = df_check[df_check['date_only'] == today_str]
+            if not df_today_chk.empty:
+                df_today_unique = df_today_chk.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+                check_today_cnt = len(df_today_unique)
+                ng_today_cnt = len(df_today_unique[df_today_unique['ox'] == 'NG'])
+                if check_today_cnt > 0:
+                    ng_rate = (ng_today_cnt / check_today_cnt) * 100
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("오늘 생산량", f"{prod_today:,.0f} EA")
-        col2.metric("일일점검 완료", f"{check_today} 건")
-        col3.metric("NG 발생", f"{ng_today} 건", delta_color="inverse")
+        # 3. 보전 KPI (오늘 정비 건수)
+        maint_today_cnt = 0
+        if not df_maint.empty:
+            # maintenance 날짜 포맷이 'YYYY-MM-DD'라고 가정
+            maint_today_cnt = len(df_maint[df_maint['날짜'].astype(str) == today_str])
 
-        st.markdown("#### 📅 주간 생산 추이")
-        if not df_prod.empty and HAS_ALTAIR:
-            chart_data = df_prod.groupby('날짜')['수량'].sum().reset_index()
-            c = alt.Chart(chart_data).mark_line(point=True).encode(
-                x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                tooltip=['날짜', '수량']
-            ).interactive()
-            st.altair_chart(c, use_container_width=True)
-        elif df_prod.empty:
-            st.info("생산 데이터가 없습니다.")
+        # --- 상단 KPI 카드 섹션 ---
+        col1, col2, col3, col4 = st.columns(4)
+        
+        col1.metric("오늘 생산량", f"{prod_today_val:,.0f} EA", f"{delta_prod:,.0f} (전일비)")
+        col2.metric("점검 완료 항목", f"{check_today_cnt} 건", "진행중" if check_today_cnt > 0 else "대기")
+        col3.metric("NG 발생 / 불량률", f"{ng_today_cnt} 건", f"{ng_rate:.1f}%", delta_color="inverse")
+        col4.metric("금일 설비 정비", f"{maint_today_cnt} 건", "특이사항 없음" if maint_today_cnt == 0 else "확인 필요", delta_color="inverse")
+
+        st.markdown("---")
+
+        # --- 차트 및 상세 분석 섹션 ---
+        c1, c2 = st.columns([2, 1])
+        
+        with c1:
+            st.subheader("📈 주간 생산 추이 & 유형")
+            if not df_prod.empty and HAS_ALTAIR:
+                # 최근 7일 데이터 필터링
+                last_7_days = today - timedelta(days=7)
+                chart_data = df_prod[df_prod['날짜'] >= last_7_days]
+                
+                if not chart_data.empty:
+                    chart_agg = chart_data.groupby(['날짜', '구분'])['수량'].sum().reset_index()
+                    
+                    # 라인 차트 + 포인트
+                    chart = alt.Chart(chart_agg).mark_line(point=True).encode(
+                        x=alt.X('날짜:T', axis=alt.Axis(format="%m-%d", labelAngle=0, title="날짜")),
+                        y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생산량")),
+                        color=alt.Color('구분', legend=alt.Legend(title="공정 구분")),
+                        tooltip=['날짜', '구분', '수량']
+                    ).properties(height=300)
+                    
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("최근 7일간 생산 데이터가 없습니다.")
+            else:
+                st.info("생산 데이터가 없습니다.")
+
+        with c2:
+            st.subheader("🍩 금일 생산 품목 비율")
+            if not df_prod.empty:
+                df_today_prod = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today_str]
+                if not df_today_prod.empty:
+                    pie_data = df_today_prod.groupby('구분')['수량'].sum().reset_index()
+                    
+                    base = alt.Chart(pie_data).encode(
+                        theta=alt.Theta("수량", stack=True),
+                        color=alt.Color("구분", legend=None) # 범례는 아래 데이터프레임으로 대체하거나 툴팁 활용
+                    )
+                    
+                    pie = base.mark_arc(outerRadius=120, innerRadius=80).encode(
+                        tooltip=["구분", "수량"]
+                    )
+                    
+                    text = base.mark_text(radius=140).encode(
+                        text="구분",
+                        order=alt.Order("구분"),
+                        color=alt.value("black")  
+                    )
+                    
+                    st.altair_chart(pie + text, use_container_width=True)
+                else:
+                    st.info("오늘 생산 실적이 없습니다.")
+            else:
+                st.info("데이터 없음")
+
+        st.markdown("---")
+        
+        # --- 하단: 실시간 이슈 모니터링 ---
+        c3, c4 = st.columns(2)
+        
+        with c3:
+            st.subheader("🚨 실시간 NG 현황 (Today)")
+            if not df_check.empty and ng_today_cnt > 0:
+                # NG 데이터만 필터링해서 보여주기
+                ng_df = df_today_unique[df_today_unique['ox'] == 'NG'][['line', 'equip_id', 'item_name', 'value', 'checker', '비고']]
+                st.dataframe(ng_df, hide_index=True, use_container_width=True)
+            elif ng_today_cnt == 0:
+                st.success("🎉 현재까지 발견된 NG 항목이 없습니다. (All Green)")
+            else:
+                st.info("점검 데이터가 없습니다.")
+
+        with c4:
+            st.subheader("🛠 최근 설비 정비 이력 (Last 5)")
+            if not df_maint.empty:
+                recent_maint = df_maint.sort_values("날짜", ascending=False).head(5)[['날짜', '설비명', '작업구분', '작업내용']]
+                st.dataframe(recent_maint, hide_index=True, use_container_width=True)
+            else:
+                st.info("정비 이력이 없습니다.")
+
     except Exception as e:
-        st.error("대시보드 로딩 오류")
+        st.error(f"대시보드 로딩 중 오류 발생: {e}")
 
 elif menu == "🏭 생산관리":
     try:
@@ -796,10 +893,10 @@ elif menu == "✅ 일일점검관리":
             df_master = get_daily_check_master_data()
             
             if not df_res.empty:
+                # [수정] 여기도 timestamp 정렬 강화 (OK->NG 반영 확인용)
                 df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
                 df_today = df_res[df_res['date_only'] == today]
                 if not df_today.empty:
-                    # [수정] 여기도 timestamp 정렬 강화 (OK->NG 반영 확인용)
                     df_today['timestamp'] = pd.to_datetime(df_today['timestamp'], errors='coerce')
                     df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     
