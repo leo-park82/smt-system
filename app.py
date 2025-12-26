@@ -205,6 +205,8 @@ def generate_all_daily_check_pdf(date_str):
         if not df_r.empty:
             df_r['date_only'] = df_r['date'].astype(str).str.split().str[0]
             df_r = df_r[df_r['date_only'] == date_str]
+            # [수정] PDF 생성 시에도 날짜 변환 후 정렬 (최신 반영)
+            df_r['timestamp'] = pd.to_datetime(df_r['timestamp'], errors='coerce')
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
         font_filename = 'NanumGothic.ttf'
@@ -386,6 +388,8 @@ if menu == "📊 대시보드":
             df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
             df_check_today = df_check[df_check['date_only'] == today]
             if not df_check_today.empty:
+                # [수정] timestamp를 datetime으로 변환 후 정렬 (정확한 최신값 확보)
+                df_check_today['timestamp'] = pd.to_datetime(df_check_today['timestamp'], errors='coerce')
                 df_unique = df_check_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                 check_today = len(df_unique)
                 ng_today = len(df_unique[df_unique['ox'] == 'NG'])
@@ -568,6 +572,8 @@ elif menu == "✅ 일일점검관리":
                 df_res_check['date_only'] = df_res_check['date'].astype(str).str.split().str[0]
                 df_done = df_res_check[df_res_check['date_only'] == str(sel_date)]
                 if not df_done.empty:
+                    # [수정] 진행률 계산 시에도 시간 정렬 강화
+                    df_done['timestamp'] = pd.to_datetime(df_done['timestamp'], errors='coerce')
                     df_done = df_done.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     current_count = len(df_done)
             
@@ -612,6 +618,7 @@ elif menu == "✅ 일일점검관리":
                 prev_data = {}
                 if not df_res_check.empty:
                     df_filtered = df_res_check[df_res_check['date_only'] == str(sel_date)]
+                    df_filtered['timestamp'] = pd.to_datetime(df_filtered['timestamp'], errors='coerce')
                     df_filtered = df_filtered.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     for _, r in df_filtered.iterrows():
                         key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
@@ -762,14 +769,6 @@ elif menu == "✅ 일일점검관리":
                         elif missing_values:
                             st.error(f"⚠️ 다음 항목의 수치를 입력해야 저장할 수 있습니다:\n {', '.join(missing_values[:3])} 등")
                         else:
-                            # 저장 로직
-                            df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                            if not df_existing.empty:
-                                df_existing['date_norm'] = df_existing['date'].astype(str).str.split().str[0]
-                                target_date_str = str(sel_date)
-                                condition = (df_existing['date_norm'] == target_date_str) & (df_existing['line'] == selected_line)
-                                df_existing = df_existing[~condition].drop(columns=['date_norm'])
-                            
                             try:
                                 if rows_to_save:
                                     if append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT):
@@ -800,6 +799,8 @@ elif menu == "✅ 일일점검관리":
                 df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
                 df_today = df_res[df_res['date_only'] == today]
                 if not df_today.empty:
+                    # [수정] 여기도 timestamp 정렬 강화 (OK->NG 반영 확인용)
+                    df_today['timestamp'] = pd.to_datetime(df_today['timestamp'], errors='coerce')
                     df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     
                     df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
