@@ -8,7 +8,7 @@ import os
 import tempfile
 import urllib.request
 from fpdf import FPDF
-import streamlit.components.v1 as components  # [추가] 스크롤 제어를 위한 컴포넌트
+import streamlit.components.v1 as components
 
 # [선택] 그리기 서명 라이브러리
 try:
@@ -185,14 +185,16 @@ def safe_float(value, default_val=None):
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     if not df.empty:
-        df = df.sort_values(by=['line', 'equip_name', 'item_name'])
+        # [수정] 항목명(item_name) 정렬 제거 -> 시트 순서 유지
+        # Line과 설비명으로만 정렬하여 그룹화
+        df = df.sort_values(by=['line', 'equip_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
     # 1. 마스터 데이터 로드
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     if not df_m.empty:
-        df_m = df_m.sort_values(by=['line', 'equip_name', 'item_name'])
+        df_m = df_m.sort_values(by=['line', 'equip_name']) # 시트 순서 유지
         
     # 2. 결과 데이터 로드
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
@@ -685,57 +687,60 @@ elif menu == "✅ 일일점검관리":
                             df_existing['date'] = df_existing['date'].astype(str)
                             df_existing = df_existing[df_existing['date'] != str(sel_date)]
                         
-                        for _, row in df_master_check.iterrows():
-                            uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                            widget_key = f"val_{uid}_{sel_date}"
-                            val = st.session_state.get(widget_key)
-                            
-                            ox = "OK"
-                            final_val = ""
-                            
-                            # 값 타입에 따른 처리
-                            if row['check_type'] == 'OX' and ('온,습도' not in row['line']) and ('NUMBER' not in str(row.get('check_type', ''))):
-                                if val == 'NG': ox = 'NG'
-                                elif val is None: ox = "NG" # 선택 안하면 NG 간주
-                                final_val = str(val) if val else "-"
-                            else:
-                                # Number Input의 경우
-                                if val is None: 
-                                    ox = "NG" # 값 입력 안됨
-                                    final_val = ""
+                        try:
+                            for _, row in df_master_check.iterrows():
+                                uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                                widget_key = f"val_{uid}_{sel_date}"
+                                val = st.session_state.get(widget_key)
+                                
+                                ox = "OK"
+                                final_val = ""
+                                
+                                # 값 타입에 따른 처리
+                                if row['check_type'] == 'OX' and ('온,습도' not in row['line']) and ('NUMBER' not in str(row.get('check_type', ''))):
+                                    if val == 'NG': ox = 'NG'
+                                    elif val is None: ox = "NG" # 선택 안하면 NG 간주
+                                    final_val = str(val) if val else "-"
                                 else:
-                                    final_val = str(val)
-                                    try:
-                                        num_val = float(val)
-                                        min_v = safe_float(row['min_val'], -999999)
-                                        max_v = safe_float(row['max_val'], 999999)
-                                        if not (min_v <= num_val <= max_v): ox = 'NG'
-                                    except: ox = 'NG'
+                                    # Number Input의 경우
+                                    if val is None: 
+                                        ox = "NG" # 값 입력 안됨
+                                        final_val = ""
+                                    else:
+                                        final_val = str(val)
+                                        try:
+                                            num_val = float(val)
+                                            min_v = safe_float(row['min_val'], -999999)
+                                            max_v = safe_float(row['max_val'], 999999)
+                                            if not (min_v <= num_val <= max_v): ox = 'NG'
+                                        except: ox = 'NG'
+                                
+                                if ox == 'NG': ng_list.append(f"{row['line']} > {row['item_name']}")
+                                
+                                rows_to_save.append([
+                                    str(sel_date), row['line'], row['equip_id'], row['item_name'], 
+                                    final_val, ox, signer_name, str(datetime.now())
+                                ])
                             
-                            if ox == 'NG': ng_list.append(f"{row['line']} > {row['item_name']}")
-                            
-                            rows_to_save.append([
-                                str(sel_date), row['line'], row['equip_id'], row['item_name'], 
-                                final_val, ox, signer_name, str(datetime.now())
-                            ])
-                        
-                        if rows_to_save:
-                            df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
-                            df_final = pd.concat([df_existing, df_new], ignore_index=True)
-                            save_data(df_final, SHEET_CHECK_RESULT)
-                            
-                            sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
-                            sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
-                            append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                            
-                            st.success("✅ 전체 점검 결과가 저장되었습니다.")
-                            if ng_list: st.error(f"NG 항목 발견: {', '.join(ng_list)}")
-                            
-                            # [NEW] 저장 후 스크롤 상단 이동 플래그 설정
-                            st.session_state['scroll_to_top'] = True
-                            
-                            time.sleep(1)
-                            st.rerun()
+                            if rows_to_save:
+                                df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
+                                df_final = pd.concat([df_existing, df_new], ignore_index=True)
+                                save_data(df_final, SHEET_CHECK_RESULT)
+                                
+                                sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
+                                sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
+                                append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
+                                
+                                st.toast("✅ 전체 점검 결과가 저장되었습니다.", icon="🎉")
+                                if ng_list: st.error(f"NG 항목 발견: {', '.join(ng_list)}")
+                                
+                                # [NEW] 저장 후 스크롤 상단 이동 플래그 설정
+                                st.session_state['scroll_to_top'] = True
+                                
+                                # [수정] time.sleep 제거하고 즉시 rerun
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"저장 중 오류 발생: {e}")
         else:
             st.info("표시할 라인 정보가 없습니다.")
 
