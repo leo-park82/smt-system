@@ -128,7 +128,6 @@ def load_data(sheet_name, cols=None):
                 if c not in df.columns: df[c] = ""
         return df
     except Exception as e:
-        # st.error(f"데이터 로딩 중 오류: {e}") # 사용자에게 너무 잦은 에러 노출 방지
         return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
 
 def clear_cache():
@@ -407,10 +406,10 @@ if menu == "📊 대시보드":
     st.markdown("#### 📅 주간 생산 추이")
     if not df_prod.empty and HAS_ALTAIR:
         chart_data = df_prod.groupby('날짜')['수량'].sum().reset_index()
-        # [수정] 글씨 가로 정렬 (axis=alt.Axis(labelAngle=0))
+        # [수정] 글씨(라벨, 타이틀) 무조건 가로 정렬
         c = alt.Chart(chart_data).mark_line(point=True).encode(
-            x=alt.X('날짜', axis=alt.Axis(labelAngle=0)), 
-            y='수량', 
+            x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+            y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
             tooltip=['날짜', '수량']
         ).interactive()
         st.altair_chart(c, use_container_width=True)
@@ -462,10 +461,10 @@ elif menu == "🏭 생산관리":
         if not df.empty and HAS_ALTAIR:
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
             df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-            # [수정] 글씨 가로 정렬
+            # [수정] 글씨(라벨, 타이틀) 무조건 가로 정렬
             c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
-                x=alt.X('날짜', axis=alt.Axis(labelAngle=0)), 
-                y='수량'
+                x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0))
             ).interactive()
             st.altair_chart(c, use_container_width=True)
     with t4:
@@ -527,10 +526,10 @@ elif menu == "🛠 설비보전관리":
         if not df.empty:
             df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
             if HAS_ALTAIR:
-                # [수정] 글씨 가로 정렬
+                # [수정] 글씨(라벨, 타이틀) 무조건 가로 정렬
                 c = alt.Chart(df).mark_bar().encode(
-                    x=alt.X('작업구분', axis=alt.Axis(labelAngle=0)), 
-                    y='비용', 
+                    x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                    y=alt.Y('비용', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     color='작업구분'
                 ).interactive()
                 st.altair_chart(c, use_container_width=True)
