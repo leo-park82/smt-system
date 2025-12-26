@@ -57,6 +57,15 @@ st.markdown("""
         cursor: pointer; transition: all 0.2s; font-size: 0.85rem;
     }
     div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
+
+    /* [NEW] 일일점검 리스트 스타일 개선 */
+    .check-item-container { padding: 5px 0; }
+    .check-item-title { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; letter-spacing: -0.5px; }
+    .check-item-content { font-size: 0.95rem; color: #64748b; margin-bottom: 2px; line-height: 1.4; }
+    .check-item-badge { 
+        display: inline-block; font-size: 0.8rem; font-weight: 600; color: #0f766e; 
+        background-color: #f0fdfa; padding: 4px 8px; border-radius: 6px; border: 1px solid #ccfbf1;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -369,7 +378,6 @@ st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow
 # 5. 기능 구현 (메뉴 이동 시 잔상 제거를 위한 컨테이너 격리)
 # ------------------------------------------------------------------
 
-# [핵심] main_holder를 사용하여 메뉴 전환 시 이전 콘텐츠를 즉시 비움
 main_holder = st.empty()
 
 with main_holder.container():
@@ -437,7 +445,6 @@ with main_holder.container():
                     if not chart_data.empty:
                         chart_agg = chart_data.groupby(['날짜', '구분'])['수량'].sum().reset_index()
                         
-                        # [가로 글씨 유지]
                         chart = alt.Chart(chart_agg).mark_line(point=True).encode(
                             x=alt.X('날짜:T', axis=alt.Axis(format="%m-%d", labelAngle=0, title="날짜")),
                             y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생산량")),
@@ -625,7 +632,6 @@ with main_holder.container():
             
             # 1. 점검 입력
             with tab1:
-                # [기능 유지] 저장 후 상단 이동
                 if st.session_state.get('scroll_to_top'):
                     components.html(
                         """
@@ -722,8 +728,17 @@ with main_holder.container():
                             default_val = prev_data.get(uid, {}).get('val', None)
                             default_memo = prev_data.get(uid, {}).get('memo', "")
                             
+                            # [Design Improvement] 가독성 개선: 타이틀과 설명을 분리하고 스타일링 적용
                             c1, c2, c3 = st.columns([2, 2, 1])
-                            c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
+                            
+                            # HTML을 사용하여 깔끔한 스타일 적용
+                            item_html = f"""
+                            <div class="check-item-container">
+                                <div class="check-item-title">{row['item_name']}</div>
+                                <div class="check-item-content">{row['check_content']}</div>
+                            </div>
+                            """
+                            c1.markdown(item_html, unsafe_allow_html=True)
                             
                             check_type = row['check_type']
                             is_numeric = False
@@ -769,9 +784,10 @@ with main_holder.container():
                                         except: pass
 
                             with c3:
-                                st.caption(f"기준: {row['standard']}")
+                                # 기준 값을 배지 스타일로 표시
+                                std_html = f"<div class='check-item-badge'>기준: {row['standard']}</div>"
+                                st.markdown(std_html, unsafe_allow_html=True)
                             
-                            # [기능 유지] NG 입력 시 장비점검 창 표시
                             if is_ng:
                                 st.text_input("⚠️ 장비점검 (조치내역)", value=default_memo, key=memo_key, placeholder="NG 사유 및 조치내용 입력")
                             
