@@ -184,17 +184,17 @@ def safe_float(value, default_val=None):
 # ------------------------------------------------------------------
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    if not df.empty:
-        # [수정] 항목명(item_name) 정렬 제거 -> 시트 순서 유지
-        # Line과 설비명으로만 정렬하여 그룹화
-        df = df.sort_values(by=['line', 'equip_name'])
+    # [수정 완료] 모든 정렬 제거: 구글 시트의 입력 순서(Row Order)를 100% 따름
+    # if not df.empty:
+    #     df = df.sort_values(by=['line', 'equip_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
     # 1. 마스터 데이터 로드
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    if not df_m.empty:
-        df_m = df_m.sort_values(by=['line', 'equip_name']) # 시트 순서 유지
+    # [수정 완료] PDF 생성 시에도 시트 순서 유지
+    # if not df_m.empty:
+    #     df_m = df_m.sort_values(by=['line', 'equip_name'])
         
     # 2. 결과 데이터 로드
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
@@ -535,6 +535,8 @@ elif menu == "✅ 일일점검관리":
             st.session_state['scroll_to_top'] = False
 
         st.info("💡 PC/태블릿 공용 입력 화면입니다. (입력 시 깜빡임을 최소화했습니다)")
+        # [안내 문구 추가]
+        st.caption("ℹ️ 숫자 입력 후 **Enter(엔터)**를 누르면 저장이 시도됩니다. 항목 이동 시 **Tab(탭)** 키를 사용하세요.")
         
         c_date, c_btn = st.columns([2, 1])
         with c_date:
