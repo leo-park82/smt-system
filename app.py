@@ -33,42 +33,48 @@ st.markdown("""
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     
-    /* [CSS 수정] 라디오 버튼 스타일 강력 적용 (CSS 선택자 단순화) */
+    /* [CSS 수정] 라디오 버튼 스타일 강력 적용 - OK/NG 버튼 크기 확대 및 통일 */
     
-    /* 1. 기본 라디오 버튼 컨테이너 (메인 영역) */
+    /* 1. 라디오 버튼 그룹 컨테이너 */
+    /* 일일점검관리 탭의 OK/NG 버튼이 가로로 꽉 차게 설정 */
     div[data-testid="stRadio"] > div {
         display: flex;
-        flex-direction: row;
-        gap: 10px !important;
-        width: 100%;
+        flex-direction: row !important;
+        gap: 12px !important;
+        width: 100% !important;
     }
 
-    /* 2. 각 라디오 버튼 항목 (Label) 스타일링 */
+    /* 2. 각 버튼(라벨) 스타일링 - 크기 대폭 확대 및 1:1 비율 강제 */
     div[data-testid="stRadio"] > div > label {
-        flex: 1;
+        flex: 1 1 0px !important; /* flex-grow: 1 -> 남은 공간을 똑같이 나눠가짐 (핵심) */
+        width: 100% !important;   /* 너비 강제 확장 */
+        min-width: 0 !important;  /* flex item 축소 허용 */
+        height: 70px !important;  /* 높이 70px로 시원하게 확대 */
         background-color: #ffffff;
-        border: 2px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 0px;
-        height: 50px; /* 높이 고정 */
+        border: 2px solid #cbd5e1;
+        border-radius: 12px !important;
+        padding: 0px !important;
         display: flex;
         justify-content: center;
         align-items: center;
         cursor: pointer;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        transition: all 0.2s;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        transition: all 0.2s ease-in-out;
+        margin-right: 0px !important; /* 기본 마진 제거 */
     }
 
     /* 3. 마우스 오버 시 효과 */
     div[data-testid="stRadio"] > div > label:hover {
-        background-color: #f1f5f9;
-        border-color: #94a3b8;
+        background-color: #f8fafc;
+        border-color: #64748b;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.1);
     }
 
-    /* 4. 내부 텍스트 스타일 */
+    /* 4. 내부 텍스트(OK/NG) 스타일 - 폰트 크기 확대 */
     div[data-testid="stRadio"] label p {
-        font-size: 18px !important; /* 글자 크기 확대 */
-        font-weight: 700 !important;
+        font-size: 24px !important; /* 글자 크기 24px로 확대 */
+        font-weight: 800 !important;
         margin: 0 !important;
         color: #334155;
     }
@@ -79,13 +85,16 @@ st.markdown("""
         gap: 0px !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] > div > label {
+        flex: none !important;
+        width: auto !important;
+        height: auto !important;
         background-color: transparent !important;
         border: none !important;
         border-radius: 0 !important;
         padding: 8px 0px !important;
-        height: auto !important;
         justify-content: flex-start !important;
         box-shadow: none !important;
+        transform: none !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label p {
         font-size: 14px !important;
@@ -605,6 +614,7 @@ elif menu == "✅ 일일점검관리":
                             if widget_key in st.session_state:
                                 if st.session_state[widget_key] == "OK": idx = 0
                                 elif st.session_state[widget_key] == "NG": idx = 1
+                            # OK/NG 버튼 - CSS가 자동 적용되어 크게 나옴
                             st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
                         else:
                             val_str = str(default_val) if default_val and default_val != 'nan' and default_val is not None else ""
