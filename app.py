@@ -33,40 +33,47 @@ st.markdown("""
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     
-    /* [메인 영역] 라디오 버튼만 카드 형태로 변경 (사이드바 제외) */
-    /* .main 은 Streamlit 메인 컨텐츠 영역 클래스 */
-    .main div[data-testid="stRadio"] > div {
+    /* [CSS 수정] 라디오 버튼 스타일 강력 적용 (CSS 선택자 단순화) */
+    
+    /* 1. 기본 라디오 버튼 컨테이너 (메인 영역) */
+    div[data-testid="stRadio"] > div {
         display: flex;
         flex-direction: row;
-        gap: 8px;
+        gap: 10px !important;
         width: 100%;
     }
-    .main div[data-testid="stRadio"] > div > label {
+
+    /* 2. 각 라디오 버튼 항목 (Label) 스타일링 */
+    div[data-testid="stRadio"] > div > label {
         flex: 1;
         background-color: #ffffff;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        padding: 0px; /* 패딩 0으로 하고 flex로 중앙 정렬 */
-        height: 45px; /* 높이 고정으로 통일감 부여 */
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0px;
+        height: 50px; /* 높이 고정 */
         display: flex;
         justify-content: center;
         align-items: center;
-        transition: all 0.1s;
         cursor: pointer;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: all 0.2s;
     }
-    .main div[data-testid="stRadio"] > div > label:hover {
-        background-color: #f8fafc;
+
+    /* 3. 마우스 오버 시 효과 */
+    div[data-testid="stRadio"] > div > label:hover {
+        background-color: #f1f5f9;
         border-color: #94a3b8;
     }
-    /* 선택된 항목 텍스트 강조 */
-    .main div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"] > p {
-        font-size: 16px;
-        font-weight: 700;
-        margin: 0;
+
+    /* 4. 내부 텍스트 스타일 */
+    div[data-testid="stRadio"] label p {
+        font-size: 18px !important; /* 글자 크기 확대 */
+        font-weight: 700 !important;
+        margin: 0 !important;
+        color: #334155;
     }
-    
-    /* [사이드바] 라디오 버튼 스타일 보호 (원복) */
+
+    /* [중요] 사이드바 라디오 버튼은 원복 (스타일 덮어쓰기 방지) */
     section[data-testid="stSidebar"] div[data-testid="stRadio"] > div {
         flex-direction: column !important;
         gap: 0px !important;
@@ -74,11 +81,16 @@ st.markdown("""
     section[data-testid="stSidebar"] div[data-testid="stRadio"] > div > label {
         background-color: transparent !important;
         border: none !important;
-        border-radius: 0px !important;
+        border-radius: 0 !important;
         padding: 8px 0px !important;
         height: auto !important;
         justify-content: flex-start !important;
         box-shadow: none !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label p {
+        font-size: 14px !important;
+        font-weight: 400 !important;
+        color: inherit !important;
     }
     </style>
 """, unsafe_allow_html=True)
