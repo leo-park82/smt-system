@@ -567,46 +567,47 @@ elif menu == "✅ 일일점검관리":
                     key_base = f"{row['equip_id']}_{row['item_name']}"
                     prev = current_vals.get(key_base, {})
                     
-                    prev_val = prev.get('val', None)
-                    if prev_val == '' or prev_val == '-': prev_val = None
-                    else:
-                        try: prev_val = float(prev_val)
-                        except: prev_val = None
-                        
-                    prev_ox = prev.get('ox', 'OK') 
+                    check_type = row['check_type']
                     
-                    with st.container(border=True):
-                        st.markdown(f"**[{row['equip_name']}] {row['item_name']}**")
-                        st.caption(f"기준: {row['standard']} | 방법: {row['check_content']}")
+                    # 기본값 세팅
+                    if check_type == 'OX':
+                        default_val = prev.get('ox', 'OK')
+                    else:
+                        default_val = prev.get('val', "")
                         
-                        c_in1, c_in2 = st.columns([1, 1])
+                    widget_key = f"chk_{index}_{key_base}"
+
+                    # 3단 레이아웃
+                    c1, c2, c3 = st.columns([1.5, 2, 1]) 
+                    
+                    with c1:
+                        st.markdown(f"**[{row['equip_name']}]**")
+                        st.markdown(f"{row['item_name']}")
+                        st.caption(f"{row['check_content']}")
+                    
+                    with c2:
+                        if check_type == 'OX':
+                            idx = None
+                            if default_val == 'OK': idx = 0
+                            elif default_val == 'NG': idx = 1
+                            if widget_key in st.session_state:
+                                if st.session_state[widget_key] == "OK": idx = 0
+                                elif st.session_state[widget_key] == "NG": idx = 1
+                            st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
+                        else:
+                            val_str = str(default_val) if default_val and default_val != 'nan' and default_val is not None else ""
+                            st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder="입력")
+                            
+                    with c3:
+                        st.caption(f"기준: {row['standard']}")
+                    
+                    st.divider()
                         
-                        val_input = None
-                        if row['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
-                            with c_in1:
-                                val_input = st.number_input(
-                                    f"측정값 ({row['unit']})", 
-                                    value=prev_val, 
-                                    step=0.1, 
-                                    key=f"val_{index}_{key_base}"
-                                )
-                        
-                        with c_in2:
-                            ox_input = st.radio(
-                                "판정", 
-                                ["OK", "NG"], 
-                                index=0 if prev_ox == 'OK' else 1, 
-                                horizontal=True,
-                                key=f"ox_{index}_{key_base}",
-                                label_visibility="collapsed" 
-                            )
-                        
-                        rows_data.append({
-                            "master": row,
-                            "val_key": f"val_{index}_{key_base}",
-                            "ox_key": f"ox_{index}_{key_base}",
-                            "check_type": row['check_type']
-                        })
+                    rows_data.append({
+                        "master": row,
+                        "widget_key": widget_key,
+                        "check_type": check_type
+                    })
 
                 submitted = st.form_submit_button("💾 점검 완료 및 저장", type="primary", use_container_width=True)
                 
@@ -617,30 +618,31 @@ elif menu == "✅ 일일점검관리":
                     
                     for item in rows_data:
                         row = item['master']
-                        
-                        val = None
-                        if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
-                            val = st.session_state.get(item['val_key'])
-                        
-                        ox = st.session_state.get(item['ox_key'])
+                        widget_key = item['widget_key']
+                        input_val = st.session_state.get(widget_key)
                         
                         val_str = ""
-                        if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
-                            if val is None:
-                                val_str = ""
+                        ox = "OK" 
+
+                        if item['check_type'] == 'OX':
+                            ox = input_val
+                        else:
+                            # 수치형 판정
+                            val_str = str(input_val).strip() if input_val else ""
+                            if not val_str:
                                 st.error(f"⚠️ [{row['item_name']}] 수치 입력값이 누락되었습니다.")
                                 save_flag = False
                             else:
-                                val_str = str(val)
                                 try:
-                                    f_val = float(val)
+                                    f_val = float(val_str)
                                     min_v = safe_float(row['min_val'], -999999)
                                     max_v = safe_float(row['max_val'], 999999)
-                                    
-                                    if not (min_v <= f_val <= max_v) and ox == 'OK':
+                                    if not (min_v <= f_val <= max_v):
                                         ox = 'NG'
                                         st.warning(f"⚠️ [{row['item_name']}] 기준값 이탈로 NG 처리되었습니다.")
-                                except: pass
+                                except:
+                                    st.error(f"⚠️ [{row['item_name']}] 잘못된 수치 형식입니다.")
+                                    save_flag = False
 
                         if ox == 'NG':
                             ng_list.append(row['item_name'])
