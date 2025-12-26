@@ -73,7 +73,7 @@ SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
 SHEET_CHECK_SIGNATURE = "daily_check_signature"
 
-# 컬럼 정의
+# 컬럼 정의 (비고/장비점검 컬럼 추가)
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_ITEMS = ["품목코드", "제품명"]
 COLS_INVENTORY = ["품목코드", "제품명", "현재고"]
@@ -81,7 +81,8 @@ COLS_INV_HISTORY = ["날짜", "품목코드", "구분", "수량", "비고", "작
 COLS_MAINTENANCE = ["날짜", "설비ID", "설비명", "작업구분", "작업내용", "교체부품", "비용", "작업자", "비가동시간", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_EQUIPMENT = ["id", "name", "func"]
 COLS_CHECK_MASTER = ["line", "equip_id", "equip_name", "item_name", "check_content", "standard", "check_type", "min_val", "max_val", "unit"]
-COLS_CHECK_RESULT = ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp"]
+# [수정] '비고' 컬럼 추가 (장비점검 내용 저장용)
+COLS_CHECK_RESULT = ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp", "비고"]
 COLS_CHECK_SIGNATURE = ["date", "line", "signer", "signature_data", "timestamp"]
 
 # ------------------------------------------------------------------
@@ -120,8 +121,13 @@ def load_data(sheet_name, cols=None):
         if not ws: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
         
         df = get_as_dataframe(ws, evaluate_formulas=True)
+        # 빈 데이터프레임 처리
+        if df.empty: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
+
         df = df.dropna(how='all').dropna(axis=1, how='all')
         df = df.fillna("") 
+        
+        # [중요] 요청된 컬럼이 없으면 생성 (스키마 변경 대응)
         if cols:
             for c in cols: 
                 if c not in df.columns: df[c] = ""
@@ -200,7 +206,6 @@ def generate_all_daily_check_pdf(date_str):
         df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         
         if not df_r.empty:
-            # [중요] 날짜 비교 시 포맷 통일 (시간 제거)
             df_r['date_only'] = df_r['date'].astype(str).str.split().str[0]
             df_r = df_r[df_r['date_only'] == date_str]
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
@@ -243,7 +248,11 @@ def generate_all_daily_check_pdf(date_str):
                 df_final['ox'] = '-'
                 df_final['checker'] = ''
             
-            df_final = df_final.fillna({'value': '-', 'ox': '-', 'checker': ''})
+            # fillna 시 '비고' 컬럼이 없으면 에러날 수 있으니 확인
+            fill_values = {'value': '-', 'ox': '-', 'checker': ''}
+            if '비고' in df_final.columns: fill_values['비고'] = ''
+            
+            df_final = df_final.fillna(fill_values)
             
             total = len(df_final)
             ok = len(df_final[df_final['ox'] == 'OK'])
@@ -264,6 +273,8 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_line_width(0.3)
             pdf.set_font(font_name, '', 10)
             
+            # [Design] Header에 '비고' 추가할 공간이 부족하면 생략하거나 레이아웃 조정 필요
+            # 여기서는 기존 레이아웃 유지 (비고는 보통 길어서 표에 넣기 힘듦)
             headers = ["설비명", "점검항목", "기준", "측정값", "판정", "점검자"]
             widths = [45, 65, 30, 20, 15, 15]
             
@@ -299,6 +310,15 @@ def generate_all_daily_check_pdf(date_str):
                 pdf.set_font(font_name, '', 10)
                 pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
                 pdf.ln()
+                
+                # NG일 경우 하단에 비고 출력 (선택사항)
+                if ox == 'NG' and '비고' in row and row['비고']:
+                    pdf.set_font(font_name, 'I', 9)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(190, 6, f"   └ 조치내역: {row['비고']}", 1, 1, 'L', fill)
+                    pdf.set_font(font_name, '', 10)
+                    pdf.set_text_color(0, 0, 0)
+
                 fill = not fill
             pdf.ln(10)
 
@@ -356,159 +376,165 @@ st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
-    df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
-    df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    prod_today = 0
-    if not df_prod.empty:
-        df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce')
-        df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
-        prod_today = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today]['수량'].sum()
-    
-    check_today = 0
-    ng_today = 0
-    if not df_check.empty:
-        # [중요] 날짜 포맷 통일 (시간 제거)
-        df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
-        df_check_today = df_check[df_check['date_only'] == today]
-        if not df_check_today.empty:
-            df_unique = df_check_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-            check_today = len(df_unique)
-            ng_today = len(df_unique[df_unique['ox'] == 'NG'])
+    try:
+        df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
+        df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        prod_today = 0
+        if not df_prod.empty:
+            df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce')
+            df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
+            prod_today = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today]['수량'].sum()
+        
+        check_today = 0
+        ng_today = 0
+        if not df_check.empty:
+            df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
+            df_check_today = df_check[df_check['date_only'] == today]
+            if not df_check_today.empty:
+                df_unique = df_check_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+                check_today = len(df_unique)
+                ng_today = len(df_unique[df_unique['ox'] == 'NG'])
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("오늘 생산량", f"{prod_today:,.0f} EA")
-    col2.metric("일일점검 완료", f"{check_today} 건")
-    col3.metric("NG 발생", f"{ng_today} 건", delta_color="inverse")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("오늘 생산량", f"{prod_today:,.0f} EA")
+        col2.metric("일일점검 완료", f"{check_today} 건")
+        col3.metric("NG 발생", f"{ng_today} 건", delta_color="inverse")
 
-    st.markdown("#### 📅 주간 생산 추이")
-    if not df_prod.empty and HAS_ALTAIR:
-        chart_data = df_prod.groupby('날짜')['수량'].sum().reset_index()
-        c = alt.Chart(chart_data).mark_line(point=True).encode(
-            x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-            y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-            tooltip=['날짜', '수량']
-        ).interactive()
-        st.altair_chart(c, use_container_width=True)
-    elif df_prod.empty:
-        st.info("생산 데이터가 없습니다.")
-
-elif menu == "🏭 생산관리":
-    t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산 분석", "📑 일일 보고서"])
-    with t1:
-        c1, c2 = st.columns([1, 1.5])
-        with c1:
-            if st.session_state.user_info['role'] in ['admin', 'editor']:
-                with st.container(border=True):
-                    st.markdown("#### ✏️ 신규 생산 등록")
-                    date = st.date_input("작업 일자")
-                    cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"])
-                    item_df = load_data(SHEET_ITEMS, COLS_ITEMS)
-                    item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
-                    def on_code():
-                        c = st.session_state.code_in.upper().strip()
-                        if c in item_map: st.session_state.name_in = item_map[c]
-                    code = st.text_input("품목 코드", key="code_in", on_change=on_code)
-                    name = st.text_input("제품명", key="name_in")
-                    qty = st.number_input("생산 수량", min_value=1, value=100, key="prod_qty")
-                    auto_deduct = st.checkbox("재고 차감 적용", value=True) if cat in ["후공정", "후공정 외주"] else False
-                    def save_production():
-                        c_code = st.session_state.code_in; c_name = st.session_state.name_in; c_qty = st.session_state.prod_qty
-                        if c_name:
-                            rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
-                            if append_data(rec, SHEET_RECORDS):
-                                if cat in ["후공정", "후공정 외주"] and auto_deduct: update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
-                                else: update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
-                                st.session_state.code_in = ""; st.session_state.name_in = ""; st.session_state.prod_qty = 100
-                                st.toast("저장되었습니다.", icon="✅")
-                        else: st.toast("제품명을 입력하세요.", icon="⚠️")
-                    st.button("실적 저장", type="primary", use_container_width=True, on_click=save_production)
-            else: st.warning("쓰기 권한이 없습니다.")
-        with c2:
-            st.markdown("#### 📋 최근 등록 내역")
-            df = load_data(SHEET_RECORDS, COLS_RECORDS)
-            if not df.empty:
-                df = df.sort_values("입력시간", ascending=False).head(50)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-    with t2:
-        df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
-        st.dataframe(df_inv, use_container_width=True)
-    with t3:
-        df = load_data(SHEET_RECORDS, COLS_RECORDS)
-        if not df.empty and HAS_ALTAIR:
-            df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
-            df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-            c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
+        st.markdown("#### 📅 주간 생산 추이")
+        if not df_prod.empty and HAS_ALTAIR:
+            chart_data = df_prod.groupby('날짜')['수량'].sum().reset_index()
+            c = alt.Chart(chart_data).mark_line(point=True).encode(
                 x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0))
+                y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                tooltip=['날짜', '수량']
             ).interactive()
             st.altair_chart(c, use_container_width=True)
-    with t4:
-        st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
-        report_date = st.date_input("보고서 날짜", datetime.now())
-        df = load_data(SHEET_RECORDS, COLS_RECORDS)
-        if not df.empty:
-            df['날짜'] = pd.to_datetime(df['날짜']).dt.date
-            daily_df = df[df['날짜'] == report_date].copy()
-            daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
-            if not daily_df.empty:
-                st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
-            else: st.warning("해당 날짜에 생산 실적이 없습니다.")
+        elif df_prod.empty:
+            st.info("생산 데이터가 없습니다.")
+    except Exception as e:
+        st.error("대시보드 로딩 오류")
 
-elif menu == "🛠 설비보전관리":
-    t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
-    with t1:
-        c1, c2 = st.columns([1, 1.5])
-        with c1:
-            if st.session_state.user_info['role'] in ['admin', 'editor']:
-                with st.container(border=True):
-                    st.markdown("#### 🔧 정비 이력 등록")
-                    eq_df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
-                    eq_map = dict(zip(eq_df['id'], eq_df['name'])) if not eq_df.empty else {}
-                    f_date = st.date_input("작업 날짜")
-                    f_eq = st.selectbox("대상 설비", list(eq_map.keys()), format_func=lambda x: f"[{x}] {eq_map[x]}")
-                    f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
-                    f_desc = st.text_area("작업 내용", height=80)
-                    if 'parts_buffer' not in st.session_state: st.session_state.parts_buffer = []
-                    col_p1, col_p2, col_p3 = st.columns([2, 1, 1])
-                    p_name = col_p1.text_input("교체부품명")
-                    p_cost = col_p2.number_input("비용", step=1000)
-                    if col_p3.button("부품 추가"):
-                        if p_name: st.session_state.parts_buffer.append({"내역": p_name, "비용": int(p_cost)})
-                    if st.session_state.parts_buffer:
-                        st.dataframe(pd.DataFrame(st.session_state.parts_buffer), use_container_width=True, hide_index=True)
-                        if st.button("목록 초기화"): st.session_state.parts_buffer = []
-                    total_cost = sum([p['비용'] for p in st.session_state.parts_buffer])
-                    f_final_cost = st.number_input("총 소요 비용", value=total_cost)
-                    f_down = st.number_input("비가동 시간(분)", step=10)
-                    if st.button("이력 저장", type="primary", use_container_width=True):
-                        parts_str = ", ".join([f"{p['내역']}" for p in st.session_state.parts_buffer])
-                        rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_str, "비용": f_final_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
-                        append_data(rec, SHEET_MAINTENANCE)
-                        st.toast("정비 이력이 저장되었습니다.", icon="✅")
-            else: st.warning("권한이 없습니다.")
-        with c2:
-            st.markdown("#### 📋 최근 정비 내역")
-            df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
-            if not df.empty:
-                df = df.sort_values("입력시간", ascending=False).head(50)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-    with t2:
-        df_hist = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
-        st.dataframe(df_hist, use_container_width=True)
-    with t3:
-        st.markdown("#### 📊 설비 고장 분석")
-        df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
-        if not df.empty:
-            df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-            if HAS_ALTAIR:
-                c = alt.Chart(df).mark_bar().encode(
-                    x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                    y=alt.Y('비용', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                    color='작업구분'
+elif menu == "🏭 생산관리":
+    try:
+        t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산 분석", "📑 일일 보고서"])
+        with t1:
+            c1, c2 = st.columns([1, 1.5])
+            with c1:
+                if st.session_state.user_info['role'] in ['admin', 'editor']:
+                    with st.container(border=True):
+                        st.markdown("#### ✏️ 신규 생산 등록")
+                        date = st.date_input("작업 일자")
+                        cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"])
+                        item_df = load_data(SHEET_ITEMS, COLS_ITEMS)
+                        item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
+                        def on_code():
+                            c = st.session_state.code_in.upper().strip()
+                            if c in item_map: st.session_state.name_in = item_map[c]
+                        code = st.text_input("품목 코드", key="code_in", on_change=on_code)
+                        name = st.text_input("제품명", key="name_in")
+                        qty = st.number_input("생산 수량", min_value=1, value=100, key="prod_qty")
+                        auto_deduct = st.checkbox("재고 차감 적용", value=True) if cat in ["후공정", "후공정 외주"] else False
+                        def save_production():
+                            c_code = st.session_state.code_in; c_name = st.session_state.name_in; c_qty = st.session_state.prod_qty
+                            if c_name:
+                                rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                                if append_data(rec, SHEET_RECORDS):
+                                    if cat in ["후공정", "후공정 외주"] and auto_deduct: update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
+                                    else: update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
+                                    st.session_state.code_in = ""; st.session_state.name_in = ""; st.session_state.prod_qty = 100
+                                    st.toast("저장되었습니다.", icon="✅")
+                            else: st.toast("제품명을 입력하세요.", icon="⚠️")
+                        st.button("실적 저장", type="primary", use_container_width=True, on_click=save_production)
+                else: st.warning("쓰기 권한이 없습니다.")
+            with c2:
+                st.markdown("#### 📋 최근 등록 내역")
+                df = load_data(SHEET_RECORDS, COLS_RECORDS)
+                if not df.empty:
+                    df = df.sort_values("입력시간", ascending=False).head(50)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+        with t2:
+            df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
+            st.dataframe(df_inv, use_container_width=True)
+        with t3:
+            df = load_data(SHEET_RECORDS, COLS_RECORDS)
+            if not df.empty and HAS_ALTAIR:
+                df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
+                df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
+                c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
+                    x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                    y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0))
                 ).interactive()
                 st.altair_chart(c, use_container_width=True)
+        with t4:
+            st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
+            report_date = st.date_input("보고서 날짜", datetime.now())
+            df = load_data(SHEET_RECORDS, COLS_RECORDS)
+            if not df.empty:
+                df['날짜'] = pd.to_datetime(df['날짜']).dt.date
+                daily_df = df[df['날짜'] == report_date].copy()
+                daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
+                if not daily_df.empty:
+                    st.dataframe(daily_df[['구분', '품목코드', '제품명', '수량']], use_container_width=True, hide_index=True)
+                else: st.warning("해당 날짜에 생산 실적이 없습니다.")
+    except: st.error("생산관리 페이지 오류")
+
+elif menu == "🛠 설비보전관리":
+    try:
+        t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
+        with t1:
+            c1, c2 = st.columns([1, 1.5])
+            with c1:
+                if st.session_state.user_info['role'] in ['admin', 'editor']:
+                    with st.container(border=True):
+                        st.markdown("#### 🔧 정비 이력 등록")
+                        eq_df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
+                        eq_map = dict(zip(eq_df['id'], eq_df['name'])) if not eq_df.empty else {}
+                        f_date = st.date_input("작업 날짜")
+                        f_eq = st.selectbox("대상 설비", list(eq_map.keys()), format_func=lambda x: f"[{x}] {eq_map[x]}")
+                        f_type = st.selectbox("작업 구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
+                        f_desc = st.text_area("작업 내용", height=80)
+                        if 'parts_buffer' not in st.session_state: st.session_state.parts_buffer = []
+                        col_p1, col_p2, col_p3 = st.columns([2, 1, 1])
+                        p_name = col_p1.text_input("교체부품명")
+                        p_cost = col_p2.number_input("비용", step=1000)
+                        if col_p3.button("부품 추가"):
+                            if p_name: st.session_state.parts_buffer.append({"내역": p_name, "비용": int(p_cost)})
+                        if st.session_state.parts_buffer:
+                            st.dataframe(pd.DataFrame(st.session_state.parts_buffer), use_container_width=True, hide_index=True)
+                            if st.button("목록 초기화"): st.session_state.parts_buffer = []
+                        total_cost = sum([p['비용'] for p in st.session_state.parts_buffer])
+                        f_final_cost = st.number_input("총 소요 비용", value=total_cost)
+                        f_down = st.number_input("비가동 시간(분)", step=10)
+                        if st.button("이력 저장", type="primary", use_container_width=True):
+                            parts_str = ", ".join([f"{p['내역']}" for p in st.session_state.parts_buffer])
+                            rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_str, "비용": f_final_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                            append_data(rec, SHEET_MAINTENANCE)
+                            st.toast("정비 이력이 저장되었습니다.", icon="✅")
+                else: st.warning("권한이 없습니다.")
+            with c2:
+                st.markdown("#### 📋 최근 정비 내역")
+                df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
+                if not df.empty:
+                    df = df.sort_values("입력시간", ascending=False).head(50)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+        with t2:
+            df_hist = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
+            st.dataframe(df_hist, use_container_width=True)
+        with t3:
+            st.markdown("#### 📊 설비 고장 분석")
+            df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
+            if not df.empty:
+                df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
+                if HAS_ALTAIR:
+                    c = alt.Chart(df).mark_bar().encode(
+                        x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                        y=alt.Y('비용', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                        color='작업구분'
+                    ).interactive()
+                    st.altair_chart(c, use_container_width=True)
+    except: st.error("보전관리 페이지 오류")
 
 elif menu == "✅ 일일점검관리":
     try:
@@ -528,8 +554,8 @@ elif menu == "✅ 일일점검관리":
                 )
                 st.session_state['scroll_to_top'] = False
 
-            st.info("💡 PC/태블릿 공용 입력 화면입니다. (입력 시 깜빡임을 최소화했습니다)")
-            st.caption("ℹ️ 숫자 입력 후 **Enter(엔터)**를 누르면 저장이 시도됩니다. (선택된 라인은 유지됩니다)")
+            st.info("💡 PC/태블릿 공용 입력 화면입니다.")
+            st.caption("ℹ️ 라인을 선택하고 점검 결과를 입력하세요.")
             
             c_date, c_btn = st.columns([2, 1])
             with c_date:
@@ -541,7 +567,6 @@ elif menu == "✅ 일일점검관리":
             total_count = len(df_master_check)
             current_count = 0
             
-            # [수정] 날짜 포맷 통일하여 진행률 계산
             if not df_res_check.empty:
                 df_res_check['date_only'] = df_res_check['date'].astype(str).str.split().str[0]
                 df_done = df_res_check[df_res_check['date_only'] == str(sel_date)]
@@ -559,7 +584,7 @@ elif menu == "✅ 일일점검관리":
                     st.info(f"⬜ {sel_date} : 미점검 ({current_count}/{total_count})")
             
             if df_master_check.empty:
-                st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 항목을 추가해주세요.")
+                st.warning("점검 항목 데이터가 없습니다.")
             
             lines = df_master_check['line'].unique()
             if len(lines) > 0:
@@ -586,174 +611,178 @@ elif menu == "✅ 일일점검관리":
                                 st.session_state[widget_key] = "OK"
                         st.rerun()
 
-                
-                # [수정] 데이터 로딩 시 날짜 포맷팅 강화
-                df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                # [최적화] 전체 로딩이 아닌 라인 필터링 후 로딩 로직은 동일하지만, Form 제거로 동적 UI 구현
+                # 기존 입력값 불러오기
                 prev_data = {}
-                if not df_res.empty:
-                    df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
-                    df_filtered = df_res[df_res['date_only'] == str(sel_date)]
+                if not df_res_check.empty:
+                    df_filtered = df_res_check[df_res_check['date_only'] == str(sel_date)]
                     df_filtered = df_filtered.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     for _, r in df_filtered.iterrows():
                         key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
-                        prev_data[key] = {'val': r['value'], 'ox': r['ox']}
+                        memo_val = r['비고'] if '비고' in r else ""
+                        prev_data[key] = {'val': r['value'], 'ox': r['ox'], 'memo': memo_val}
 
-                form_key = f"form_{selected_line}_{sel_date}"
+                st.markdown(f"#### 📝 {selected_line} 점검 입력")
                 
-                with st.form(form_key):
-                    st.markdown(f"#### 📝 {selected_line} 점검 입력")
+                # [중요] st.form 제거 -> 실시간 상호작용(NG 창) 가능하게 함
+                # 대신 라인별로 쪼개서 속도 저하 방지
+                
+                # 입력 데이터를 임시 저장할 딕셔너리
+                input_data = {} 
+
+                for equip_name, group in line_data.groupby("equip_name", sort=False):
+                    st.markdown(f"**🛠 {equip_name}**")
                     
-                    for equip_name, group in line_data.groupby("equip_name", sort=False):
-                        st.markdown(f"**🛠 {equip_name}**")
+                    for _, row in group.iterrows():
+                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                        widget_key = f"val_{uid}_{sel_date}"
+                        memo_key = f"memo_{uid}_{sel_date}"
                         
-                        for _, row in group.iterrows():
-                            uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                            widget_key = f"val_{uid}_{sel_date}"
-                            
-                            default_val = prev_data.get(uid, {}).get('val', None)
-                            
-                            c1, c2, c3 = st.columns([2, 2, 1])
-                            c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
-                            
-                            check_type = row['check_type']
-                            is_numeric = False
-                            if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
-                                is_numeric = True
+                        default_val = prev_data.get(uid, {}).get('val', None)
+                        default_memo = prev_data.get(uid, {}).get('memo', "")
+                        
+                        c1, c2, c3 = st.columns([2, 2, 1])
+                        c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
+                        
+                        check_type = row['check_type']
+                        is_numeric = False
+                        if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
+                            is_numeric = True
 
-                            with c2:
-                                if not is_numeric and check_type == 'OX':
-                                    idx = None
-                                    if default_val == 'OK': idx = 0
-                                    elif default_val == 'NG': idx = 1
-                                    if widget_key in st.session_state:
-                                        if st.session_state[widget_key] == "OK": idx = 0
-                                        elif st.session_state[widget_key] == "NG": idx = 1
-                                    st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
-                                else:
-                                    num_val = None
-                                    if default_val and default_val != 'nan' and default_val != '-':
-                                        try:
-                                            num_val = float(default_val)
-                                        except:
-                                            num_val = None
-                                    
-                                    st.number_input(
-                                        f"수치 ({row['unit']})", 
-                                        value=num_val, 
-                                        key=widget_key, 
-                                        placeholder="입력",
-                                        step=0.1,
-                                        format="%.1f"
-                                    )
-                            with c3:
-                                st.caption(f"기준: {row['standard']}")
-                        st.divider()
+                        current_val = None
+                        is_ng = False
 
-                    st.markdown("---")
-                    st.markdown("#### ✍️ 전자 서명 (필수)")
-                    
-                    signature_data = None
-                    if HAS_CANVAS:
-                        canvas_result = st_canvas(
-                            fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
-                            background_color="#ffffff", height=150, width=400, drawing_mode="freedraw",
-                            key=f"canvas_{selected_line}", 
-                        )
-                        if canvas_result.image_data is not None:
-                            signature_data = canvas_result.image_data
-                            
-                    c_s1, c_s2 = st.columns([3, 1])
-                    signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'], key=f"signer_{selected_line}")
-                    
-                    submitted = st.form_submit_button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True)
-                    
-                    if submitted:
-                        missing_values = []
-                        for _, row in line_data.iterrows():
-                            check_type = row['check_type']
-                            is_numeric = False
-                            if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
-                                is_numeric = True
-                            
-                            if is_numeric:
-                                uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                                widget_key = f"val_{uid}_{sel_date}"
-                                val = st.session_state.get(widget_key)
-                                if val is None:
-                                    missing_values.append(f"{row['equip_name']} > {row['item_name']}")
+                        with c2:
+                            if not is_numeric and check_type == 'OX':
+                                idx = None
+                                if default_val == 'OK': idx = 0
+                                elif default_val == 'NG': idx = 1
+                                
+                                # Session State 우선
+                                if widget_key in st.session_state:
+                                    if st.session_state[widget_key] == "OK": idx = 0
+                                    elif st.session_state[widget_key] == "NG": idx = 1
+                                
+                                val = st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
+                                if val == 'NG': is_ng = True
+                                current_val = val
+                            else:
+                                num_val = None
+                                if default_val and default_val != 'nan' and default_val != '-':
+                                    try: num_val = float(default_val)
+                                    except: num_val = None
+                                
+                                val = st.number_input(
+                                    f"수치 ({row['unit']})", 
+                                    value=num_val, 
+                                    key=widget_key, 
+                                    placeholder="입력",
+                                    step=0.1,
+                                    format="%.1f"
+                                )
+                                current_val = val
+                                # NG 판단 로직
+                                if val is not None:
+                                    try:
+                                        min_v = safe_float(row['min_val'], -999999)
+                                        max_v = safe_float(row['max_val'], 999999)
+                                        if not (min_v <= val <= max_v): is_ng = True
+                                    except: pass
 
-                        if not signer_name:
-                            st.error("⚠️ 점검자 성명을 입력해주세요.")
-                        elif HAS_CANVAS and (canvas_result is None or canvas_result.image_data is None):
-                            st.error("⚠️ 서명(Canvas)이 누락되었습니다. 서명을 완료해주세요.")
-                        elif missing_values:
-                            st.error(f"⚠️ 다음 항목의 수치를 입력해야 저장할 수 있습니다:\n {', '.join(missing_values[:3])} 등")
+                        with c3:
+                            st.caption(f"기준: {row['standard']}")
+                        
+                        # [핵심] NG 발생 시 장비점검 입력창 자동 생성
+                        if is_ng:
+                            st.text_input("⚠️ 장비점검 (조치내역)", value=default_memo, key=memo_key, placeholder="NG 사유 및 조치내용 입력")
+                        
+                    st.divider()
+
+                st.markdown("---")
+                st.markdown("#### ✍️ 전자 서명 (필수)")
+                
+                signature_data = None
+                if HAS_CANVAS:
+                    canvas_result = st_canvas(
+                        fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
+                        background_color="#ffffff", height=150, width=400, drawing_mode="freedraw",
+                        key=f"canvas_{selected_line}", 
+                    )
+                    if canvas_result.image_data is not None:
+                        signature_data = canvas_result.image_data
+                        
+                c_s1, c_s2 = st.columns([3, 1])
+                signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'], key=f"signer_{selected_line}")
+                
+                # 저장 버튼
+                if st.button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True):
+                    # 유효성 검사
+                    missing_values = []
+                    rows_to_save = []
+                    
+                    for _, row in line_data.iterrows():
+                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                        widget_key = f"val_{uid}_{sel_date}"
+                        memo_key = f"memo_{uid}_{sel_date}"
+                        
+                        val = st.session_state.get(widget_key)
+                        memo_val = st.session_state.get(memo_key, "")
+                        
+                        check_type = row['check_type']
+                        is_numeric = False
+                        if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
+                            is_numeric = True
+                        
+                        if is_numeric and val is None:
+                            missing_values.append(f"{row['equip_name']} > {row['item_name']}")
+                            continue
+
+                        ox = "OK"
+                        final_val = ""
+                        
+                        if not is_numeric and check_type == 'OX':
+                            if val == 'NG': ox = 'NG'
+                            elif val is None: ox = "NG"
+                            final_val = str(val) if val else "-"
                         else:
-                            rows_to_save = []
-                            ng_list = []
-                            
-                            df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                            
-                            # [핵심] 기존 데이터 삭제 로직 강화 (날짜 포맷 정규화 후 비교)
-                            if not df_existing.empty:
-                                # 날짜 컬럼을 문자열로 변환하고, 앞부분(YYYY-MM-DD)만 추출
-                                df_existing['date_norm'] = df_existing['date'].astype(str).str.split().str[0]
-                                target_date_str = str(sel_date)
-                                
-                                # 날짜가 같고 라인이 같은 데이터 제거
-                                condition = (df_existing['date_norm'] == target_date_str) & (df_existing['line'] == selected_line)
-                                df_existing = df_existing[~condition].drop(columns=['date_norm'])
-                            
+                            final_val = str(val)
                             try:
-                                for _, row in line_data.iterrows():
-                                    uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                                    widget_key = f"val_{uid}_{sel_date}"
-                                    val = st.session_state.get(widget_key)
-                                    
-                                    ox = "OK"
-                                    final_val = ""
-                                    
-                                    if row['check_type'] == 'OX' and ('온,습도' not in row['line']) and ('NUMBER' not in str(row.get('check_type', ''))):
-                                        if val == 'NG': ox = 'NG'
-                                        elif val is None: ox = "NG" 
-                                        final_val = str(val) if val else "-"
-                                    else:
-                                        if val is None: 
-                                            ox = "NG" 
-                                            final_val = ""
-                                        else:
-                                            final_val = str(val)
-                                            try:
-                                                num_val = float(val)
-                                                min_v = safe_float(row['min_val'], -999999)
-                                                max_v = safe_float(row['max_val'], 999999)
-                                                if not (min_v <= num_val <= max_v): ox = 'NG'
-                                            except: ox = 'NG'
-                                    
-                                    if ox == 'NG': ng_list.append(f"{row['equip_name']} > {row['item_name']}")
-                                    
-                                    rows_to_save.append([
-                                        str(sel_date), row['line'], row['equip_id'], row['item_name'], 
-                                        final_val, ox, signer_name, str(datetime.now())
-                                    ])
+                                min_v = safe_float(row['min_val'], -999999)
+                                max_v = safe_float(row['max_val'], 999999)
+                                if not (min_v <= val <= max_v): ox = 'NG'
+                            except: ox = 'NG'
+                        
+                        rows_to_save.append([
+                            str(sel_date), row['line'], row['equip_id'], row['item_name'], 
+                            final_val, ox, signer_name, str(datetime.now()), memo_val
+                        ])
+
+                    if not signer_name:
+                        st.error("⚠️ 점검자 성명을 입력해주세요.")
+                    elif HAS_CANVAS and (canvas_result is None or canvas_result.image_data is None):
+                        st.error("⚠️ 서명(Canvas)이 누락되었습니다. 서명을 완료해주세요.")
+                    elif missing_values:
+                        st.error(f"⚠️ 다음 항목의 수치를 입력해야 저장할 수 있습니다:\n {', '.join(missing_values[:3])} 등")
+                    else:
+                        # [핵심 최적화] append_rows 만 사용하여 저장 속도 획기적 개선
+                        # 기존 데이터를 읽어서 지우고 다시 쓰는 방식 -> 무조건 추가(Append) 방식
+                        # 읽을 때 drop_duplicates(keep='last')가 있으므로 논리적으로 문제 없음
+                        
+                        if rows_to_save:
+                            # COLS_CHECK_RESULT 순서에 맞게 데이터 준비
+                            # ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp", "비고"]
+                            
+                            if append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT):
+                                sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
+                                sig_row = [str(sel_date), selected_line, signer_name, sig_type, str(datetime.now())]
+                                append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
                                 
-                                if rows_to_save:
-                                    df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
-                                    df_final = pd.concat([df_existing, df_new], ignore_index=True)
-                                    save_data(df_final, SHEET_CHECK_RESULT)
-                                    
-                                    sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
-                                    sig_row = [str(sel_date), selected_line, signer_name, sig_type, str(datetime.now())]
-                                    append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                                    
-                                    st.toast(f"✅ {selected_line} 점검 결과가 저장되었습니다.", icon="🎉")
-                                    if ng_list: st.error(f"NG 항목 발견: {', '.join(ng_list)}")
-                                    
-                                    st.session_state['scroll_to_top'] = True
-                                    time.sleep(0.5)
-                                    st.rerun()
-                            except Exception as e:
-                                st.error(f"저장 중 오류 발생: {e}")
+                                st.toast(f"✅ {selected_line} 점검 결과가 저장되었습니다.", icon="🎉")
+                                st.session_state['scroll_to_top'] = True
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error("저장 중 오류가 발생했습니다.")
             else:
                 st.info("표시할 라인 정보가 없습니다.")
 
@@ -765,7 +794,6 @@ elif menu == "✅ 일일점검관리":
             df_master = get_daily_check_master_data()
             
             if not df_res.empty:
-                # [수정] 날짜 포맷팅 강화
                 df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
                 df_today = df_res[df_res['date_only'] == today]
                 if not df_today.empty:
