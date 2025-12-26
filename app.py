@@ -30,13 +30,74 @@ st.markdown("""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
     html, body, [class*="css"] { font-family: 'Pretendard', sans-serif !important; color: #1e293b; }
-    .stApp { background-color: #f1f5f9; } /* 배경색을 조금 더 진한 회색으로 변경 (카드 부각) */
+    .stApp { background-color: #f1f5f9; } 
     
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     
-    /* --- [일일점검 디자인 리뉴얼] --- */
+    /* [1] 사이드바 디자인 개선 (네비게이션 카드 스타일) */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a, #020617);
+        color: #e5e7eb;
+    }
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] p {
+        color: #f8fafc !important;
+    }
     
-    /* 설비 카드 스타일 */
+    /* 사이드바 라디오 버튼 컨테이너 재설정 */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] > div {
+        gap: 6px !important;
+    }
+    
+    /* 사이드바 라디오 항목 (카드형) */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+        padding: 14px 16px !important;
+        border-radius: 12px !important;
+        margin-bottom: 2px !important;
+        transition: all 0.2s ease !important;
+        background-color: transparent;
+        border: 1px solid transparent !important;
+        height: auto !important;
+    }
+    
+    /* 마우스 오버 효과 */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
+        background: rgba(255,255,255,0.08) !important;
+        transform: translateX(4px);
+    }
+    
+    /* 선택된 항목 하이라이트 */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label[data-checked="true"] {
+        background: linear-gradient(90deg, #3b82f6, #2563eb) !important;
+        color: white !important;
+        font-weight: 800 !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+        border: none !important;
+    }
+    
+    /* 사이드바 텍스트 보정 */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label p {
+        font-size: 15px !important;
+        color: inherit !important;
+    }
+
+    /* [2] 버튼 스타일 (CTA 강조 - 저장 버튼 등) */
+    .stButton>button {
+        height: 56px;
+        font-size: 1.1rem;
+        font-weight: 800;
+        border-radius: 14px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: all 0.2s;
+    }
+    .stButton>button:active {
+        transform: scale(0.98);
+    }
+    
+    /* [3] 일일점검 설비 카드 스타일 */
     .equip-card {
         background-color: white;
         border-radius: 16px;
@@ -45,8 +106,6 @@ st.markdown("""
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         border: 1px solid #e2e8f0;
     }
-    
-    /* 설비 헤더 */
     .equip-header {
         display: flex;
         align-items: center;
@@ -71,36 +130,25 @@ st.markdown("""
         color: #1e293b;
     }
     
-    /* 점검 항목 Row */
-    .check-row {
-        padding: 16px 0;
-        border-bottom: 1px solid #f1f5f9;
-    }
-    .check-row:last-child { border-bottom: none; }
-    
-    /* 항목 텍스트 스타일 */
+    /* 점검 항목 Row & Text */
+    .check-row { padding: 16px 0; border-bottom: 1px solid #f1f5f9; }
     .item-name { font-size: 1.05rem; font-weight: 700; color: #334155; margin-bottom: 4px; }
     .item-content { font-size: 0.85rem; color: #64748b; margin-bottom: 8px; }
     .item-standard { 
-        display: inline-block;
-        background-color: #f8fafc; 
-        color: #475569;
-        font-size: 0.75rem; 
-        font-weight: 600;
-        padding: 4px 8px; 
-        border-radius: 6px;
-        border: 1px solid #e2e8f0;
+        display: inline-block; background-color: #f8fafc; color: #475569;
+        font-size: 0.75rem; font-weight: 600; padding: 4px 8px; 
+        border-radius: 6px; border: 1px solid #e2e8f0;
     }
 
-    /* OK/NG 버튼 스타일 (라디오 버튼 커스텀) */
-    div[data-testid="stRadio"] > div {
+    /* 메인 화면의 OK/NG 라디오 버튼 (사이드바와 충돌 방지 위해 div[data-testid="stRadio"] > div 로 타겟팅) */
+    /* .stMain 은 Streamlit 메인 영역 클래스 */
+    .stMain div[data-testid="stRadio"] > div {
         display: flex;
         flex-direction: row !important;
         gap: 8px !important;
         width: 100% !important;
     }
-
-    div[data-testid="stRadio"] > div > label {
+    .stMain div[data-testid="stRadio"] > div > label {
         flex: 1 !important;
         height: 56px !important;
         background-color: white;
@@ -113,44 +161,15 @@ st.markdown("""
         transition: all 0.2s ease;
         box-shadow: 0 2px 4px rgba(0,0,0,0.02);
     }
-    
-    div[data-testid="stRadio"] > div > label:hover {
+    .stMain div[data-testid="stRadio"] > div > label:hover {
         background-color: #f8fafc;
         transform: translateY(-1px);
     }
-
-    /* 선택된 상태의 텍스트 스타일링은 Streamlit 한계로 CSS만으론 완벽 분리가 어렵지만,
-       전체적인 크기와 레이아웃을 HTML 시안처럼 1:1 비율의 꽉 찬 버튼으로 만듦 */
-    div[data-testid="stRadio"] label p {
+    .stMain div[data-testid="stRadio"] label p {
         font-size: 20px !important;
         font-weight: 800 !important;
         color: #475569;
     }
-    
-    /* 사이드바는 영향 안 받도록 격리 */
-    section[data-testid="stSidebar"] div[data-testid="stRadio"] > div {
-        gap: 0px !important;
-    }
-    section[data-testid="stSidebar"] div[data-testid="stRadio"] > div > label {
-        height: auto !important;
-        border: none !important;
-        justify-content: flex-start !important;
-    }
-    
-    /* 통계 카드 */
-    .stat-card {
-        background: white;
-        padding: 15px;
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-    }
-    .stat-label { font-size: 0.8rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; }
-    .stat-value { font-size: 1.5rem; font-weight: 900; line-height: 1; }
-    .stat-total { color: #475569; }
-    .stat-ok { color: #10b981; }
-    .stat-ng { color: #ef4444; }
 
     </style>
 """, unsafe_allow_html=True)
@@ -435,18 +454,17 @@ with st.sidebar:
     st.title("Cloud SMT")
     u = st.session_state.user_info
     role_badge = "👑 Admin" if u["role"] == "admin" else "👤 User"
-    st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='padding:10px; background:rgba(255,255,255,0.1); border-radius:8px; margin-bottom:20px; color:#f8fafc;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
     menu = st.radio("업무 선택", ["📊 대시보드", "🏭 생산관리", "🛠 설비보전관리", "✅ 일일점검관리", "⚙ 기준정보관리"])
     st.divider()
     if st.button("로그아웃"): st.session_state.logged_in = False; st.rerun()
-
-st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 # 5. 기능 구현 (메인)
 # ------------------------------------------------------------------
 
 if menu == "📊 대시보드":
+    st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
     try:
         df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
         df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
@@ -486,6 +504,7 @@ if menu == "📊 대시보드":
         st.error(f"대시보드 로드 중 오류: {e}")
 
 elif menu == "🏭 생산관리":
+    st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
     t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산 분석", "📑 일일 보고서"])
     with t1:
         c1, c2 = st.columns([1, 1.5])
@@ -544,6 +563,7 @@ elif menu == "🏭 생산관리":
             else: st.warning("해당 날짜에 생산 실적이 없습니다.")
 
 elif menu == "🛠 설비보전관리":
+    st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
     t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
     with t1:
         c1, c2 = st.columns([1, 1.5])
@@ -594,13 +614,15 @@ elif menu == "🛠 설비보전관리":
                 st.altair_chart(c, use_container_width=True)
 
 elif menu == "✅ 일일점검관리":
-    # [수정: 디자인 전면 리뉴얼] 카드형 UI & 직관적인 입력 폼
+    # [수정] 대시보드형 상단바 & 설비 카드 & 하단 고정 CTA 버튼
+    st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
+    
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력", "📊 점검 현황", "📄 리포트"])
     
     with tab1:
-        # 상단 설정 및 요약 바
-        c_date, c_line, c_blank = st.columns([1, 1.5, 2])
-        sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
+        # 1. 설정 입력 (날짜/라인) - 공간 효율화
+        col_input1, col_input2, col_input3 = st.columns([1, 1.5, 3])
+        sel_date = col_input1.date_input("점검 일자", datetime.now(), key="chk_date")
         
         df_master_all = get_daily_check_master_data()
         
@@ -608,7 +630,7 @@ elif menu == "✅ 일일점검관리":
             st.warning("등록된 점검 항목이 없습니다.")
         else:
             lines = df_master_all['line'].unique()
-            sel_line = c_line.selectbox("라인 선택", lines)
+            sel_line = col_input2.selectbox("라인 선택", lines)
             
             # 해당 라인/날짜의 마스터 및 결과 데이터 로드
             df_master_line = df_master_all[df_master_all['line'] == sel_line].copy()
@@ -624,38 +646,45 @@ elif menu == "✅ 일일점검관리":
                         key = f"{r['equip_id']}_{r['item_name']}"
                         current_vals[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # 상단 통계 카드 (HTML 디자인 유사 구현)
-            total_cnt = len(df_master_line)
-            done_cnt = len([k for k in current_vals.keys() if k.split('_')[0] in df_master_line['equip_id'].values])
-            # 정확한 통계는 복잡하므로 단순 진행률 표시
-            
-            # 통계 표시 영역
+            # 2. [New] 상단 요약 바 (관리 화면 느낌)
+            signer = st.session_state.user_info['name']
             st.markdown(f"""
-                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                    <div class="stat-card" style="flex:1;">
-                        <div class="stat-label stat-total">Total Items</div>
-                        <div class="stat-value stat-total">{total_cnt}</div>
-                    </div>
-                    <div class="stat-card" style="flex:1;">
-                        <div class="stat-label stat-ok">Done</div>
-                        <div class="stat-value stat-ok">{len(current_vals)}</div>
-                    </div>
+            <div style="
+                background: white;
+                padding: 20px;
+                border-radius: 16px;
+                display: flex;
+                justify-content: space-around;
+                align-items: center;
+                margin-bottom: 24px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+                border: 1px solid #e2e8f0;
+            ">
+                <div style="text-align:center;">
+                    <div style="font-size:0.8rem;color:#64748b;margin-bottom:4px;font-weight:600;">점검 일자</div>
+                    <div style="font-size:1.3rem;font-weight:800;color:#1e293b;">{sel_date}</div>
                 </div>
+                <div style="width: 1px; height: 40px; background: #e2e8f0;"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.8rem;color:#64748b;margin-bottom:4px;font-weight:600;">라인</div>
+                    <div style="font-size:1.3rem;font-weight:800;color:#1e293b;">{sel_line}</div>
+                </div>
+                <div style="width: 1px; height: 40px; background: #e2e8f0;"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.8rem;color:#64748b;margin-bottom:4px;font-weight:600;">점검자</div>
+                    <div style="font-size:1.3rem;font-weight:800;color:#1e293b;">{signer}</div>
+                </div>
+            </div>
             """, unsafe_allow_html=True)
             
-            st.write(f"**점검자**: {st.session_state.user_info['name']}")
-            signer = st.session_state.user_info['name'] 
-
+            # 3. 설비 카드 리스트
             with st.form("daily_check_form", clear_on_submit=False):
                 rows_data = [] 
                 
-                # 설비별로 그룹화하여 카드 생성
-                # 데이터 프레임 정렬 (설비 순서) -> 설비 ID 기준 그룹핑
                 for equip_id in df_master_line['equip_id'].unique():
                     equip_group = df_master_line[df_master_line['equip_id'] == equip_id]
                     equip_name = equip_group.iloc[0]['equip_name']
                     
-                    # --- 설비 카드 시작 ---
                     st.markdown(f"""
                     <div class="equip-card">
                         <div class="equip-header">
@@ -669,16 +698,13 @@ elif menu == "✅ 일일점검관리":
                         prev = current_vals.get(key_base, {})
                         
                         check_type = row['check_type']
-                        
-                        # 기본값 세팅
                         if check_type == 'OX':
-                            default_val = prev.get('ox', 'OK') # 기본 OK
+                            default_val = prev.get('ox', 'OK') 
                         else:
                             default_val = prev.get('val', "")
                             
                         widget_key = f"chk_{index}_{key_base}"
                         
-                        # 아이템 Row 시작 (Streamlit 레이아웃 사용)
                         col_info, col_input = st.columns([1.8, 1])
                         
                         with col_info:
@@ -692,13 +718,12 @@ elif menu == "✅ 일일점검관리":
                             if check_type == 'OX':
                                 idx = 0
                                 if default_val == 'NG': idx = 1
-                                # 라디오 버튼 (커스텀 CSS 적용됨)
                                 st.radio(f"{row['item_name']} 판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
                             else:
                                 val_str = str(default_val) if default_val and default_val != 'nan' and default_val is not None else ""
                                 st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder=f"입력 ({row['unit']})", label_visibility="collapsed")
                         
-                        st.markdown('<div class="check-row"></div>', unsafe_allow_html=True) # Divider
+                        st.markdown('<div class="check-row"></div>', unsafe_allow_html=True) 
 
                         rows_data.append({
                             "master": row,
@@ -706,10 +731,11 @@ elif menu == "✅ 일일점검관리":
                             "check_type": check_type
                         })
                     
-                    st.markdown("</div>", unsafe_allow_html=True) # 설비 카드 끝
+                    st.markdown("</div>", unsafe_allow_html=True) 
 
-                # 플로팅 버튼처럼 보이게 하기 위해 컨테이너 하단 배치
-                submitted = st.form_submit_button("💾 전체 점검 결과 저장", type="primary", use_container_width=True)
+                # 4. [New] 하단 고정형 저장 버튼 (CTA)
+                st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True) # 여백
+                submitted = st.form_submit_button("✅ 점검 완료 및 저장", type="primary", use_container_width=True)
                 
                 if submitted:
                     rows_to_save = []
@@ -729,8 +755,6 @@ elif menu == "✅ 일일점검관리":
                         else:
                             val_str = str(input_val).strip() if input_val else ""
                             if not val_str:
-                                # 수치형인데 빈칸이면 넘어갈지, 에러낼지 결정. 여기선 OK처리하되 값 비움 (선택적)
-                                # 엄격 모드: 에러
                                 pass 
                             else:
                                 try:
@@ -804,6 +828,7 @@ elif menu == "✅ 일일점검관리":
                 st.warning("해당 날짜에 점검 데이터가 없습니다.")
 
 elif menu == "⚙ 기준정보관리":
+    st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
     t1, t2, t3 = st.tabs(["📦 품목 기준정보", "🏭 설비 기준정보", "✅ 일일점검 기준정보"])
     with t1:
         if st.session_state.user_info['role'] == 'admin':
