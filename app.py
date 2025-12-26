@@ -487,6 +487,9 @@ elif menu == "✅ 일일점검관리":
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Smart)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
     with tab1:
+        # [수정 2] 안내 문구 추가
+        st.info("🚨 주의: 날짜나 라인을 변경하면 작성 중인 내용은 사라집니다. 변경 전 반드시 '저장' 하세요.", icon="⚠️")
+        
         c_date, c_line = st.columns([1, 2])
         sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
         
@@ -518,7 +521,13 @@ elif menu == "✅ 일일점검관리":
                 key = f"{row['equip_id']}_{row['item_name']}"
                 prev = current_vals.get(key, {})
                 
-                val = prev.get('val', "")
+                # [수정 1] 입력값을 숫자로 변환 (NumberColumn 사용 위함)
+                val_raw = prev.get('val', "")
+                val_num = None
+                if val_raw != "" and val_raw != "-":
+                    try: val_num = float(val_raw)
+                    except: val_num = None
+                
                 ox = prev.get('ox', "OK") 
                 
                 editor_rows.append({
@@ -526,7 +535,7 @@ elif menu == "✅ 일일점검관리":
                     "점검항목": row['item_name'],
                     "점검내용": row['check_content'],
                     "기준": row['standard'],
-                    "입력값": val,
+                    "입력값": val_num, # Float or None
                     "판정": ox,
                     "unit": row['unit'],
                     "equip_id": row['equip_id'], 
@@ -539,8 +548,7 @@ elif menu == "✅ 일일점검관리":
 
             st.markdown("##### 📝 점검 결과 입력")
             
-            # [수정 2] HTML 레벨 유효성 검사: validate regex 사용 (숫자 or 빈값만 허용, 문자 차단)
-            # validate=r"^$|^-?\d+(\.\d+)?$" -> 빈 문자열 OR 숫자만 허용
+            # [수정 1] TextColumn -> NumberColumn으로 변경 (태블릿 편의성 및 정규식 완화)
             edited_df = st.data_editor(
                 df_editor,
                 column_config={
@@ -548,9 +556,10 @@ elif menu == "✅ 일일점검관리":
                     "점검항목": st.column_config.TextColumn(disabled=True),
                     "점검내용": st.column_config.TextColumn(disabled=True, width="medium"),
                     "기준": st.column_config.TextColumn(disabled=True),
-                    "입력값": st.column_config.TextColumn(
-                        help="수치 입력 (문자 불가)", 
-                        validate=r"^$|^-?\d+(\.\d+)?$" 
+                    "입력값": st.column_config.NumberColumn(
+                        help="수치 입력 (선택)", 
+                        step=0.01,
+                        required=False # OK/NG 항목은 비워둘 수 있음
                     ),
                     "판정": st.column_config.SelectboxColumn(options=["OK", "NG"], required=True),
                     "unit": None, "equip_id": None, "min": None, "max": None, "type": None 
@@ -593,12 +602,18 @@ elif menu == "✅ 일일점검관리":
                         save_flag = True
                         
                         for _, row in edited_df.iterrows():
-                            val = str(row['입력값']).strip()
+                            # NumberColumn 값 처리 (None -> 빈문자열)
+                            val = row['입력값']
+                            if pd.isna(val) or val is None:
+                                val_str = ""
+                            else:
+                                val_str = str(val)
+
                             ox = row['판정']
                             
-                            # [수정 2] Python 레벨 유효성 검사: 빈 값 X (수치형인데 값 없으면 에러)
+                            # [수정 3] NG 자동 판정은 "저장 시점"에만 수행
                             if row['type'] != 'OX':
-                                if not val:
+                                if not val_str:
                                     st.error(f"⚠️ [{row['점검항목']}] 수치 입력값이 누락되었습니다.")
                                     save_flag = False
                                 else:
@@ -606,6 +621,7 @@ elif menu == "✅ 일일점검관리":
                                         f_val = float(val)
                                         min_v = safe_float(row['min'], -999999)
                                         max_v = safe_float(row['max'], 999999)
+                                        # 여기서만 자동 판정 개입
                                         if not (min_v <= f_val <= max_v) and ox == 'OK':
                                             ox = 'NG' 
                                     except ValueError:
@@ -617,7 +633,7 @@ elif menu == "✅ 일일점검관리":
                             
                             rows_to_save.append([
                                 str(sel_date), sel_line, row['equip_id'], row['점검항목'],
-                                val, ox, signer, str(datetime.now())
+                                val_str, ox, signer, str(datetime.now())
                             ])
                         
                         if save_flag:
