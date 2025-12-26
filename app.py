@@ -9,13 +9,6 @@ import tempfile
 import urllib.request  # 폰트 다운로드용
 from fpdf import FPDF
 
-# [선택] 그리기 서명 라이브러리 (태블릿 터치 서명용)
-try:
-    from streamlit_drawable_canvas import st_canvas
-    HAS_CANVAS = True
-except ImportError:
-    HAS_CANVAS = False
-
 # 구글 시트 연동 라이브러리
 import gspread
 from google.oauth2.service_account import Credentials
@@ -39,10 +32,32 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Pretendard', sans-serif !important; color: #1e293b; }
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-    /* 라디오 버튼 스타일 개선 (버튼처럼 보이게) */
-    div[role="radiogroup"] > label > div:first-child {
+    
+    /* [디자인 개선] 라디오 버튼을 큼직한 버튼 형태로 변경 */
+    div[data-testid="stRadio"] > div {
+        display: flex;
+        flex-direction: row;
+        gap: 10px;
+        width: 100%;
+    }
+    div[data-testid="stRadio"] > div > label {
+        flex: 1;
+        background-color: #ffffff;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 15px 10px;
+        justify-content: center;
+        transition: all 0.2s;
+        cursor: pointer;
+    }
+    div[data-testid="stRadio"] > div > label:hover {
         background-color: #f1f5f9;
-        border: 1px solid #e2e8f0;
+        border-color: #cbd5e1;
+    }
+    /* 선택된 항목 강조 (Streamlit 구조 의존) */
+    div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"] > p {
+        font-size: 1.1rem;
+        font-weight: 600;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -58,7 +73,7 @@ SHEET_MAINTENANCE = "maintenance_data"
 SHEET_EQUIPMENT = "equipment_list"
 SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
-SHEET_CHECK_SIGNATURE = "daily_check_signature"
+SHEET_CHECK_SIGNATURE = "daily_check_signature" # 데이터 호환성을 위해 변수는 유지
 
 # 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
@@ -207,7 +222,6 @@ def generate_all_daily_check_pdf(date_str):
         font_name = 'Korean'
     except: pass
 
-    # [수정 4] PDF 생성이 "Master 기준" -> "Result 기준" (점검한 라인만 출력)
     # 실제 점검 데이터가 있는 라인만 추출
     lines_with_data = df_r['line'].unique()
     
@@ -227,7 +241,6 @@ def generate_all_daily_check_pdf(date_str):
         pdf.ln(25)
         
         # 데이터 병합 (Master Left Join Result)
-        # 해당 라인의 마스터 항목을 불러오되, 결과가 없으면 '-' 표시
         line_master = df_m[df_m['line'] == line]
         df_merged = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
         df_merged = df_merged.fillna({'value':'-', 'ox':'-', 'checker':''})
@@ -519,55 +532,34 @@ elif menu == "✅ 일일점검관리":
                         key = f"{r['equip_id']}_{r['item_name']}"
                         current_vals[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # 서명 영역 (폼 외부 배치)
-            col_sig, col_act = st.columns([1, 1])
-            signature_data = None
-            with col_sig:
-                st.write("전자 서명 (필수)")
-                if HAS_CANVAS:
-                    canvas_result = st_canvas(
-                        fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
-                        background_color="#ffffff", height=100, width=300, drawing_mode="freedraw",
-                        key=f"sig_{sel_line}",
-                    )
-                    if canvas_result.image_data is not None:
-                        if canvas_result.json_data and len(canvas_result.json_data['objects']) > 0:
-                            signature_data = "Signed"
-            
-            with col_act:
-                st.write("작성자 확인")
-                signer = st.text_input("점검자", value=st.session_state.user_info['name'])
+            # [수정 2] 전자서명 삭제 (점검자 확인만 유지)
+            st.write(f"**작성자 확인**: {st.session_state.user_info['name']}")
+            signer = st.session_state.user_info['name'] # 자동 할당
 
             st.divider()
             st.markdown("##### 📝 점검 항목 (터치 입력)")
             
-            # [수정 1 & 2] st.form을 사용하여 입력 중 리로드 방지 및 터치 UI 구현
             with st.form("daily_check_form", clear_on_submit=False):
-                rows_data = [] # 나중에 처리할 데이터 보관
+                rows_data = [] 
                 
-                # 설비별 그룹화 대신 단순 리스트업 (가독성 위해 컨테이너 사용)
                 for index, row in df_master_line.iterrows():
                     key_base = f"{row['equip_id']}_{row['item_name']}"
                     prev = current_vals.get(key_base, {})
                     
-                    # 이전 값 세팅
                     prev_val = prev.get('val', None)
                     if prev_val == '' or prev_val == '-': prev_val = None
                     else:
                         try: prev_val = float(prev_val)
                         except: prev_val = None
                         
-                    prev_ox = prev.get('ox', 'OK') # 기본 OK
+                    prev_ox = prev.get('ox', 'OK') 
                     
-                    # 카드 UI
                     with st.container(border=True):
-                        # 헤더: 설비명 - 항목명
                         st.markdown(f"**[{row['equip_name']}] {row['item_name']}**")
                         st.caption(f"기준: {row['standard']} | 방법: {row['check_content']}")
                         
                         c_in1, c_in2 = st.columns([1, 1])
                         
-                        # [수정 2] NUMBER_AND_OX (또는 NUMBER) 일 때만 숫자 입력창 표시
                         val_input = None
                         if row['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
                             with c_in1:
@@ -578,7 +570,7 @@ elif menu == "✅ 일일점검관리":
                                     key=f"val_{index}_{key_base}"
                                 )
                         
-                        # [수정 1] OK/NG 라디오 버튼 (가로 배열 = 터치 용이)
+                        # [수정 1] OK/NG 라디오 버튼 (CSS 적용됨)
                         with c_in2:
                             ox_input = st.radio(
                                 "판정", 
@@ -586,10 +578,9 @@ elif menu == "✅ 일일점검관리":
                                 index=0 if prev_ox == 'OK' else 1, 
                                 horizontal=True,
                                 key=f"ox_{index}_{key_base}",
-                                label_visibility="collapsed" # 공간 절약
+                                label_visibility="collapsed" 
                             )
                         
-                        # 데이터 수집용 dict
                         rows_data.append({
                             "master": row,
                             "val_key": f"val_{index}_{key_base}",
@@ -597,70 +588,63 @@ elif menu == "✅ 일일점검관리":
                             "check_type": row['check_type']
                         })
 
-                # 저장 버튼 (Form Submit)
                 submitted = st.form_submit_button("💾 점검 완료 및 저장", type="primary", use_container_width=True)
                 
                 if submitted:
-                    if not signature_data:
-                        st.error("🚨 서명이 누락되었습니다. 서명 후 다시 시도해주세요.")
-                    else:
-                        rows_to_save = []
-                        ng_list = []
-                        save_flag = True
+                    rows_to_save = []
+                    ng_list = []
+                    save_flag = True
+                    
+                    for item in rows_data:
+                        row = item['master']
                         
-                        # Form 내부 위젯 값 가져오기
-                        # st.session_state는 폼 제출 시 업데이트됨
-                        for item in rows_data:
-                            row = item['master']
-                            
-                            # 값 가져오기 (숫자 입력이 없으면 None)
-                            val = None
-                            if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
-                                val = st.session_state.get(item['val_key'])
-                            
-                            ox = st.session_state.get(item['ox_key'])
-                            
-                            # 유효성 검사 및 자동 판정
-                            val_str = ""
-                            if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
-                                if val is None:
-                                    val_str = ""
-                                    st.error(f"⚠️ [{row['item_name']}] 수치 입력값이 누락되었습니다.")
-                                    save_flag = False
-                                else:
-                                    val_str = str(val)
-                                    try:
-                                        f_val = float(val)
-                                        min_v = safe_float(row['min_val'], -999999)
-                                        max_v = safe_float(row['max_val'], 999999)
-                                        
-                                        # [자동 판정] 수치가 있는데 범위 밖이고, 사용자가 OK라고 했으면 NG로 강제 변경
-                                        if not (min_v <= f_val <= max_v) and ox == 'OK':
-                                            ox = 'NG'
-                                            st.warning(f"⚠️ [{row['item_name']}] 기준값 이탈로 NG 처리되었습니다.")
-                                    except:
-                                        pass # 변환 에러 등
+                        val = None
+                        if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
+                            val = st.session_state.get(item['val_key'])
+                        
+                        ox = st.session_state.get(item['ox_key'])
+                        
+                        val_str = ""
+                        if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
+                            if val is None:
+                                val_str = ""
+                                st.error(f"⚠️ [{row['item_name']}] 수치 입력값이 누락되었습니다.")
+                                save_flag = False
+                            else:
+                                val_str = str(val)
+                                try:
+                                    f_val = float(val)
+                                    min_v = safe_float(row['min_val'], -999999)
+                                    max_v = safe_float(row['max_val'], 999999)
+                                    
+                                    if not (min_v <= f_val <= max_v) and ox == 'OK':
+                                        ox = 'NG'
+                                        st.warning(f"⚠️ [{row['item_name']}] 기준값 이탈로 NG 처리되었습니다.")
+                                except: pass
 
-                            if ox == 'NG':
-                                ng_list.append(row['item_name'])
-                                
-                            rows_to_save.append([
-                                str(sel_date), sel_line, row['equip_id'], row['item_name'],
-                                val_str, ox, signer, str(datetime.now())
-                            ])
+                        if ox == 'NG':
+                            ng_list.append(row['item_name'])
                             
-                        if save_flag:
-                            df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
-                            append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                            
-                            sig_row = [str(sel_date), sel_line, signer, "Canvas Signed", str(datetime.now())]
-                            append_data(dict(zip(COLS_CHECK_SIGNATURE, sig_row)), SHEET_CHECK_SIGNATURE)
-                            
-                            st.success("✅ 점검 결과가 저장되었습니다.")
-                            if ng_list:
-                                st.error(f"NG 항목 포함: {', '.join(ng_list)}")
-                            time.sleep(2)
-                            st.rerun()
+                        rows_to_save.append([
+                            str(sel_date), sel_line, row['equip_id'], row['item_name'],
+                            val_str, ox, signer, str(datetime.now())
+                        ])
+                        
+                    if save_flag:
+                        df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
+                        append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                        
+                        # 서명 없이 저장 (또는 빈 값 저장)
+                        sig_row = [str(sel_date), sel_line, signer, "No Signature (Removed)", str(datetime.now())]
+                        # 시트에 서명 데이터는 형식상 남기되 이미지는 없음
+                        # append_data(dict(zip(COLS_CHECK_SIGNATURE, sig_row)), SHEET_CHECK_SIGNATURE) 
+                        # -> 요청대로 '기능 삭제'이므로 DB 저장도 생략하거나 위처럼 더미 저장 가능. 여기선 생략.
+                        
+                        st.success("✅ 점검 결과가 저장되었습니다.")
+                        if ng_list:
+                            st.error(f"NG 항목 포함: {', '.join(ng_list)}")
+                        time.sleep(2)
+                        st.rerun()
 
     with tab2:
         st.markdown("##### 오늘의 점검 현황")
