@@ -426,16 +426,20 @@ with main_holder.container():
             if not df_maint.empty:
                 maint_today_cnt = len(df_maint[df_maint['날짜'].astype(str) == today_str])
 
-            # KPI 카드
-            col1, col2, col3, col4 = st.columns(4)
+            # KPI 카드 재배치 및 통합
+            col1, col2, col3 = st.columns(3)
+            # 1. 오늘 생산량
             col1.metric("오늘 생산량", f"{prod_today_val:,.0f} EA", f"{delta_prod:,.0f} (전일비)")
-            col2.metric("점검 완료 항목", f"{check_today_cnt} 건", "진행중" if check_today_cnt > 0 else "대기")
-            col3.metric("NG 발생 / 불량률", f"{ng_today_cnt} 건", f"{ng_rate:.1f}%", delta_color="inverse")
-            col4.metric("금일 설비 정비", f"{maint_today_cnt} 건", "특이사항 없음" if maint_today_cnt == 0 else "확인 필요", delta_color="inverse")
+            # 2. 금일 설비 정비
+            col2.metric("금일 설비 정비", f"{maint_today_cnt} 건", "특이사항 없음" if maint_today_cnt == 0 else "확인 필요", delta_color="inverse")
+            # 3. 일일점검 (완료/NG 통합)
+            col3.metric("일일점검 (완료/NG)", f"{check_today_cnt} 건 / {ng_today_cnt} 건", f"불량률: {ng_rate:.1f}%", delta_color="inverse")
 
             st.markdown("---")
 
+            # 차트 및 상세 분석 섹션
             c1, c2 = st.columns([2, 1])
+
             with c1:
                 st.subheader("📈 주간 생산 추이 & 유형")
                 if not df_prod.empty and HAS_ALTAIR:
@@ -460,27 +464,35 @@ with main_holder.container():
 
             with c2:
                 st.subheader("🍩 금일 생산 품목 비율")
-                if not df_prod.empty:
-                    df_today_prod = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today_str]
-                    if not df_today_prod.empty:
-                        pie_data = df_today_prod.groupby('구분')['수량'].sum().reset_index()
-                        base = alt.Chart(pie_data).encode(
-                            theta=alt.Theta("수량", stack=True),
-                            color=alt.Color("구분", legend=None)
-                        )
-                        pie = base.mark_arc(outerRadius=120, innerRadius=80).encode(
-                            tooltip=["구분", "수량"]
-                        )
-                        text = base.mark_text(radius=140).encode(
-                            text="구분",
-                            order=alt.Order("구분"),
-                            color=alt.value("black")  
-                        )
-                        st.altair_chart(pie + text, use_container_width=True)
+                # [NEW] 도넛 차트와 회사 이미지를 나란히 배치하기 위한 하위 컬럼
+                c2_chart, c2_img = st.columns([2, 1]) 
+                
+                with c2_chart:
+                    if not df_prod.empty:
+                        df_today_prod = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today_str]
+                        if not df_today_prod.empty:
+                            pie_data = df_today_prod.groupby('구분')['수량'].sum().reset_index()
+                            base = alt.Chart(pie_data).encode(
+                                theta=alt.Theta("수량", stack=True),
+                                color=alt.Color("구분", legend=None)
+                            )
+                            pie = base.mark_arc(outerRadius=120, innerRadius=80).encode(
+                                tooltip=["구분", "수량"]
+                            )
+                            text = base.mark_text(radius=140).encode(
+                                text="구분",
+                                order=alt.Order("구분"),
+                                color=alt.value("black")  
+                            )
+                            st.altair_chart(pie + text, use_container_width=True)
+                        else:
+                            st.info("오늘 생산 실적이 없습니다.")
                     else:
-                        st.info("오늘 생산 실적이 없습니다.")
-                else:
-                    st.info("데이터 없음")
+                        st.info("데이터 없음")
+                
+                with c2_img:
+                    # [NEW] 회사 이미지 추가
+                    st.image("", caption="스마트 싸이몬 (Smart Symon)")
 
             st.markdown("---")
             
