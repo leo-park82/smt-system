@@ -184,18 +184,12 @@ def safe_float(value, default_val=None):
 # ------------------------------------------------------------------
 def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    # [수정 완료] 모든 정렬 제거: 구글 시트의 입력 순서(Row Order)를 100% 따름
-    # if not df.empty:
-    #     df = df.sort_values(by=['line', 'equip_name'])
     return df
 
 def generate_all_daily_check_pdf(date_str):
     # 1. 마스터 데이터 로드
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-    # [수정 완료] PDF 생성 시에도 시트 순서 유지
-    # if not df_m.empty:
-    #     df_m = df_m.sort_values(by=['line', 'equip_name'])
-        
+    
     # 2. 결과 데이터 로드
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     if not df_r.empty:
@@ -515,7 +509,7 @@ elif menu == "🛠 설비보전관리":
 
 elif menu == "✅ 일일점검관리":
     # ------------------------------------------------------------------
-    # [일일점검관리] 수정됨: HTML 재렌더링 방지 및 입력 타입 최적화
+    # [일일점검관리] 수정됨: 탭 제거 후 라디오 버튼 적용 (페이지 튕김 방지)
     # ------------------------------------------------------------------
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
@@ -535,8 +529,7 @@ elif menu == "✅ 일일점검관리":
             st.session_state['scroll_to_top'] = False
 
         st.info("💡 PC/태블릿 공용 입력 화면입니다. (입력 시 깜빡임을 최소화했습니다)")
-        # [안내 문구 추가]
-        st.caption("ℹ️ 숫자 입력 후 **Enter(엔터)**를 누르면 저장이 시도됩니다. 항목 이동 시 **Tab(탭)** 키를 사용하세요.")
+        st.caption("ℹ️ 숫자 입력 후 **Enter(엔터)**를 누르면 저장이 시도됩니다. (선택된 라인은 유지됩니다)")
         
         c_date, c_btn = st.columns([2, 1])
         with c_date:
@@ -552,7 +545,6 @@ elif menu == "✅ 일일점검관리":
         if not df_res_check.empty:
              df_res_check['date'] = df_res_check['date'].astype(str)
              df_done = df_res_check[df_res_check['date'] == str(sel_date)]
-             # 중복 제거 후 카운트
              if not df_done.empty:
                 df_done = df_done.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                 current_count = len(df_done)
@@ -571,20 +563,36 @@ elif menu == "✅ 일일점검관리":
         
         lines = df_master_check['line'].unique()
         if len(lines) > 0:
-            # [유지] 일괄 합격 버튼 (상단)
+            # ---------------------------------------------------------------
+            # [핵심 변경] Tabs 대신 Radio 버튼 사용 (상태 유지)
+            # ---------------------------------------------------------------
+            st.markdown("### 📍 라인 선택")
+            
+            # 라디오 버튼은 key를 지정하면 rerun 되어도 선택 상태를 기억합니다.
+            selected_line = st.radio(
+                "점검할 라인을 선택하세요:", 
+                lines, 
+                horizontal=True,
+                key="line_selector",
+                label_visibility="collapsed"
+            )
+            
+            # 선택된 라인에 해당하는 데이터만 필터링
+            line_data = df_master_check[df_master_check['line'] == selected_line]
+
+            # [개선] 일괄 합격 버튼 (현재 선택된 라인만 적용)
             with c_btn:
                 st.write("") 
                 st.write("") 
-                if st.button("✅ 일괄 합격 (ALL OK)", type="secondary", use_container_width=True):
-                    for _, row in df_master_check.iterrows():
+                if st.button(f"✅ {selected_line} 일괄 OK", type="secondary", use_container_width=True):
+                    for _, row in line_data.iterrows():
                         uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
                         widget_key = f"val_{uid}_{sel_date}"
                         if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                             if st.session_state.get(widget_key) is None:
-                                 st.session_state[widget_key] = "OK"
+                             # session_state에 직접 주입
+                             st.session_state[widget_key] = "OK"
                     st.rerun()
 
-            line_tabs = st.tabs([f"📍 {l}" for l in lines])
             
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
             prev_data = {}
@@ -596,86 +604,80 @@ elif menu == "✅ 일일점검관리":
                     key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
                     prev_data[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # [핵심 1] st.form 사용으로 전체 재렌더링 방지
-            # form 안에서는 Enter 키가 Submit(저장)을 트리거할 수 있지만, 일반적인 값 입력 시에는 새로고침되지 않습니다.
-            with st.form("main_check_form"):
-                for i, line in enumerate(lines):
-                    with line_tabs[i]:
-                        line_data = df_master_check[df_master_check['line'] == line]
+            # [핵심] Form은 이제 '선택된 라인'에 대해서만 생성됩니다.
+            # 이렇게 하면 렌더링 양이 줄어들어 버벅임이 줄고, 엔터 키 입력 시 해당 라인 폼만 제출됩니다.
+            form_key = f"form_{selected_line}_{sel_date}"
+            
+            with st.form(form_key):
+                st.markdown(f"#### 📝 {selected_line} 점검 입력")
+                
+                # 라인 데이터만 렌더링
+                for equip_name, group in line_data.groupby("equip_name", sort=False):
+                    st.markdown(f"**🛠 {equip_name}**")
+                    
+                    for _, row in group.iterrows():
+                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                        widget_key = f"val_{uid}_{sel_date}"
                         
-                        for equip_name, group in line_data.groupby("equip_name", sort=False):
-                            st.markdown(f"**🛠 {equip_name}**")
-                            
-                            for _, row in group.iterrows():
-                                uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                                widget_key = f"val_{uid}_{sel_date}"
-                                
-                                default_val = prev_data.get(uid, {}).get('val', None)
-                                
-                                c1, c2, c3 = st.columns([2, 2, 1])
-                                c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
-                                
-                                check_type = row['check_type']
-                                is_numeric = False
-                                if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
-                                    is_numeric = True
+                        default_val = prev_data.get(uid, {}).get('val', None)
+                        
+                        c1, c2, c3 = st.columns([2, 2, 1])
+                        c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
+                        
+                        check_type = row['check_type']
+                        is_numeric = False
+                        if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
+                            is_numeric = True
 
-                                with c2:
-                                    if not is_numeric and check_type == 'OX':
-                                        idx = None
-                                        if default_val == 'OK': idx = 0
-                                        elif default_val == 'NG': idx = 1
-                                        if widget_key in st.session_state:
-                                            if st.session_state[widget_key] == "OK": idx = 0
-                                            elif st.session_state[widget_key] == "NG": idx = 1
-                                        st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
-                                    else:
-                                        # [핵심 2] st.number_input으로 변경 (HTML type="number" 강제)
-                                        # value=None으로 설정하여 입력하지 않았을 때를 구분
+                        with c2:
+                            if not is_numeric and check_type == 'OX':
+                                idx = None
+                                if default_val == 'OK': idx = 0
+                                elif default_val == 'NG': idx = 1
+                                if widget_key in st.session_state:
+                                    if st.session_state[widget_key] == "OK": idx = 0
+                                    elif st.session_state[widget_key] == "NG": idx = 1
+                                st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
+                            else:
+                                num_val = None
+                                if default_val and default_val != 'nan' and default_val != '-':
+                                    try:
+                                        num_val = float(default_val)
+                                    except:
                                         num_val = None
-                                        if default_val and default_val != 'nan' and default_val != '-':
-                                            try:
-                                                num_val = float(default_val)
-                                            except:
-                                                num_val = None
-                                        
-                                        st.number_input(
-                                            f"수치 ({row['unit']})", 
-                                            value=num_val, 
-                                            key=widget_key, 
-                                            placeholder="입력 필요",
-                                            step=0.1,
-                                            format="%.1f"
-                                        )
-                                with c3:
-                                    st.caption(f"기준: {row['standard']}")
-                            st.divider()
+                                
+                                st.number_input(
+                                    f"수치 ({row['unit']})", 
+                                    value=num_val, 
+                                    key=widget_key, 
+                                    placeholder="입력",
+                                    step=0.1,
+                                    format="%.1f"
+                                )
+                        with c3:
+                            st.caption(f"기준: {row['standard']}")
+                    st.divider()
 
                 st.markdown("---")
-                st.markdown("#### ✍️ 전자 서명 및 저장")
+                st.markdown("#### ✍️ 전자 서명 (필수)")
                 
                 signature_data = None
                 if HAS_CANVAS:
-                    st.caption("아래 박스에 마우스나 터치로 서명하세요. (필수)")
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
                         background_color="#ffffff", height=150, width=400, drawing_mode="freedraw",
-                        key="canvas_signature",
+                        key=f"canvas_{selected_line}", # 캔버스 키도 라인별로 분리
                     )
-                    # 서명 데이터 확인
                     if canvas_result.image_data is not None:
-                        # 사용자가 실제로 그렸는지 확인하기 위해 알파 채널 등을 체크할 수도 있으나,
-                        # 여기서는 image_data가 존재하면 서명한 것으로 간주 (st_canvas 특성상)
                         signature_data = canvas_result.image_data
                         
-                
                 c_s1, c_s2 = st.columns([3, 1])
-                signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
+                signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'], key=f"signer_{selected_line}")
                 
-                submitted = st.form_submit_button("💾 점검 결과 전체 저장", type="primary", use_container_width=True)
+                # [저장 버튼]
+                submitted = st.form_submit_button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True)
                 
                 if submitted:
-                    # [핵심 3] 서명 필수 체크 로직
                     if not signer_name:
                         st.error("⚠️ 점검자 성명을 입력해주세요.")
                     elif HAS_CANVAS and (canvas_result is None or canvas_result.image_data is None):
@@ -685,12 +687,18 @@ elif menu == "✅ 일일점검관리":
                         ng_list = []
                         
                         df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                        
+                        # 기존 데이터에서 '현재 날짜' AND '현재 라인' 데이터만 제거 (덮어쓰기 위함)
+                        # 전체 삭제가 아니라 해당 라인 데이터만 갱신하는 것이 안전함
                         if not df_existing.empty:
                             df_existing['date'] = df_existing['date'].astype(str)
-                            df_existing = df_existing[df_existing['date'] != str(sel_date)]
+                            # 날짜가 다르거나, 날짜는 같지만 라인이 다른 데이터는 유지
+                            condition = (df_existing['date'] == str(sel_date)) & (df_existing['line'] == selected_line)
+                            df_existing = df_existing[~condition]
                         
                         try:
-                            for _, row in df_master_check.iterrows():
+                            # 현재 선택된 라인의 항목만 저장
+                            for _, row in line_data.iterrows():
                                 uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
                                 widget_key = f"val_{uid}_{sel_date}"
                                 val = st.session_state.get(widget_key)
@@ -698,15 +706,13 @@ elif menu == "✅ 일일점검관리":
                                 ox = "OK"
                                 final_val = ""
                                 
-                                # 값 타입에 따른 처리
                                 if row['check_type'] == 'OX' and ('온,습도' not in row['line']) and ('NUMBER' not in str(row.get('check_type', ''))):
                                     if val == 'NG': ox = 'NG'
-                                    elif val is None: ox = "NG" # 선택 안하면 NG 간주
+                                    elif val is None: ox = "NG" 
                                     final_val = str(val) if val else "-"
                                 else:
-                                    # Number Input의 경우
                                     if val is None: 
-                                        ox = "NG" # 값 입력 안됨
+                                        ox = "NG" 
                                         final_val = ""
                                     else:
                                         final_val = str(val)
@@ -717,7 +723,7 @@ elif menu == "✅ 일일점검관리":
                                             if not (min_v <= num_val <= max_v): ox = 'NG'
                                         except: ox = 'NG'
                                 
-                                if ox == 'NG': ng_list.append(f"{row['line']} > {row['item_name']}")
+                                if ox == 'NG': ng_list.append(f"{row['equip_name']} > {row['item_name']}")
                                 
                                 rows_to_save.append([
                                     str(sel_date), row['line'], row['equip_id'], row['item_name'], 
@@ -730,16 +736,14 @@ elif menu == "✅ 일일점검관리":
                                 save_data(df_final, SHEET_CHECK_RESULT)
                                 
                                 sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
-                                sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
+                                sig_row = [str(sel_date), selected_line, signer_name, sig_type, str(datetime.now())]
                                 append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
                                 
-                                st.toast("✅ 전체 점검 결과가 저장되었습니다.", icon="🎉")
+                                st.toast(f"✅ {selected_line} 점검 결과가 저장되었습니다.", icon="🎉")
                                 if ng_list: st.error(f"NG 항목 발견: {', '.join(ng_list)}")
                                 
-                                # [NEW] 저장 후 스크롤 상단 이동 플래그 설정
                                 st.session_state['scroll_to_top'] = True
-                                
-                                # [수정] time.sleep 제거하고 즉시 rerun
+                                time.sleep(0.5)
                                 st.rerun()
                         except Exception as e:
                             st.error(f"저장 중 오류 발생: {e}")
