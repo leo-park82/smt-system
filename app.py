@@ -81,7 +81,6 @@ COLS_INV_HISTORY = ["날짜", "품목코드", "구분", "수량", "비고", "작
 COLS_MAINTENANCE = ["날짜", "설비ID", "설비명", "작업구분", "작업내용", "교체부품", "비용", "작업자", "비가동시간", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_EQUIPMENT = ["id", "name", "func"]
 COLS_CHECK_MASTER = ["line", "equip_id", "equip_name", "item_name", "check_content", "standard", "check_type", "min_val", "max_val", "unit"]
-# [수정] '비고' 컬럼 추가 (장비점검 내용 저장용)
 COLS_CHECK_RESULT = ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp", "비고"]
 COLS_CHECK_SIGNATURE = ["date", "line", "signer", "signature_data", "timestamp"]
 
@@ -121,13 +120,11 @@ def load_data(sheet_name, cols=None):
         if not ws: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
         
         df = get_as_dataframe(ws, evaluate_formulas=True)
-        # 빈 데이터프레임 처리
         if df.empty: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
 
         df = df.dropna(how='all').dropna(axis=1, how='all')
         df = df.fillna("") 
         
-        # [중요] 요청된 컬럼이 없으면 생성 (스키마 변경 대응)
         if cols:
             for c in cols: 
                 if c not in df.columns: df[c] = ""
@@ -248,7 +245,6 @@ def generate_all_daily_check_pdf(date_str):
                 df_final['ox'] = '-'
                 df_final['checker'] = ''
             
-            # fillna 시 '비고' 컬럼이 없으면 에러날 수 있으니 확인
             fill_values = {'value': '-', 'ox': '-', 'checker': ''}
             if '비고' in df_final.columns: fill_values['비고'] = ''
             
@@ -273,8 +269,6 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_line_width(0.3)
             pdf.set_font(font_name, '', 10)
             
-            # [Design] Header에 '비고' 추가할 공간이 부족하면 생략하거나 레이아웃 조정 필요
-            # 여기서는 기존 레이아웃 유지 (비고는 보통 길어서 표에 넣기 힘듦)
             headers = ["설비명", "점검항목", "기준", "측정값", "판정", "점검자"]
             widths = [45, 65, 30, 20, 15, 15]
             
@@ -311,7 +305,6 @@ def generate_all_daily_check_pdf(date_str):
                 pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
                 pdf.ln()
                 
-                # NG일 경우 하단에 비고 출력 (선택사항)
                 if ox == 'NG' and '비고' in row and row['비고']:
                     pdf.set_font(font_name, 'I', 9)
                     pdf.set_text_color(100, 100, 100)
@@ -542,12 +535,16 @@ elif menu == "✅ 일일점검관리":
         
         # 1. 점검 입력
         with tab1:
+            # [복구 & 강화] 저장 후 자동 상단 스크롤 (JS)
             if st.session_state.get('scroll_to_top'):
                 components.html(
                     """
                     <script>
+                        // Streamlit 메인 컨테이너 스크롤 이동
                         var body = window.parent.document.querySelector(".main");
                         if (body) { body.scrollTop = 0; }
+                        // 혹시 모를 window 자체 스크롤 이동
+                        window.parent.scrollTo(0, 0);
                     </script>
                     """,
                     height=0
@@ -611,7 +608,6 @@ elif menu == "✅ 일일점검관리":
                                 st.session_state[widget_key] = "OK"
                         st.rerun()
 
-                # [최적화] 전체 로딩이 아닌 라인 필터링 후 로딩 로직은 동일하지만, Form 제거로 동적 UI 구현
                 # 기존 입력값 불러오기
                 prev_data = {}
                 if not df_res_check.empty:
@@ -622,167 +618,174 @@ elif menu == "✅ 일일점검관리":
                         memo_val = r['비고'] if '비고' in r else ""
                         prev_data[key] = {'val': r['value'], 'ox': r['ox'], 'memo': memo_val}
 
-                st.markdown(f"#### 📝 {selected_line} 점검 입력")
+                form_key = f"form_{selected_line}_{sel_date}"
                 
-                # [중요] st.form 제거 -> 실시간 상호작용(NG 창) 가능하게 함
-                # 대신 라인별로 쪼개서 속도 저하 방지
-                
-                # 입력 데이터를 임시 저장할 딕셔너리
-                input_data = {} 
-
-                for equip_name, group in line_data.groupby("equip_name", sort=False):
-                    st.markdown(f"**🛠 {equip_name}**")
+                with st.form(form_key):
+                    st.markdown(f"#### 📝 {selected_line} 점검 입력")
                     
-                    for _, row in group.iterrows():
-                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}"
-                        memo_key = f"memo_{uid}_{sel_date}"
-                        
-                        default_val = prev_data.get(uid, {}).get('val', None)
-                        default_memo = prev_data.get(uid, {}).get('memo', "")
-                        
-                        c1, c2, c3 = st.columns([2, 2, 1])
-                        c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
-                        
-                        check_type = row['check_type']
-                        is_numeric = False
-                        if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
-                            is_numeric = True
-
-                        current_val = None
-                        is_ng = False
-
-                        with c2:
-                            if not is_numeric and check_type == 'OX':
-                                idx = None
-                                if default_val == 'OK': idx = 0
-                                elif default_val == 'NG': idx = 1
-                                
-                                # Session State 우선
-                                if widget_key in st.session_state:
-                                    if st.session_state[widget_key] == "OK": idx = 0
-                                    elif st.session_state[widget_key] == "NG": idx = 1
-                                
-                                val = st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
-                                if val == 'NG': is_ng = True
-                                current_val = val
-                            else:
-                                num_val = None
-                                if default_val and default_val != 'nan' and default_val != '-':
-                                    try: num_val = float(default_val)
-                                    except: num_val = None
-                                
-                                val = st.number_input(
-                                    f"수치 ({row['unit']})", 
-                                    value=num_val, 
-                                    key=widget_key, 
-                                    placeholder="입력",
-                                    step=0.1,
-                                    format="%.1f"
-                                )
-                                current_val = val
-                                # NG 판단 로직
-                                if val is not None:
-                                    try:
-                                        min_v = safe_float(row['min_val'], -999999)
-                                        max_v = safe_float(row['max_val'], 999999)
-                                        if not (min_v <= val <= max_v): is_ng = True
-                                    except: pass
-
-                        with c3:
-                            st.caption(f"기준: {row['standard']}")
-                        
-                        # [핵심] NG 발생 시 장비점검 입력창 자동 생성
-                        if is_ng:
-                            st.text_input("⚠️ 장비점검 (조치내역)", value=default_memo, key=memo_key, placeholder="NG 사유 및 조치내용 입력")
-                        
-                    st.divider()
-
-                st.markdown("---")
-                st.markdown("#### ✍️ 전자 서명 (필수)")
-                
-                signature_data = None
-                if HAS_CANVAS:
-                    canvas_result = st_canvas(
-                        fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
-                        background_color="#ffffff", height=150, width=400, drawing_mode="freedraw",
-                        key=f"canvas_{selected_line}", 
-                    )
-                    if canvas_result.image_data is not None:
-                        signature_data = canvas_result.image_data
-                        
-                c_s1, c_s2 = st.columns([3, 1])
-                signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'], key=f"signer_{selected_line}")
-                
-                # 저장 버튼
-                if st.button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True):
-                    # 유효성 검사
-                    missing_values = []
-                    rows_to_save = []
+                    # [중요] st.form 제거 -> 실시간 상호작용(NG 창) 가능하게 함
+                    # 대신 라인별로 쪼개서 속도 저하 방지
                     
-                    for _, row in line_data.iterrows():
-                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}"
-                        memo_key = f"memo_{uid}_{sel_date}"
+                    for equip_name, group in line_data.groupby("equip_name", sort=False):
+                        st.markdown(f"**🛠 {equip_name}**")
                         
-                        val = st.session_state.get(widget_key)
-                        memo_val = st.session_state.get(memo_key, "")
-                        
-                        check_type = row['check_type']
-                        is_numeric = False
-                        if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
-                            is_numeric = True
-                        
-                        if is_numeric and val is None:
-                            missing_values.append(f"{row['equip_name']} > {row['item_name']}")
-                            continue
-
-                        ox = "OK"
-                        final_val = ""
-                        
-                        if not is_numeric and check_type == 'OX':
-                            if val == 'NG': ox = 'NG'
-                            elif val is None: ox = "NG"
-                            final_val = str(val) if val else "-"
-                        else:
-                            final_val = str(val)
-                            try:
-                                min_v = safe_float(row['min_val'], -999999)
-                                max_v = safe_float(row['max_val'], 999999)
-                                if not (min_v <= val <= max_v): ox = 'NG'
-                            except: ox = 'NG'
-                        
-                        rows_to_save.append([
-                            str(sel_date), row['line'], row['equip_id'], row['item_name'], 
-                            final_val, ox, signer_name, str(datetime.now()), memo_val
-                        ])
-
-                    if not signer_name:
-                        st.error("⚠️ 점검자 성명을 입력해주세요.")
-                    elif HAS_CANVAS and (canvas_result is None or canvas_result.image_data is None):
-                        st.error("⚠️ 서명(Canvas)이 누락되었습니다. 서명을 완료해주세요.")
-                    elif missing_values:
-                        st.error(f"⚠️ 다음 항목의 수치를 입력해야 저장할 수 있습니다:\n {', '.join(missing_values[:3])} 등")
-                    else:
-                        # [핵심 최적화] append_rows 만 사용하여 저장 속도 획기적 개선
-                        # 기존 데이터를 읽어서 지우고 다시 쓰는 방식 -> 무조건 추가(Append) 방식
-                        # 읽을 때 drop_duplicates(keep='last')가 있으므로 논리적으로 문제 없음
-                        
-                        if rows_to_save:
-                            # COLS_CHECK_RESULT 순서에 맞게 데이터 준비
-                            # ["date", "line", "equip_id", "item_name", "value", "ox", "checker", "timestamp", "비고"]
+                        for _, row in group.iterrows():
+                            uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                            widget_key = f"val_{uid}_{sel_date}"
+                            memo_key = f"memo_{uid}_{sel_date}"
                             
-                            if append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT):
-                                sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
-                                sig_row = [str(sel_date), selected_line, signer_name, sig_type, str(datetime.now())]
-                                append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                                
-                                st.toast(f"✅ {selected_line} 점검 결과가 저장되었습니다.", icon="🎉")
-                                st.session_state['scroll_to_top'] = True
-                                time.sleep(0.5)
-                                st.rerun()
+                            default_val = prev_data.get(uid, {}).get('val', None)
+                            default_memo = prev_data.get(uid, {}).get('memo', "")
+                            
+                            c1, c2, c3 = st.columns([2, 2, 1])
+                            c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
+                            
+                            check_type = row['check_type']
+                            is_numeric = False
+                            if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
+                                is_numeric = True
+
+                            current_val = None
+                            is_ng = False
+
+                            with c2:
+                                if not is_numeric and check_type == 'OX':
+                                    idx = None
+                                    if default_val == 'OK': idx = 0
+                                    elif default_val == 'NG': idx = 1
+                                    
+                                    if widget_key in st.session_state:
+                                        if st.session_state[widget_key] == "OK": idx = 0
+                                        elif st.session_state[widget_key] == "NG": idx = 1
+                                    
+                                    val = st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
+                                    if val == 'NG': is_ng = True
+                                    current_val = val
+                                else:
+                                    num_val = None
+                                    if default_val and default_val != 'nan' and default_val != '-':
+                                        try: num_val = float(default_val)
+                                        except: num_val = None
+                                    
+                                    val = st.number_input(
+                                        f"수치 ({row['unit']})", 
+                                        value=num_val, 
+                                        key=widget_key, 
+                                        placeholder="입력",
+                                        step=0.1,
+                                        format="%.1f"
+                                    )
+                                    current_val = val
+                                    if val is not None:
+                                        try:
+                                            min_v = safe_float(row['min_val'], -999999)
+                                            max_v = safe_float(row['max_val'], 999999)
+                                            if not (min_v <= val <= max_v): is_ng = True
+                                        except: pass
+
+                            with c3:
+                                st.caption(f"기준: {row['standard']}")
+                            
+                            # NG 발생 시 장비점검 입력창 자동 생성
+                            if is_ng:
+                                st.text_input("⚠️ 장비점검 (조치내역)", value=default_memo, key=memo_key, placeholder="NG 사유 및 조치내용 입력")
+                            
+                        st.divider()
+
+                    st.markdown("---")
+                    st.markdown("#### ✍️ 전자 서명 (필수)")
+                    
+                    signature_data = None
+                    if HAS_CANVAS:
+                        canvas_result = st_canvas(
+                            fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
+                            background_color="#ffffff", height=150, width=400, drawing_mode="freedraw",
+                            key=f"canvas_{selected_line}", 
+                        )
+                        if canvas_result.image_data is not None:
+                            signature_data = canvas_result.image_data
+                            
+                    c_s1, c_s2 = st.columns([3, 1])
+                    signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'], key=f"signer_{selected_line}")
+                    
+                    submitted = st.form_submit_button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True)
+                    
+                    if submitted:
+                        missing_values = []
+                        rows_to_save = []
+                        
+                        for _, row in line_data.iterrows():
+                            check_type = row['check_type']
+                            is_numeric = False
+                            if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
+                                is_numeric = True
+                            
+                            if is_numeric:
+                                uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                                widget_key = f"val_{uid}_{sel_date}"
+                                val = st.session_state.get(widget_key)
+                                if val is None:
+                                    missing_values.append(f"{row['equip_name']} > {row['item_name']}")
+                                    continue
+
+                            uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                            widget_key = f"val_{uid}_{sel_date}"
+                            memo_key = f"memo_{uid}_{sel_date}"
+                            
+                            val = st.session_state.get(widget_key)
+                            memo_val = st.session_state.get(memo_key, "")
+
+                            ox = "OK"
+                            final_val = ""
+                            
+                            if not is_numeric and check_type == 'OX':
+                                if val == 'NG': ox = 'NG'
+                                elif val is None: ox = "NG"
+                                final_val = str(val) if val else "-"
                             else:
-                                st.error("저장 중 오류가 발생했습니다.")
+                                final_val = str(val)
+                                try:
+                                    min_v = safe_float(row['min_val'], -999999)
+                                    max_v = safe_float(row['max_val'], 999999)
+                                    if not (min_v <= val <= max_v): ox = 'NG'
+                                except: ox = 'NG'
+                            
+                            rows_to_save.append([
+                                str(sel_date), row['line'], row['equip_id'], row['item_name'], 
+                                final_val, ox, signer_name, str(datetime.now()), memo_val
+                            ])
+
+                        if not signer_name:
+                            st.error("⚠️ 점검자 성명을 입력해주세요.")
+                        elif HAS_CANVAS and (canvas_result is None or canvas_result.image_data is None):
+                            st.error("⚠️ 서명(Canvas)이 누락되었습니다. 서명을 완료해주세요.")
+                        elif missing_values:
+                            st.error(f"⚠️ 다음 항목의 수치를 입력해야 저장할 수 있습니다:\n {', '.join(missing_values[:3])} 등")
+                        else:
+                            # 저장 로직
+                            df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                            if not df_existing.empty:
+                                df_existing['date_norm'] = df_existing['date'].astype(str).str.split().str[0]
+                                target_date_str = str(sel_date)
+                                condition = (df_existing['date_norm'] == target_date_str) & (df_existing['line'] == selected_line)
+                                df_existing = df_existing[~condition].drop(columns=['date_norm'])
+                            
+                            try:
+                                if rows_to_save:
+                                    if append_rows(rows_to_save, SHEET_CHECK_RESULT, COLS_CHECK_RESULT):
+                                        sig_type = "Canvas Signature" if signature_data is not None else "Text Signature"
+                                        sig_row = [str(sel_date), selected_line, signer_name, sig_type, str(datetime.now())]
+                                        append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
+                                        
+                                        st.toast(f"✅ {selected_line} 점검 결과가 저장되었습니다.", icon="🎉")
+                                        # [복구] 스크롤 상단 이동 플래그 설정
+                                        st.session_state['scroll_to_top'] = True
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error("저장 중 오류가 발생했습니다.")
+                            except Exception as e:
+                                st.error(f"저장 중 오류 발생: {e}")
             else:
                 st.info("표시할 라인 정보가 없습니다.")
 
