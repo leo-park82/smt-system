@@ -39,6 +39,11 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Pretendard', sans-serif !important; color: #1e293b; }
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    /* 라디오 버튼 스타일 개선 (버튼처럼 보이게) */
+    div[role="radiogroup"] > label > div:first-child {
+        background-color: #f1f5f9;
+        border: 1px solid #e2e8f0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -483,12 +488,11 @@ elif menu == "🛠 설비보전관리":
                 st.altair_chart(c, use_container_width=True)
 
 elif menu == "✅ 일일점검관리":
-    # [수정 1] HTML 재렌더링 없는 st.data_editor 사용
-    tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Smart)", "📊 점검 현황", "📄 점검 이력 / PDF"])
+    # [수정 1] 터치 친화적 카드형 UI로 변경 (OK/NG 버튼 가시화)
+    tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Touch)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
     with tab1:
-        # [수정 2] 안내 문구 추가
-        st.info("🚨 주의: 날짜나 라인을 변경하면 작성 중인 내용은 사라집니다. 변경 전 반드시 '저장' 하세요.", icon="⚠️")
+        st.info("🚨 주의: 날짜나 라인을 변경하면 작성 중인 내용은 사라집니다.", icon="⚠️")
         
         c_date, c_line = st.columns([1, 2])
         sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
@@ -515,69 +519,11 @@ elif menu == "✅ 일일점검관리":
                         key = f"{r['equip_id']}_{r['item_name']}"
                         current_vals[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # Editor용 데이터프레임
-            editor_rows = []
-            for _, row in df_master_line.iterrows():
-                key = f"{row['equip_id']}_{row['item_name']}"
-                prev = current_vals.get(key, {})
-                
-                # [수정 1] 입력값을 숫자로 변환 (NumberColumn 사용 위함)
-                val_raw = prev.get('val', "")
-                val_num = None
-                if val_raw != "" and val_raw != "-":
-                    try: val_num = float(val_raw)
-                    except: val_num = None
-                
-                ox = prev.get('ox', "OK") 
-                
-                editor_rows.append({
-                    "설비명": row['equip_name'],
-                    "점검항목": row['item_name'],
-                    "점검내용": row['check_content'],
-                    "기준": row['standard'],
-                    "입력값": val_num, # Float or None
-                    "판정": ox,
-                    "unit": row['unit'],
-                    "equip_id": row['equip_id'], 
-                    "min": row['min_val'],       
-                    "max": row['max_val'],       
-                    "type": row['check_type']    
-                })
-            
-            df_editor = pd.DataFrame(editor_rows)
-
-            st.markdown("##### 📝 점검 결과 입력")
-            
-            # [수정 1] TextColumn -> NumberColumn으로 변경 (태블릿 편의성 및 정규식 완화)
-            edited_df = st.data_editor(
-                df_editor,
-                column_config={
-                    "설비명": st.column_config.TextColumn(disabled=True),
-                    "점검항목": st.column_config.TextColumn(disabled=True),
-                    "점검내용": st.column_config.TextColumn(disabled=True, width="medium"),
-                    "기준": st.column_config.TextColumn(disabled=True),
-                    "입력값": st.column_config.NumberColumn(
-                        help="수치 입력 (선택)", 
-                        step=0.01,
-                        required=False # OK/NG 항목은 비워둘 수 있음
-                    ),
-                    "판정": st.column_config.SelectboxColumn(options=["OK", "NG"], required=True),
-                    "unit": None, "equip_id": None, "min": None, "max": None, "type": None 
-                },
-                hide_index=True,
-                use_container_width=True,
-                num_rows="fixed",
-                key=f"editor_{sel_line}_{sel_date}"
-            )
-
-            st.divider()
-            
+            # 서명 영역 (폼 외부 배치)
             col_sig, col_act = st.columns([1, 1])
-            
             signature_data = None
             with col_sig:
                 st.write("전자 서명 (필수)")
-                # [수정 5] 터치 지원 Canvas
                 if HAS_CANVAS:
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
@@ -589,11 +535,72 @@ elif menu == "✅ 일일점검관리":
                             signature_data = "Signed"
             
             with col_act:
-                st.write("저장")
+                st.write("작성자 확인")
                 signer = st.text_input("점검자", value=st.session_state.user_info['name'])
+
+            st.divider()
+            st.markdown("##### 📝 점검 항목 (터치 입력)")
+            
+            # [수정 1 & 2] st.form을 사용하여 입력 중 리로드 방지 및 터치 UI 구현
+            with st.form("daily_check_form", clear_on_submit=False):
+                rows_data = [] # 나중에 처리할 데이터 보관
                 
-                if st.button("💾 점검 완료 및 저장", type="primary", use_container_width=True):
-                    # [수정 3] 서명 필수 체크 (강력)
+                # 설비별 그룹화 대신 단순 리스트업 (가독성 위해 컨테이너 사용)
+                for index, row in df_master_line.iterrows():
+                    key_base = f"{row['equip_id']}_{row['item_name']}"
+                    prev = current_vals.get(key_base, {})
+                    
+                    # 이전 값 세팅
+                    prev_val = prev.get('val', None)
+                    if prev_val == '' or prev_val == '-': prev_val = None
+                    else:
+                        try: prev_val = float(prev_val)
+                        except: prev_val = None
+                        
+                    prev_ox = prev.get('ox', 'OK') # 기본 OK
+                    
+                    # 카드 UI
+                    with st.container(border=True):
+                        # 헤더: 설비명 - 항목명
+                        st.markdown(f"**[{row['equip_name']}] {row['item_name']}**")
+                        st.caption(f"기준: {row['standard']} | 방법: {row['check_content']}")
+                        
+                        c_in1, c_in2 = st.columns([1, 1])
+                        
+                        # [수정 2] NUMBER_AND_OX (또는 NUMBER) 일 때만 숫자 입력창 표시
+                        val_input = None
+                        if row['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
+                            with c_in1:
+                                val_input = st.number_input(
+                                    f"측정값 ({row['unit']})", 
+                                    value=prev_val, 
+                                    step=0.1, 
+                                    key=f"val_{index}_{key_base}"
+                                )
+                        
+                        # [수정 1] OK/NG 라디오 버튼 (가로 배열 = 터치 용이)
+                        with c_in2:
+                            ox_input = st.radio(
+                                "판정", 
+                                ["OK", "NG"], 
+                                index=0 if prev_ox == 'OK' else 1, 
+                                horizontal=True,
+                                key=f"ox_{index}_{key_base}",
+                                label_visibility="collapsed" # 공간 절약
+                            )
+                        
+                        # 데이터 수집용 dict
+                        rows_data.append({
+                            "master": row,
+                            "val_key": f"val_{index}_{key_base}",
+                            "ox_key": f"ox_{index}_{key_base}",
+                            "check_type": row['check_type']
+                        })
+
+                # 저장 버튼 (Form Submit)
+                submitted = st.form_submit_button("💾 점검 완료 및 저장", type="primary", use_container_width=True)
+                
+                if submitted:
                     if not signature_data:
                         st.error("🚨 서명이 누락되었습니다. 서명 후 다시 시도해주세요.")
                     else:
@@ -601,41 +608,47 @@ elif menu == "✅ 일일점검관리":
                         ng_list = []
                         save_flag = True
                         
-                        for _, row in edited_df.iterrows():
-                            # NumberColumn 값 처리 (None -> 빈문자열)
-                            val = row['입력값']
-                            if pd.isna(val) or val is None:
-                                val_str = ""
-                            else:
-                                val_str = str(val)
-
-                            ox = row['판정']
+                        # Form 내부 위젯 값 가져오기
+                        # st.session_state는 폼 제출 시 업데이트됨
+                        for item in rows_data:
+                            row = item['master']
                             
-                            # [수정 3] NG 자동 판정은 "저장 시점"에만 수행
-                            if row['type'] != 'OX':
-                                if not val_str:
-                                    st.error(f"⚠️ [{row['점검항목']}] 수치 입력값이 누락되었습니다.")
+                            # 값 가져오기 (숫자 입력이 없으면 None)
+                            val = None
+                            if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
+                                val = st.session_state.get(item['val_key'])
+                            
+                            ox = st.session_state.get(item['ox_key'])
+                            
+                            # 유효성 검사 및 자동 판정
+                            val_str = ""
+                            if item['check_type'] in ['NUMBER_AND_OX', 'NUMBER']:
+                                if val is None:
+                                    val_str = ""
+                                    st.error(f"⚠️ [{row['item_name']}] 수치 입력값이 누락되었습니다.")
                                     save_flag = False
                                 else:
+                                    val_str = str(val)
                                     try:
                                         f_val = float(val)
-                                        min_v = safe_float(row['min'], -999999)
-                                        max_v = safe_float(row['max'], 999999)
-                                        # 여기서만 자동 판정 개입
+                                        min_v = safe_float(row['min_val'], -999999)
+                                        max_v = safe_float(row['max_val'], 999999)
+                                        
+                                        # [자동 판정] 수치가 있는데 범위 밖이고, 사용자가 OK라고 했으면 NG로 강제 변경
                                         if not (min_v <= f_val <= max_v) and ox == 'OK':
-                                            ox = 'NG' 
-                                    except ValueError:
-                                        st.error(f"⚠️ [{row['점검항목']}] 잘못된 수치 형식입니다.")
-                                        save_flag = False
-                            
+                                            ox = 'NG'
+                                            st.warning(f"⚠️ [{row['item_name']}] 기준값 이탈로 NG 처리되었습니다.")
+                                    except:
+                                        pass # 변환 에러 등
+
                             if ox == 'NG':
-                                ng_list.append(f"{row['점검항목']}")
-                            
+                                ng_list.append(row['item_name'])
+                                
                             rows_to_save.append([
-                                str(sel_date), sel_line, row['equip_id'], row['점검항목'],
+                                str(sel_date), sel_line, row['equip_id'], row['item_name'],
                                 val_str, ox, signer, str(datetime.now())
                             ])
-                        
+                            
                         if save_flag:
                             df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
                             append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
@@ -645,8 +658,8 @@ elif menu == "✅ 일일점검관리":
                             
                             st.success("✅ 점검 결과가 저장되었습니다.")
                             if ng_list:
-                                st.error(f"NG 항목이 포함되어 있습니다: {', '.join(ng_list)}")
-                            time.sleep(1.5)
+                                st.error(f"NG 항목 포함: {', '.join(ng_list)}")
+                            time.sleep(2)
                             st.rerun()
 
     with tab2:
