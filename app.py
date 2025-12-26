@@ -115,7 +115,6 @@ def get_worksheet(sheet_name, create_cols=None):
 
 @st.cache_data(ttl=5)
 def load_data(sheet_name, cols=None):
-    # [안전장치] 데이터 로드 실패 시 빈 DataFrame 반환하여 페이지 오류 방지
     try:
         ws = get_worksheet(sheet_name, create_cols=cols)
         if not ws: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
@@ -197,17 +196,15 @@ def get_daily_check_master_data():
 
 def generate_all_daily_check_pdf(date_str):
     try:
-        # 1. 마스터 데이터 로드
         df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
-        
-        # 2. 결과 데이터 로드
         df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+        
         if not df_r.empty:
-            df_r['date'] = df_r['date'].astype(str)
-            df_r = df_r[df_r['date'] == date_str]
+            # [중요] 날짜 비교 시 포맷 통일 (시간 제거)
+            df_r['date_only'] = df_r['date'].astype(str).str.split().str[0]
+            df_r = df_r[df_r['date_only'] == date_str]
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
 
-        # 3. 폰트 다운로드
         font_filename = 'NanumGothic.ttf'
         if not os.path.exists(font_filename):
             try:
@@ -215,7 +212,6 @@ def generate_all_daily_check_pdf(date_str):
                 urllib.request.urlretrieve(url, font_filename)
             except: pass
 
-        # 4. PDF 생성
         pdf = FPDF()
         font_name = 'Arial'
         try:
@@ -227,25 +223,17 @@ def generate_all_daily_check_pdf(date_str):
         
         for line in lines:
             pdf.add_page()
-            
-            # [Design] 상단 헤더 바
             pdf.set_fill_color(63, 81, 181) 
             pdf.rect(0, 0, 210, 25, 'F')
-            
-            # [Design] 타이틀
             pdf.set_font(font_name, '', 20)
             pdf.set_text_color(255, 255, 255)
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
-            
-            # [Design] 우측 상단 정보
             pdf.set_font(font_name, '', 10)
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
-            
             pdf.ln(25)
             
-            # 데이터 병합 및 통계
             line_master = df_m[df_m['line'] == line]
             if not df_r.empty:
                 df_final = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
@@ -262,20 +250,14 @@ def generate_all_daily_check_pdf(date_str):
             ng = len(df_final[df_final['ox'] == 'NG'])
             
             pdf.set_text_color(0, 0, 0)
-            
-            # [Design] Line Name
             pdf.set_font(font_name, '', 16)
             pdf.cell(0, 10, f"{line}", 0, 1, 'L')
-            
-            # [Design] Statistics
             pdf.set_font(font_name, '', 10)
             pdf.set_text_color(100, 100, 100)
             pdf.cell(0, 6, f"Total: {total}  |  OK: {ok}  |  NG: {ng}", 0, 1, 'L')
             pdf.ln(4)
             
             pdf.set_text_color(0, 0, 0)
-
-            # [Design] Header
             pdf.set_fill_color(240, 242, 245)
             pdf.set_text_color(60, 60, 60)
             pdf.set_draw_color(220, 220, 220)
@@ -289,7 +271,6 @@ def generate_all_daily_check_pdf(date_str):
                 pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
             pdf.ln()
 
-            # [Design] Body
             fill = False
             pdf.set_fill_color(250, 250, 250) 
             
@@ -314,14 +295,11 @@ def generate_all_daily_check_pdf(date_str):
                     pdf.set_font(font_name, '', 10)
                     
                 pdf.cell(15, 8, ox, 1, 0, 'C', fill)
-                
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font(font_name, '', 10)
                 pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
-                
                 pdf.ln()
                 fill = not fill
-
             pdf.ln(10)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -391,8 +369,9 @@ if menu == "📊 대시보드":
     check_today = 0
     ng_today = 0
     if not df_check.empty:
-        df_check['date'] = df_check['date'].astype(str)
-        df_check_today = df_check[df_check['date'] == today]
+        # [중요] 날짜 포맷 통일 (시간 제거)
+        df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
+        df_check_today = df_check[df_check['date_only'] == today]
         if not df_check_today.empty:
             df_unique = df_check_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
             check_today = len(df_unique)
@@ -406,7 +385,6 @@ if menu == "📊 대시보드":
     st.markdown("#### 📅 주간 생산 추이")
     if not df_prod.empty and HAS_ALTAIR:
         chart_data = df_prod.groupby('날짜')['수량'].sum().reset_index()
-        # [수정] 글씨(라벨, 타이틀) 무조건 가로 정렬
         c = alt.Chart(chart_data).mark_line(point=True).encode(
             x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
             y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
@@ -461,7 +439,6 @@ elif menu == "🏭 생산관리":
         if not df.empty and HAS_ALTAIR:
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
             df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-            # [수정] 글씨(라벨, 타이틀) 무조건 가로 정렬
             c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
                 x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                 y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0))
@@ -526,7 +503,6 @@ elif menu == "🛠 설비보전관리":
         if not df.empty:
             df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
             if HAS_ALTAIR:
-                # [수정] 글씨(라벨, 타이틀) 무조건 가로 정렬
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
@@ -565,9 +541,10 @@ elif menu == "✅ 일일점검관리":
             total_count = len(df_master_check)
             current_count = 0
             
+            # [수정] 날짜 포맷 통일하여 진행률 계산
             if not df_res_check.empty:
-                df_res_check['date'] = df_res_check['date'].astype(str)
-                df_done = df_res_check[df_res_check['date'] == str(sel_date)]
+                df_res_check['date_only'] = df_res_check['date'].astype(str).str.split().str[0]
+                df_done = df_res_check[df_res_check['date_only'] == str(sel_date)]
                 if not df_done.empty:
                     df_done = df_done.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     current_count = len(df_done)
@@ -610,11 +587,12 @@ elif menu == "✅ 일일점검관리":
                         st.rerun()
 
                 
+                # [수정] 데이터 로딩 시 날짜 포맷팅 강화
                 df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                 prev_data = {}
                 if not df_res.empty:
-                    df_res['date'] = df_res['date'].astype(str)
-                    df_filtered = df_res[df_res['date'] == str(sel_date)]
+                    df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
+                    df_filtered = df_res[df_res['date_only'] == str(sel_date)]
                     df_filtered = df_filtered.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     for _, r in df_filtered.iterrows():
                         key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
@@ -690,7 +668,6 @@ elif menu == "✅ 일일점검관리":
                     submitted = st.form_submit_button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True)
                     
                     if submitted:
-                        # [핵심] 수치 미입력 검사 로직
                         missing_values = []
                         for _, row in line_data.iterrows():
                             check_type = row['check_type']
@@ -710,7 +687,6 @@ elif menu == "✅ 일일점검관리":
                         elif HAS_CANVAS and (canvas_result is None or canvas_result.image_data is None):
                             st.error("⚠️ 서명(Canvas)이 누락되었습니다. 서명을 완료해주세요.")
                         elif missing_values:
-                            # [핵심] 빈 값이 있으면 저장 불가 처리
                             st.error(f"⚠️ 다음 항목의 수치를 입력해야 저장할 수 있습니다:\n {', '.join(missing_values[:3])} 등")
                         else:
                             rows_to_save = []
@@ -718,10 +694,15 @@ elif menu == "✅ 일일점검관리":
                             
                             df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                             
+                            # [핵심] 기존 데이터 삭제 로직 강화 (날짜 포맷 정규화 후 비교)
                             if not df_existing.empty:
-                                df_existing['date'] = df_existing['date'].astype(str)
-                                condition = (df_existing['date'] == str(sel_date)) & (df_existing['line'] == selected_line)
-                                df_existing = df_existing[~condition]
+                                # 날짜 컬럼을 문자열로 변환하고, 앞부분(YYYY-MM-DD)만 추출
+                                df_existing['date_norm'] = df_existing['date'].astype(str).str.split().str[0]
+                                target_date_str = str(sel_date)
+                                
+                                # 날짜가 같고 라인이 같은 데이터 제거
+                                condition = (df_existing['date_norm'] == target_date_str) & (df_existing['line'] == selected_line)
+                                df_existing = df_existing[~condition].drop(columns=['date_norm'])
                             
                             try:
                                 for _, row in line_data.iterrows():
@@ -784,8 +765,9 @@ elif menu == "✅ 일일점검관리":
             df_master = get_daily_check_master_data()
             
             if not df_res.empty:
-                df_res['date'] = df_res['date'].astype(str)
-                df_today = df_res[df_res['date'] == today]
+                # [수정] 날짜 포맷팅 강화
+                df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
+                df_today = df_res[df_res['date_only'] == today]
                 if not df_today.empty:
                     df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
                     
@@ -824,7 +806,6 @@ elif menu == "✅ 일일점검관리":
                     st.warning("데이터가 없습니다.")
     except Exception as e:
         st.error("⚠️ 페이지 로딩 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
-        # st.error(f"Error detail: {e}") # 디버깅용
 
 elif menu == "⚙ 기준정보관리":
     try:
