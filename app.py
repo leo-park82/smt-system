@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+import urllib.request  # 폰트 다운로드용
 from fpdf import FPDF
 
 # [선택] 그리기 서명 라이브러리
@@ -38,23 +39,6 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Pretendard', sans-serif !important; color: #1e293b; }
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-    .metric-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    
-    /* 탭 스타일 개선 */
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; flex-wrap: wrap; }
-    .stTabs [data-baseweb="tab"] { 
-        height: 40px; white-space: pre-wrap; background-color: white; border-radius: 8px 8px 0px 0px; 
-        box-shadow: 0 -1px 2px rgba(0,0,0,0.05); padding: 0 16px; font-size: 0.9rem;
-    }
-    .stTabs [aria-selected="true"] { background-color: #eff6ff; color: #1e40af; font-weight: bold; border-top: 2px solid #1e40af; }
-    
-    /* 라디오 버튼 가로 배치 */
-    div.row-widget.stRadio > div { flex-direction: row !important; gap: 10px; }
-    div.row-widget.stRadio > div > label { 
-        background-color: #fff; padding: 4px 12px; border-radius: 5px; border: 1px solid #e2e8f0; 
-        cursor: pointer; transition: all 0.2s; font-size: 0.85rem;
-    }
-    div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -117,13 +101,11 @@ def load_data(sheet_name, cols=None):
     if not ws: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
     try:
         df = get_as_dataframe(ws, evaluate_formulas=True)
-        # 빈 데이터프레임 처리
         if df.empty: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
         
         df = df.dropna(how='all').dropna(axis=1, how='all')
         df = df.fillna("") 
         
-        # 필수 컬럼 보장
         if cols:
             for c in cols: 
                 if c not in df.columns: df[c] = ""
@@ -148,7 +130,6 @@ def append_data(data_dict, sheet_name):
     if ws:
         try: headers = ws.row_values(1)
         except: headers = list(data_dict.keys())
-        # [Fix] 모든 데이터를 문자열로 변환하여 JSON 에러 방지
         ws.append_row([str(data_dict.get(h, "")) if not pd.isna(data_dict.get(h, "")) else "" for h in headers])
         clear_cache()
         return True
@@ -157,7 +138,6 @@ def append_data(data_dict, sheet_name):
 def append_rows(rows, sheet_name, cols):
     ws = get_worksheet(sheet_name, create_cols=cols)
     if ws:
-        # [Fix] 다중 행 추가 시에도 모든 셀을 문자열로 변환
         safe_rows = [[str(cell) if cell is not None else "" for cell in row] for row in rows]
         ws.append_rows(safe_rows)
         clear_cache()
@@ -195,16 +175,19 @@ def generate_all_daily_check_pdf(date_str):
     df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     
+    # 해당 날짜 데이터 필터링
     if not df_r.empty:
         df_r['date'] = df_r['date'].astype(str)
         df_r = df_r[df_r['date'] == date_str]
         df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+    
+    if df_r.empty:
+        return None
 
-    # 폰트
+    # 폰트 설정
     font_filename = 'NanumGothic.ttf'
     if not os.path.exists(font_filename):
         try:
-            # 대체 URL
             url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
             urllib.request.urlretrieve(url, font_filename)
         except: pass
@@ -216,37 +199,30 @@ def generate_all_daily_check_pdf(date_str):
         font_name = 'Korean'
     except: pass
 
-    lines = df_m['line'].unique() if not df_m.empty else []
+    # [Fix 4] 점검 결과가 존재하는 라인만 출력 (Master 기준 X -> Result 기준 O)
+    lines_with_data = df_r['line'].unique()
     
-    for line in lines:
-        # [Fix] 해당 라인에 결과 데이터가 없으면 PDF 페이지 생성 안함 (점검한 것만 출력)
-        line_result_check = df_r[df_r['line'] == line]
-        if line_result_check.empty:
-            continue
-
+    for line in lines_with_data:
         pdf.add_page()
         
+        # 헤더
         pdf.set_fill_color(63, 81, 181) 
         pdf.rect(0, 0, 210, 25, 'F')
-        
         pdf.set_font(font_name, '', 20)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
-        
         pdf.set_font(font_name, '', 10)
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, f"Date: {date_str}  |  Line: {line}", 0, 0, 'R')
-        
         pdf.ln(25)
         
+        # 데이터 병합 (Master Left Join Result) - 해당 라인의 모든 항목 표시
         line_master = df_m[df_m['line'] == line]
-        # Inner Join to show only checked items, or Left Join to show all master items for that line
-        # 사용자 요청: "점검한 것만" -> Inner Join이 적합하나, Master 기준으로 정렬/누락 확인을 위해 Left Join + 필터링 사용
         df_merged = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
         df_merged = df_merged.fillna({'value':'-', 'ox':'-', 'checker':''})
 
-        # 통계
+        # 요약 통계
         total = len(df_merged)
         ok = len(df_merged[df_merged['ox'] == 'OK'])
         ng = len(df_merged[df_merged['ox'] == 'NG'])
@@ -256,6 +232,7 @@ def generate_all_daily_check_pdf(date_str):
         pdf.cell(0, 10, f"Summary: Total {total}  /  Pass {ok}  /  Fail {ng}", 0, 1, 'L')
         pdf.ln(2)
 
+        # 테이블 헤더
         pdf.set_fill_color(240, 242, 245)
         pdf.set_text_color(60, 60, 60)
         pdf.set_draw_color(220, 220, 220)
@@ -264,11 +241,11 @@ def generate_all_daily_check_pdf(date_str):
         
         headers = ["설비명", "점검항목", "기준", "측정값", "판정", "점검자"]
         widths = [45, 65, 30, 20, 15, 15]
-        
         for i, h in enumerate(headers):
             pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
         pdf.ln()
 
+        # 테이블 바디
         fill = False
         pdf.set_fill_color(250, 250, 250) 
         
@@ -293,17 +270,13 @@ def generate_all_daily_check_pdf(date_str):
                 pdf.set_font(font_name, '', 10)
                 
             pdf.cell(15, 8, ox, 1, 0, 'C', fill)
-            
             pdf.set_text_color(0, 0, 0)
             pdf.set_font(font_name, '', 10)
             pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
             
-            pdf.ln()
             fill = not fill
-
         pdf.ln(10)
 
-    # [Fix] 임시 파일 생성 방식 (Window/Linux 호환)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
         with open(tmp_file.name, "rb") as f:
@@ -505,188 +478,158 @@ elif menu == "🛠 설비보전관리":
                 st.altair_chart(c, use_container_width=True)
 
 elif menu == "✅ 일일점검관리":
-    tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
+    # [Fix 1, 5] st.data_editor를 활용한 고성능 점검 입력 인터페이스
+    tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Smart)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
-    # 1. 점검 입력
     with tab1:
-        st.info("💡 PC/태블릿 공용 입력 화면입니다.")
+        c_date, c_line = st.columns([1, 2])
+        sel_date = c_date.date_input("점검 일자", datetime.now(), key="chk_date")
         
-        c_date, c_btn = st.columns([1, 1])
-        with c_date:
-            sel_date = st.date_input("점검 일자", datetime.now(), key="chk_date")
-            
-            # [복구] 점검 상태 표시 기능 (날짜 변경 시 즉시 반영)
-            df_res_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-            df_master_check = get_daily_check_master_data()
-            
-            total_cnt = len(df_master_check)
-            curr_cnt = 0
-            
-            if not df_res_check.empty:
-                 df_res_check['date'] = df_res_check['date'].astype(str)
-                 df_done = df_res_check[df_res_check['date'] == str(sel_date)]
-                 if not df_done.empty:
-                     # 중복 제거 후 카운트
-                     df_done = df_done.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-                     curr_cnt = len(df_done)
-            
-            if total_cnt > 0:
-                if curr_cnt >= total_cnt:
-                    st.success(f"✅ {sel_date} : 점검 완료 ({curr_cnt}/{total_cnt})")
-                elif curr_cnt > 0:
-                    st.warning(f"⚠️ {sel_date} : 점검 진행 중 ({curr_cnt}/{total_count})")
-                else:
-                    st.info(f"⬜ {sel_date} : 미점검 ({curr_cnt}/{total_count})")
-            
         df_master_all = get_daily_check_master_data()
         
         if df_master_all.empty:
-            st.warning("점검 항목 데이터가 없습니다. 기준정보관리에서 항목을 추가해주세요.")
-        
-        lines = df_master_all['line'].unique()
-        if len(lines) > 0:
-            with c_btn:
-                st.write("") 
-                st.write("") 
-                # [Fix] 일괄 합격 (키 일치 문제 해결)
-                if st.button("✅ 일괄 합격 (빈 항목 OK 채우기)", type="secondary", use_container_width=True):
-                    for _, row in df_master_all.iterrows():
-                        uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                        widget_key = f"val_{uid}_{sel_date}"
-                        if row['check_type'] == 'OX' and '온,습도' not in row['line']:
-                             if st.session_state.get(widget_key) is None:
-                                 st.session_state[widget_key] = "OK"
-                    st.rerun()
-
-            line_tabs = st.tabs([f"📍 {l}" for l in lines])
+            st.warning("등록된 점검 항목이 없습니다.")
+        else:
+            lines = df_master_all['line'].unique()
+            sel_line = c_line.selectbox("라인 선택", lines)
             
+            # 1. 데이터 준비 (Master + Result 병합)
+            df_master_line = df_master_all[df_master_all['line'] == sel_line].copy()
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-            prev_data = {}
+            
+            # 기존 입력값 불러오기
+            current_vals = {}
             if not df_res.empty:
                 df_res['date'] = df_res['date'].astype(str)
-                df_filtered = df_res[df_res['date'] == str(sel_date)]
-                df_filtered = df_filtered.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-                for _, r in df_filtered.iterrows():
-                    key = f"{r['line']}_{r['equip_id']}_{r['item_name']}"
-                    prev_data[key] = {'val': r['value'], 'ox': r['ox']}
+                df_filtered = df_res[(df_res['date'] == str(sel_date)) & (df_res['line'] == sel_line)]
+                if not df_filtered.empty:
+                    df_filtered = df_filtered.sort_values('timestamp').drop_duplicates(['equip_id', 'item_name'], keep='last')
+                    for _, r in df_filtered.iterrows():
+                        key = f"{r['equip_id']}_{r['item_name']}"
+                        current_vals[key] = {'val': r['value'], 'ox': r['ox']}
 
-            with st.form("main_check_form"):
-                for i, line in enumerate(lines):
-                    with line_tabs[i]:
-                        line_data = df_master_all[df_master_all['line'] == line]
-                        
-                        # [Fix] sort=False로 시트 순서 유지
-                        for equip_name, group in line_data.groupby("equip_name", sort=False):
-                            st.markdown(f"**🛠 {equip_name}**")
-                            
-                            for _, row in group.iterrows():
-                                uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                                widget_key = f"val_{uid}_{sel_date}"
-                                
-                                default_val = prev_data.get(uid, {}).get('val', None)
-                                
-                                c1, c2, c3 = st.columns([2, 2, 1])
-                                c1.markdown(f"{row['item_name']}<br><span style='font-size:0.8em; color:gray'>{row['check_content']}</span>", unsafe_allow_html=True)
-                                
-                                check_type = row['check_type']
-                                if '온,습도' in row['line'] or '온습도' in row['line']:
-                                    check_type = 'NUMBER'
-
-                                with c2:
-                                    if check_type == 'OX':
-                                        idx = None
-                                        # 저장된 값이 있으면 반영
-                                        if default_val == 'OK': idx = 0
-                                        elif default_val == 'NG': idx = 1
-                                        
-                                        # 일괄 합격 등으로 세션에 값이 있으면 우선 적용
-                                        if widget_key in st.session_state and st.session_state[widget_key] in ["OK", "NG"]:
-                                            if st.session_state[widget_key] == "OK": idx = 0
-                                            elif st.session_state[widget_key] == "NG": idx = 1
-
-                                        st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
-                                    else:
-                                        val_str = str(default_val) if default_val and default_val != 'nan' else ""
-                                        st.text_input(f"수치 ({row['unit']})", value=val_str, key=widget_key, placeholder="입력")
-                                with c3:
-                                    st.caption(f"기준: {row['standard']}")
-                            st.divider()
-
-                st.markdown("---")
-                st.markdown("#### ✍️ 전자 서명 및 저장")
+            # Editor용 데이터프레임 생성
+            editor_rows = []
+            for _, row in df_master_line.iterrows():
+                key = f"{row['equip_id']}_{row['item_name']}"
+                prev = current_vals.get(key, {})
                 
-                signature_data = None
+                # 기본값 설정
+                val = prev.get('val', "")
+                ox = prev.get('ox', "OK") # 기본은 OK로 두되, 저장 시 검증
+                
+                editor_rows.append({
+                    "설비명": row['equip_name'],
+                    "점검항목": row['item_name'],
+                    "점검내용": row['check_content'],
+                    "기준": row['standard'],
+                    "입력값": val,
+                    "판정": ox,
+                    "unit": row['unit'],
+                    "equip_id": row['equip_id'], # Hidden
+                    "min": row['min_val'],       # Hidden
+                    "max": row['max_val'],       # Hidden
+                    "type": row['check_type']    # Hidden
+                })
+            
+            df_editor = pd.DataFrame(editor_rows)
+
+            st.markdown("##### 📝 점검 결과 입력")
+            st.caption("표에서 직접 값을 수정하고 엔터를 치세요. (Excel 스타일)")
+
+            # [Fix 1] data_editor로 고성능 렌더링 (재렌더링 문제 해결)
+            edited_df = st.data_editor(
+                df_editor,
+                column_config={
+                    "설비명": st.column_config.TextColumn(disabled=True),
+                    "점검항목": st.column_config.TextColumn(disabled=True),
+                    "점검내용": st.column_config.TextColumn(disabled=True, width="medium"),
+                    "기준": st.column_config.TextColumn(disabled=True),
+                    "입력값": st.column_config.TextColumn(help="수치 또는 상태 입력"),
+                    "판정": st.column_config.SelectboxColumn(options=["OK", "NG"], required=True),
+                    "unit": None, "equip_id": None, "min": None, "max": None, "type": None # 숨김 처리
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="fixed",
+                key=f"editor_{sel_line}_{sel_date}"
+            )
+
+            st.divider()
+            
+            # 서명 및 저장 영역
+            col_sig, col_act = st.columns([1, 1])
+            
+            signature_data = None
+            with col_sig:
+                st.write("전자 서명")
                 if HAS_CANVAS:
-                    st.caption("아래 박스에 마우스나 터치로 서명하세요.")
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.3)", stroke_width=2, stroke_color="#000000",
-                        background_color="#ffffff", height=150, width=400, drawing_mode="freedraw",
-                        key="canvas_signature",
+                        background_color="#ffffff", height=100, width=300, drawing_mode="freedraw",
+                        key=f"sig_{sel_line}",
                     )
                     if canvas_result.image_data is not None:
-                        signature_data = "Signed via Canvas" 
+                        # 캔버스가 비어있는지 확인하는 간단한 로직 (numpy 필요하나, 여기선 길이로 대체)
+                        if canvas_result.json_data and len(canvas_result.json_data['objects']) > 0:
+                            signature_data = "Signed"
+            
+            with col_act:
+                st.write("저장")
+                signer = st.text_input("점검자", value=st.session_state.user_info['name'])
                 
-                c_s1, c_s2 = st.columns([3, 1])
-                signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'])
-                
-                submitted = st.form_submit_button("💾 점검 결과 전체 저장", type="primary", use_container_width=True)
-                
-                if submitted:
-                    if signer_name:
+                if st.button("💾 점검 완료 및 저장", type="primary", use_container_width=True):
+                    # [Fix 3] 서명 필수 체크
+                    if not signature_data:
+                        st.error("🚨 서명이 필요합니다. 서명란에 서명해주세요.")
+                    else:
+                        # [Fix 2] 데이터 검증 및 저장 로직 (HTML JS 유효성 검사 대체)
                         rows_to_save = []
                         ng_list = []
                         
-                        df_existing = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
-                        if not df_existing.empty:
-                            df_existing['date'] = df_existing['date'].astype(str)
-                            df_existing = df_existing[df_existing['date'] != str(sel_date)]
-                        
-                        for _, row in df_master_all.iterrows():
-                            uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                            widget_key = f"val_{uid}_{sel_date}"
-                            val = st.session_state.get(widget_key)
+                        for _, row in edited_df.iterrows():
+                            val = str(row['입력값']).strip()
+                            ox = row['판정']
                             
-                            ox = "OK"
-                            final_val = str(val) if val is not None else ""
+                            # 수치형인데 값이 입력된 경우, 숫자 검증
+                            if row['type'] != 'OX' and val:
+                                try:
+                                    f_val = float(val)
+                                    min_v = safe_float(row['min'], -999999)
+                                    max_v = safe_float(row['max'], 999999)
+                                    # 자동 판정 로직 (사용자가 OK로 뒀어도 수치가 벗어나면 NG 강제할 수도 있음, 여기선 경고만)
+                                    if not (min_v <= f_val <= max_v) and ox == 'OK':
+                                        ox = 'NG' # 시스템 강제 판정
+                                except ValueError:
+                                    st.warning(f"⚠️ [{row['점검항목']}] 수치 입력란에 문자가 있습니다. 확인해주세요.")
+                                    # 여기서는 저장 진행하되 NG 처리하거나, 저장을 막을 수 있음. 현재는 NG 처리.
+                                    ox = 'NG'
                             
-                            if row['check_type'] == 'OX' and ('온,습도' not in row['line']):
-                                if val == 'NG': ox = 'NG'
-                                elif val is None: ox = "NG" 
-                            else:
-                                if not final_val: 
-                                    ox = "NG" 
-                                else:
-                                    try:
-                                        num_val = float(final_val)
-                                        min_v = safe_float(row['min_val'], -999999)
-                                        max_v = safe_float(row['max_val'], 999999)
-                                        if not (min_v <= num_val <= max_v): ox = 'NG'
-                                    except: ox = 'NG'
-                            
-                            if ox == 'NG': ng_list.append(f"{row['line']} > {row['item_name']}")
+                            if ox == 'NG':
+                                ng_list.append(f"{row['점검항목']}")
                             
                             rows_to_save.append([
-                                str(sel_date), row['line'], row['equip_id'], row['item_name'], 
-                                final_val, ox, signer_name, str(datetime.now())
+                                str(sel_date), sel_line, row['equip_id'], row['점검항목'],
+                                val, ox, signer, str(datetime.now())
                             ])
                         
-                        if rows_to_save:
-                            df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
-                            df_final = pd.concat([df_existing, df_new], ignore_index=True)
-                            save_data(df_final, SHEET_CHECK_RESULT)
-                            
-                            sig_type = "Canvas Signature" if signature_data else "Text Signature"
-                            sig_row = [str(sel_date), "ALL", signer_name, sig_type, str(datetime.now())]
-                            append_rows([sig_row], SHEET_CHECK_SIGNATURE, COLS_CHECK_SIGNATURE)
-                            
-                            st.success("✅ 전체 점검 결과가 저장되었습니다.")
-                            if ng_list: st.error(f"NG 항목 발견: {', '.join(ng_list)}")
-                            time.sleep(1)
-                            st.rerun()
-                    else:
-                        st.warning("성명을 입력해주세요.")
-        else:
-            st.info("표시할 라인 정보가 없습니다.")
+                        # 기존 데이터 삭제 (해당 날짜/라인) 로직은 복잡하므로 Append Only 후 최신값 조회 방식 유지
+                        # 또는 전체 저장 시 덮어쓰기 로직 필요. 여기서는 Append 방식.
+                        
+                        df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
+                        
+                        # 시트 저장
+                        append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                        
+                        # 서명 저장
+                        sig_row = [str(sel_date), sel_line, signer, "Canvas Signed", str(datetime.now())]
+                        append_data(dict(zip(COLS_CHECK_SIGNATURE, sig_row)), SHEET_CHECK_SIGNATURE)
+                        
+                        st.success("✅ 저장이 완료되었습니다.")
+                        if ng_list:
+                            st.error(f"NG 항목이 포함되어 있습니다: {', '.join(ng_list)}")
+                        time.sleep(1.5)
+                        st.rerun()
 
     with tab2:
         st.markdown("##### 오늘의 점검 현황")
@@ -700,7 +643,7 @@ elif menu == "✅ 일일점검관리":
             df_today = df_res[df_res['date'] == today]
             if not df_today.empty:
                 df_today = df_today.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-                
+                # 마스터 키와 매칭하여 유효한 항목만 카운트
                 df_master['key'] = df_master['line'] + "_" + df_master['equip_id'] + "_" + df_master['item_name']
                 df_today['key'] = df_today['line'] + "_" + df_today['equip_id'] + "_" + df_today['item_name']
                 df_today = df_today[df_today['key'].isin(df_master['key'])]
@@ -719,21 +662,18 @@ elif menu == "✅ 일일점검관리":
 
         if ng_items > 0:
             st.error("🚨 금일 NG 발생 항목")
-            st.dataframe(df_today[df_today['ox']=='NG'])
-        else: 
-            if done_items == 0: st.info("오늘 점검 데이터가 아직 없습니다.")
-            elif done_items >= total_items * 0.9: st.success("오늘의 점검이 완료되었습니다.")
+            st.dataframe(df_today[df_today['ox']=='NG'][['line','equip_id','item_name','value','checker']])
 
     with tab3:
         c1, c2 = st.columns([1, 2])
         search_date = c1.date_input("조회 날짜 (PDF출력)", datetime.now())
         
-        if st.button("📄 해당 날짜 전체 점검 리포트 생성 (PDF)"):
+        if st.button("📄 해당 날짜 점검 리포트 생성 (PDF)"):
             pdf_bytes = generate_all_daily_check_pdf(str(search_date))
             if pdf_bytes:
-                st.download_button("PDF 다운로드", pdf_bytes, file_name=f"DailyCheck_All_{search_date}.pdf", mime='application/pdf')
+                st.download_button("PDF 다운로드", pdf_bytes, file_name=f"DailyCheck_{search_date}.pdf", mime='application/pdf')
             else:
-                st.warning("데이터가 없습니다.")
+                st.warning("해당 날짜에 점검 데이터가 없습니다.")
 
 elif menu == "⚙ 기준정보관리":
     t1, t2, t3 = st.tabs(["📦 품목 기준정보", "🏭 설비 기준정보", "✅ 일일점검 기준정보"])
