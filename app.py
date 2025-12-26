@@ -33,31 +33,52 @@ st.markdown("""
     .stApp { background-color: #f8fafc; }
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     
-    /* [디자인 개선] 라디오 버튼을 큼직한 버튼 형태로 변경 */
-    div[data-testid="stRadio"] > div {
+    /* [메인 영역] 라디오 버튼만 카드 형태로 변경 (사이드바 제외) */
+    /* .main 은 Streamlit 메인 컨텐츠 영역 클래스 */
+    .main div[data-testid="stRadio"] > div {
         display: flex;
         flex-direction: row;
-        gap: 10px;
+        gap: 8px;
         width: 100%;
     }
-    div[data-testid="stRadio"] > div > label {
+    .main div[data-testid="stRadio"] > div > label {
         flex: 1;
         background-color: #ffffff;
-        border: 2px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 15px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 0px; /* 패딩 0으로 하고 flex로 중앙 정렬 */
+        height: 45px; /* 높이 고정으로 통일감 부여 */
+        display: flex;
         justify-content: center;
-        transition: all 0.2s;
+        align-items: center;
+        transition: all 0.1s;
         cursor: pointer;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     }
-    div[data-testid="stRadio"] > div > label:hover {
-        background-color: #f1f5f9;
-        border-color: #cbd5e1;
+    .main div[data-testid="stRadio"] > div > label:hover {
+        background-color: #f8fafc;
+        border-color: #94a3b8;
     }
-    /* 선택된 항목 강조 (Streamlit 구조 의존) */
-    div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"] > p {
-        font-size: 1.1rem;
-        font-weight: 600;
+    /* 선택된 항목 텍스트 강조 */
+    .main div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"] > p {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    /* [사이드바] 라디오 버튼 스타일 보호 (원복) */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] > div {
+        flex-direction: column !important;
+        gap: 0px !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] > div > label {
+        background-color: transparent !important;
+        border: none !important;
+        border-radius: 0px !important;
+        padding: 8px 0px !important;
+        height: auto !important;
+        justify-content: flex-start !important;
+        box-shadow: none !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -73,7 +94,7 @@ SHEET_MAINTENANCE = "maintenance_data"
 SHEET_EQUIPMENT = "equipment_list"
 SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
-SHEET_CHECK_SIGNATURE = "daily_check_signature" # 데이터 호환성을 위해 변수는 유지
+SHEET_CHECK_SIGNATURE = "daily_check_signature"
 
 # 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
@@ -501,7 +522,7 @@ elif menu == "🛠 설비보전관리":
                 st.altair_chart(c, use_container_width=True)
 
 elif menu == "✅ 일일점검관리":
-    # [수정 1] 터치 친화적 카드형 UI로 변경 (OK/NG 버튼 가시화)
+    # [수정 1] 터치 친화적 카드형 UI (CSS 적용)
     tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Touch)", "📊 점검 현황", "📄 점검 이력 / PDF"])
     
     with tab1:
@@ -532,9 +553,9 @@ elif menu == "✅ 일일점검관리":
                         key = f"{r['equip_id']}_{r['item_name']}"
                         current_vals[key] = {'val': r['value'], 'ox': r['ox']}
 
-            # [수정 2] 전자서명 삭제 (점검자 확인만 유지)
+            # 점검자 확인
             st.write(f"**작성자 확인**: {st.session_state.user_info['name']}")
-            signer = st.session_state.user_info['name'] # 자동 할당
+            signer = st.session_state.user_info['name'] 
 
             st.divider()
             st.markdown("##### 📝 점검 항목 (터치 입력)")
@@ -570,7 +591,6 @@ elif menu == "✅ 일일점검관리":
                                     key=f"val_{index}_{key_base}"
                                 )
                         
-                        # [수정 1] OK/NG 라디오 버튼 (CSS 적용됨)
                         with c_in2:
                             ox_input = st.radio(
                                 "판정", 
@@ -634,11 +654,7 @@ elif menu == "✅ 일일점검관리":
                         df_new = pd.DataFrame(rows_to_save, columns=COLS_CHECK_RESULT)
                         append_rows(df_new.values.tolist(), SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                         
-                        # 서명 없이 저장 (또는 빈 값 저장)
                         sig_row = [str(sel_date), sel_line, signer, "No Signature (Removed)", str(datetime.now())]
-                        # 시트에 서명 데이터는 형식상 남기되 이미지는 없음
-                        # append_data(dict(zip(COLS_CHECK_SIGNATURE, sig_row)), SHEET_CHECK_SIGNATURE) 
-                        # -> 요청대로 '기능 삭제'이므로 DB 저장도 생략하거나 위처럼 더미 저장 가능. 여기선 생략.
                         
                         st.success("✅ 점검 결과가 저장되었습니다.")
                         if ng_list:
