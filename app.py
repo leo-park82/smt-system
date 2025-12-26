@@ -10,7 +10,7 @@ import urllib.request
 from fpdf import FPDF
 import streamlit.components.v1 as components
 
-# [선택] 그리기 서명 라이브러리 (Native UI Fallback용)
+# [선택] 그리기 서명 라이브러리
 try:
     from streamlit_drawable_canvas import st_canvas
     HAS_CANVAS = True
@@ -65,9 +65,9 @@ COLS_INV_HISTORY = ["날짜", "품목코드", "구분", "수량", "비고", "작
 COLS_MAINTENANCE = ["날짜", "설비ID", "설비명", "작업구분", "작업내용", "교체부품", "비용", "작업자", "비가동시간", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_EQUIPMENT = ["id", "name", "func"]
 
-# ------------------------------------------------------------------
-# 2. 구글 시트 연결
-# ------------------------------------------------------------------
+# ==============================================================================
+# [MODULE] Google Sheet Connection & Utils
+# ==============================================================================
 @st.cache_resource
 def get_gs_connection():
     try:
@@ -107,26 +107,13 @@ def load_data(sheet_name, cols=None):
         return df
     except: return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
 
-def clear_cache():
-    load_data.clear()
-
 def save_data(df, sheet_name):
     ws = get_worksheet(sheet_name)
     if ws:
         df = df.fillna("")
         ws.clear()
         set_with_dataframe(ws, df)
-        clear_cache()
-        return True
-    return False
-
-def append_data(data_dict, sheet_name):
-    ws = get_worksheet(sheet_name)
-    if ws:
-        try: headers = ws.row_values(1)
-        except: headers = list(data_dict.keys())
-        ws.append_row([str(data_dict.get(h, "")) if not pd.isna(data_dict.get(h, "")) else "" for h in headers])
-        clear_cache()
+        load_data.clear()
         return True
     return False
 
@@ -135,23 +122,9 @@ def append_rows(rows, sheet_name, cols):
     if ws:
         safe_rows = [[str(cell) if cell is not None else "" for cell in row] for row in rows]
         ws.append_rows(safe_rows)
-        clear_cache()
+        load_data.clear()
         return True
     return False
-
-def update_inventory(code, name, change, reason, user):
-    df = load_data(SHEET_INVENTORY, COLS_INVENTORY)
-    if not df.empty:
-        df['현재고'] = pd.to_numeric(df['현재고'], errors='coerce').fillna(0).astype(int)
-    if not df.empty and code in df['품목코드'].values:
-        idx = df[df['품목코드'] == code].index[0]
-        df.at[idx, '현재고'] = df.at[idx, '현재고'] + change
-    else:
-        new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
-        df = pd.concat([df, new_row], ignore_index=True)
-    save_data(df, SHEET_INVENTORY)
-    hist = {"날짜": datetime.now().strftime("%Y-%m-%d"), "품목코드": code, "구분": "입고" if change > 0 else "출고", "수량": change, "비고": reason, "작성자": user, "입력시간": str(datetime.now())}
-    append_data(hist, SHEET_INV_HISTORY)
 
 def safe_float(value, default_val=None):
     try:
@@ -160,7 +133,7 @@ def safe_float(value, default_val=None):
     except: return default_val
 
 # ==============================================================================
-# [MODULE] Daily Check Management (일일점검관리) - Refactored
+# [MODULE] Daily Check Management (일일점검관리)
 # ==============================================================================
 
 class DailyCheckSchema:
@@ -184,14 +157,6 @@ class DailyCheckStorage:
             df = df[df['date'] == str(date)]
         return df
     
-    @staticmethod
-    def load_signature(date=None):
-        df = load_data(DailyCheckSchema.SHEET_SIGNATURE, DailyCheckSchema.SIGNATURE_COLS)
-        if date and not df.empty:
-            df['date'] = df['date'].astype(str)
-            df = df[df['date'] == str(date)]
-        return df
-
     @staticmethod
     def save_result_and_signature(rows_result, row_signature, target_date):
         # 1. Overwrite Strategy: Load all except target date
@@ -224,7 +189,7 @@ class DailyCheckLogic:
         config = {}
         for line, g_line in df.groupby('line'):
             equip_list = []
-            # Sort by equipment name if needed, here we trust the sheet order
+            # Sort by equip_name for consistent display
             for equip, g_equip in g_line.groupby('equip_name', sort=False):
                 items = []
                 for _, row in g_equip.iterrows():
@@ -234,7 +199,6 @@ class DailyCheckLogic:
                         "max": row['max_val'], "unit": row['unit'],
                         "standard": row['standard'], "equip_id": row['equip_id']
                     })
-                # Use first row's equip_id for the group
                 eid = g_equip.iloc[0]['equip_id']
                 equip_list.append({"equip": equip, "id": eid, "items": items})
             config[line] = equip_list
@@ -248,18 +212,21 @@ class DailyCheckLogic:
             signature = payload.get('signature', "")
             date_str = meta.get('date')
             
-            df_master = DailyCheckStorage.load_master()
+            # [규칙 3] 서명 필수 검사
+            if not signature or len(signature) < 50:
+                return False, 0, ["서명이 누락되었습니다. 서명을 완료해주세요."]
             
+            df_master = DailyCheckStorage.load_master()
             rows = []
             ng_list = []
             
             for item in items:
-                line = item.get('line') # HTML passes line now
+                line = item.get('line') 
                 equip_id = item.get('equip_id')
                 item_name = item.get('item_name')
                 val = str(item.get('value'))
                 
-                # Validation Logic
+                # OK/NG Logic
                 criteria = df_master[(df_master['line'] == line) & (df_master['equip_id'] == equip_id) & (df_master['item_name'] == item_name)]
                 
                 ox = "OK"
@@ -267,30 +234,29 @@ class DailyCheckLogic:
                     crit = criteria.iloc[0]
                     if crit['check_type'] == 'NUMBER':
                         try:
-                            if not val or val == '': ox = "NG"
+                            # [규칙 2] Python에서 수치 검증 및 NG 처리
+                            if not val or val == '': 
+                                ox = "NG" # 빈 값은 NG
                             else:
                                 num = float(val)
                                 min_v = safe_float(crit['min_val'], -999999)
                                 max_v = safe_float(crit['max_val'], 999999)
                                 if not (min_v <= num <= max_v): ox = "NG"
                         except: ox = "NG"
-                    else: # OX type
+                    else: 
                         if val == 'NG' or val == 'X': ox = "NG"
-                        elif not val: ox = "NG" # Empty is NG for safety
+                        elif not val: ox = "NG"
                 
                 if ox == "NG": ng_list.append(f"{line} > {item_name}")
                 
                 rows.append([date_str, line, equip_id, item_name, val, ox, user_id, str(datetime.now())])
             
-            sig_row = None
-            if signature:
-                sig_row = [date_str, "ALL", user_id, signature[:100]+"...", str(datetime.now())]
+            sig_row = [date_str, "ALL", user_id, signature[:100]+"...", str(datetime.now())]
             
             success = DailyCheckStorage.save_result_and_signature(rows, sig_row, date_str)
             return success, len(rows), ng_list
         except Exception as e:
-            st.error(f"Logic Error: {e}")
-            return False, 0, []
+            return False, 0, [f"System Error: {e}"]
 
 class DailyCheckPDF:
     @staticmethod
@@ -298,8 +264,11 @@ class DailyCheckPDF:
         df_m = DailyCheckStorage.load_master()
         df_r = DailyCheckStorage.load_result(date_str)
         
-        if not df_r.empty:
-            df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+        # [규칙 4] 결과가 있는 라인만 출력
+        if df_r.empty: return None
+        
+        df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+        target_lines = df_r['line'].unique()
 
         font_path = 'NanumGothic.ttf'
         if not os.path.exists(font_path):
@@ -313,11 +282,9 @@ class DailyCheckPDF:
         except: pass
         font_name = 'Korean' if os.path.exists(font_path) else 'Arial'
 
-        lines = df_m['line'].unique()
-        for line in lines:
+        for line in target_lines:
             pdf.add_page()
             
-            # Header
             pdf.set_fill_color(63, 81, 181)
             pdf.rect(0, 0, 210, 25, 'F')
             pdf.set_font(font_name, '', 20)
@@ -329,25 +296,16 @@ class DailyCheckPDF:
             pdf.cell(0, 10, f"Date: {date_str}", 0, 0, 'R')
             pdf.ln(20)
 
-            # Table
             pdf.set_text_color(0, 0, 0)
             pdf.set_fill_color(240, 240, 240)
-            pdf.cell(40, 8, "Equip", 1, 0, 'C', 1)
-            pdf.cell(60, 8, "Item", 1, 0, 'C', 1)
-            pdf.cell(30, 8, "Standard", 1, 0, 'C', 1)
-            pdf.cell(20, 8, "Value", 1, 0, 'C', 1)
-            pdf.cell(15, 8, "Res", 1, 0, 'C', 1)
-            pdf.cell(20, 8, "User", 1, 1, 'C', 1)
+            headers = ["Equip", "Item", "Standard", "Value", "Res", "User"]
+            widths = [40, 60, 30, 20, 15, 20]
+            for i, h in enumerate(headers):
+                pdf.cell(widths[i], 8, h, 1, 0, 'C', 1)
+            pdf.ln()
 
             line_master = df_m[df_m['line'] == line]
-            if not df_r.empty:
-                df_merged = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
-            else:
-                df_merged = line_master.copy()
-                df_merged['value'] = '-'
-                df_merged['ox'] = '-'
-                df_merged['checker'] = ''
-            
+            df_merged = pd.merge(line_master, df_r, on=['line', 'equip_id', 'item_name'], how='left')
             df_merged = df_merged.fillna({'value':'-', 'ox':'-', 'checker':''})
 
             for _, row in df_merged.iterrows():
@@ -379,7 +337,7 @@ class DailyCheckPDF:
 class DailyCheckUI:
     @staticmethod
     def render_input_html_string(master_json):
-        # HTML String that handles UI only
+        # [규칙 1] DOM 직접 제어로 성능 최적화
         return f"""
 <!DOCTYPE html>
 <html lang="ko">
@@ -389,18 +347,16 @@ class DailyCheckUI:
     <title>Daily Check</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {{ font-family: -apple-system, sans-serif; background: #f8fafc; padding-bottom: 80px; }}
+        body {{ font-family: -apple-system, sans-serif; background: #f8fafc; padding-bottom: 100px; }}
         .tab-btn {{ padding: 10px 15px; border-radius: 20px; background: #fff; border: 1px solid #ddd; margin-right: 5px; font-weight: bold; cursor: pointer; }}
         .tab-btn.active {{ background: #2563eb; color: #fff; border-color: #2563eb; }}
-        .hidden {{ display: none; }}
-        .btn-ox {{ width: 45%; padding: 8px; border-radius: 8px; font-weight: bold; border: 1px solid #ddd; }}
-        .btn-ox.ok.selected {{ background: #22c55e; color: white; }}
-        .btn-ox.ng.selected {{ background: #ef4444; color: white; }}
+        .btn-ox {{ width: 45%; padding: 10px; border-radius: 8px; font-weight: bold; border: 1px solid #cbd5e1; background: #fff; }}
+        .btn-ox.ok.selected {{ background: #22c55e; color: white; border-color: #22c55e; }}
+        .btn-ox.ng.selected {{ background: #ef4444; color: white; border-color: #ef4444; }}
     </style>
 </head>
 <body>
     <div class="max-w-md mx-auto p-4">
-        <!-- Header & Config -->
         <div class="bg-white p-4 rounded-xl shadow-sm mb-4">
             <h2 class="text-xl font-bold mb-2">✅ 일일점검 입력</h2>
             <div class="flex gap-2 mb-2">
@@ -409,30 +365,28 @@ class DailyCheckUI:
             <div id="tabs" class="flex overflow-x-auto pb-2"></div>
         </div>
 
-        <!-- Check List Area -->
         <div id="listContainer"></div>
 
-        <!-- Signature -->
-        <div class="bg-white p-4 rounded-xl shadow-sm mt-4">
+        <div class="bg-white p-4 rounded-xl shadow-sm mt-4 border">
             <h3 class="font-bold mb-2">✍️ 서명 (Signature)</h3>
             <canvas id="sigCanvas" class="w-full h-32 border rounded bg-slate-50 touch-none"></canvas>
-            <div class="flex justify-end mt-1"><button onclick="clearSig()" class="text-sm text-red-500">Clear</button></div>
+            <div class="flex justify-end mt-1"><button onclick="clearSig()" class="text-sm text-red-500 font-bold">Clear</button></div>
         </div>
         
-        <!-- Actions -->
-        <div class="fixed bottom-0 left-0 w-full bg-white border-t p-4 shadow-lg flex gap-2 justify-center">
+        <div class="fixed bottom-0 left-0 w-full bg-white border-t p-4 shadow-lg flex gap-2 justify-center z-50">
             <button onclick="setBatchOK()" class="bg-green-100 text-green-700 px-4 py-3 rounded-xl font-bold flex-1">일괄 OK</button>
             <button onclick="exportData()" class="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold flex-1">데이터 생성</button>
         </div>
     </div>
 
-    <!-- Export Modal -->
-    <div id="modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
+    <!-- Modal -->
+    <div id="modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-[99]">
         <div class="bg-white p-6 rounded-xl w-full max-w-sm">
             <h3 class="font-bold text-lg mb-2">데이터 준비 완료</h3>
             <p class="text-sm text-gray-500 mb-2">아래 텍스트를 복사하여 Streamlit에 붙여넣으세요.</p>
-            <textarea id="out" class="w-full h-32 border p-2 text-xs mb-3" readonly></textarea>
+            <textarea id="out" class="w-full h-32 border p-2 text-xs mb-3 font-mono" readonly></textarea>
             <button onclick="copyAndClose()" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold">복사 및 닫기</button>
+            <button onclick="document.getElementById('modal').classList.add('hidden')" class="w-full mt-2 text-gray-400 text-sm">닫기</button>
         </div>
     </div>
 
@@ -440,6 +394,7 @@ class DailyCheckUI:
         const MASTER = {master_json};
         const DATA = {{}};
         let curLine = Object.keys(MASTER)[0];
+        let isSignatureEmpty = true;
         
         // Canvas Setup
         const canvas = document.getElementById('sigCanvas');
@@ -462,13 +417,12 @@ class DailyCheckUI:
             return {{x, y}};
         }}
         
-        ['mousedown', 'touchstart'].forEach(ev => canvas.addEventListener(ev, (e) => {{ e.preventDefault(); isDrawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }}));
+        ['mousedown', 'touchstart'].forEach(ev => canvas.addEventListener(ev, (e) => {{ e.preventDefault(); isDrawing = true; isSignatureEmpty = false; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }}));
         ['mousemove', 'touchmove'].forEach(ev => canvas.addEventListener(ev, (e) => {{ if(!isDrawing) return; e.preventDefault(); const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }}));
         ['mouseup', 'touchend'].forEach(ev => canvas.addEventListener(ev, () => {{ isDrawing = false; }}));
         
-        function clearSig() {{ ctx.clearRect(0, 0, canvas.width, canvas.height); }}
+        function clearSig() {{ ctx.clearRect(0, 0, canvas.width, canvas.height); isSignatureEmpty = true; }}
 
-        // Init
         document.getElementById('checkDate').value = new Date().toISOString().split('T')[0];
         renderTabs();
         renderList();
@@ -493,27 +447,28 @@ class DailyCheckUI:
                 let html = `<div class="font-bold text-lg mb-2 text-slate-700">🛠 ${{g.equip}}</div>`;
                 
                 g.items.forEach(it => {{
-                    const uid = `${{curLine}}|${{g.id}}|${{it.name}}`; // Unique Key
+                    const uid = `${{curLine}}|${{g.id}}|${{it.name}}`;
                     const val = DATA[uid] || '';
                     
                     let input = '';
                     if(it.type === 'OX') {{
                         input = `
-                            <div class="flex gap-2 mt-1">
-                                <button onclick="setVal('${{uid}}', 'OK')" class="btn-ox ok ${{val==='OK'?'selected':''}}">OK</button>
-                                <button onclick="setVal('${{uid}}', 'NG')" class="btn-ox ng ${{val==='NG'?'selected':''}}">NG</button>
+                            <div class="flex gap-2 mt-1 justify-center">
+                                <button id="btn-ok-${{uid}}" onclick="setVal('${{uid}}', 'OK', 'OX')" class="btn-ox ok ${{val==='OK'?'selected':''}}">OK</button>
+                                <button id="btn-ng-${{uid}}" onclick="setVal('${{uid}}', 'NG', 'OX')" class="btn-ox ng ${{val==='NG'?'selected':''}}">NG</button>
                             </div>`;
                     }} else {{
-                        input = `<input type="number" class="border p-2 rounded w-full mt-1 text-center font-bold" 
-                            placeholder="${{it.min}}~${{it.max}}" value="${{val}}" onchange="setVal('${{uid}}', this.value)">`;
+                        input = `<input id="input-${{uid}}" type="number" class="border p-3 rounded-lg w-full mt-1 text-center font-bold text-lg bg-slate-50" 
+                            placeholder="${{it.min}} ~ ${{it.max}}" value="${{val}}" onchange="setVal('${{uid}}', this.value, 'NUMBER')">`;
                     }}
                     
                     html += `
-                        <div class="py-2 border-t">
-                            <div class="flex justify-between">
-                                <span class="font-bold">${{it.name}}</span>
-                                <span class="text-xs text-gray-400">${{it.standard}}</span>
+                        <div class="py-3 border-t">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-bold text-slate-800">${{it.name}}</span>
+                                <span class="text-xs text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded">${{it.standard}}</span>
                             </div>
+                            <div class="text-xs text-gray-400 mb-1">${{it.content}}</div>
                             ${{input}}
                         </div>`;
                 }});
@@ -522,9 +477,16 @@ class DailyCheckUI:
             }});
         }}
         
-        // Expose to window
-        window.switchLine = switchLine;
-        window.setVal = (uid, val) => {{ DATA[uid] = val; renderList(); }};
+        // [규칙 1] DOM 직접 제어 (전체 리렌더링 X)
+        window.setVal = (uid, val, type) => {{
+            DATA[uid] = val;
+            if(type === 'OX') {{
+                document.getElementById('btn-ok-' + uid).classList.remove('selected');
+                document.getElementById('btn-ng-' + uid).classList.remove('selected');
+                if(val === 'OK') document.getElementById('btn-ok-' + uid).classList.add('selected');
+                if(val === 'NG') document.getElementById('btn-ng-' + uid).classList.add('selected');
+            }}
+        }};
         
         window.setBatchOK = () => {{
             const groups = MASTER[curLine] || [];
@@ -532,14 +494,32 @@ class DailyCheckUI:
                 g.items.forEach(it => {{
                     if(it.type === 'OX') {{
                         const uid = `${{curLine}}|${{g.id}}|${{it.name}}`;
-                        if(!DATA[uid]) DATA[uid] = 'OK';
+                        if(!DATA[uid]) {{
+                            setVal(uid, 'OK', 'OX');
+                        }}
                     }}
                 }});
             }});
-            renderList();
         }};
 
         window.exportData = () => {{
+            // [규칙 2] NUMBER 타입 빈 값 검사
+            const groups = MASTER[curLine] || [];
+            let missingNum = false;
+            groups.forEach(g => {{
+                g.items.forEach(it => {{
+                    if(it.type === 'NUMBER') {{
+                        const uid = `${{curLine}}|${{g.id}}|${{it.name}}`;
+                        if(!DATA[uid] || DATA[uid] === '') missingNum = true;
+                    }}
+                }});
+            }});
+
+            if(missingNum) {{
+                alert('⚠️ 수치 입력 항목에 빈 값이 있습니다. 숫자를 입력해주세요.');
+                return;
+            }}
+
             const date = document.getElementById('checkDate').value;
             const items = Object.keys(DATA).map(key => {{
                 const [line, equip_id, item_name] = key.split('|');
@@ -549,7 +529,7 @@ class DailyCheckUI:
             const payload = {{
                 meta: {{ date: date }},
                 items: items,
-                signature: canvas.toDataURL()
+                signature: isSignatureEmpty ? "" : canvas.toDataURL()
             }};
             
             document.getElementById('out').value = JSON.stringify(payload);
@@ -562,6 +542,9 @@ class DailyCheckUI:
             document.execCommand('copy');
             document.getElementById('modal').classList.add('hidden');
         }};
+        
+        // Expose
+        window.switchLine = switchLine;
     </script>
 </body>
 </html>
@@ -639,7 +622,7 @@ elif menu == "✅ 일일점검관리":
         # [HTML UI]
         master_json = DailyCheckLogic.get_master_json()
         html_code = DailyCheckUI.render_input_html_string(master_json)
-        components.html(html_code, height=800, scrolling=True)
+        components.html(html_code, height=900, scrolling=True)
         
         st.divider()
         st.markdown("#### 📥 데이터 저장 (PC)")
@@ -655,7 +638,7 @@ elif menu == "✅ 일일점검관리":
                         st.success(f"✅ {count}건 저장 완료")
                         if ng_list: st.error(f"NG 항목: {ng_list}")
                     else:
-                        st.error("저장 실패")
+                        st.error("저장 실패 (서명 누락 등)")
                 except Exception as e:
                     st.error(f"데이터 오류: {e}")
 
