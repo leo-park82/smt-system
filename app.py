@@ -32,7 +32,7 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
-# [수정] 타이틀 SMT로 변경
+# 타이틀 SMT로 변경
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -59,7 +59,7 @@ st.markdown("""
     }
     div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
 
-    /* [NEW] 일일점검 리스트 스타일 개선 */
+    /* 일일점검 리스트 스타일 개선 */
     .check-item-container { padding: 5px 0; }
     .check-item-title { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; letter-spacing: -0.5px; }
     .check-item-content { font-size: 0.95rem; color: #64748b; margin-bottom: 2px; line-height: 1.4; }
@@ -212,11 +212,17 @@ def generate_all_daily_check_pdf(date_str):
         df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
         df_r = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
         
+        checker_name = ""
         if not df_r.empty:
             df_r['date_only'] = df_r['date'].astype(str).str.split().str[0]
             df_r = df_r[df_r['date_only'] == date_str]
             df_r['timestamp'] = pd.to_datetime(df_r['timestamp'], errors='coerce')
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+            
+            # [NEW] 첫 페이지 표시용 점검자 이름 추출 (데이터가 있으면 첫번째 사람)
+            checkers = df_r['checker'].unique()
+            if len(checkers) > 0 and checkers[0]:
+                checker_name = checkers[0]
 
         font_filename = 'NanumGothic.ttf'
         if not os.path.exists(font_filename):
@@ -234,6 +240,8 @@ def generate_all_daily_check_pdf(date_str):
 
         lines = df_m['line'].unique()
         
+        first_page = True # 첫 페이지만 점검자 표시를 위한 플래그
+
         for line in lines:
             pdf.add_page()
             pdf.set_fill_color(63, 81, 181) 
@@ -242,9 +250,17 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_text_color(255, 255, 255)
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, "SMT Daily Check Report", 0, 0, 'L')
+            
             pdf.set_font(font_name, '', 10)
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
+            
+            # [NEW] 첫 페이지 상단에만 점검자 성명 출력
+            if first_page and checker_name:
+                pdf.set_xy(10, 12) # 날짜 아래 위치
+                pdf.cell(0, 15, f"Checker: {checker_name}", 0, 0, 'R')
+                first_page = False # 이후 페이지에는 출력 안함
+
             pdf.ln(25)
             
             line_master = df_m[df_m['line'] == line]
@@ -340,8 +356,9 @@ def generate_all_daily_check_pdf(date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
-    "park": {"name": "Park", "password_hash": make_hash("1083"), "role": "admin"},
-    "suk": {"name": "Suk", "password_hash": make_hash("1734"), "role": "editor"},
+    # [수정] 사용자 이름 변경 (박종선, 김윤석)
+    "park": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
+    "suk": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
 }
 def check_password():
@@ -361,12 +378,13 @@ def check_password():
 
     if st.session_state.logged_in: return True
     
-    col1, col2, col3 = st.columns([1,2,1])
+    # [수정] 로그인 컬럼 비율 조정하여 창과 로고 작게 만들기
+    col1, col2, col3 = st.columns([5, 2, 5])
     with col2:
-        # [수정] 로그인 화면 로고 크기 맞춤 (use_container_width=True) 및 타이틀 'SMT'로 변경
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
-        st.title("SMT")
+        # SMT 글씨 삭제
+        # st.title("SMT") 
         with st.form("login"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
@@ -384,7 +402,6 @@ def check_password():
 if not check_password(): st.stop()
 
 with st.sidebar:
-    # [수정] 사이드바 로고 및 타이틀 'SMT'로 변경
     if os.path.exists("logo.png"):
         st.image("logo.png", width=180)
     st.title("SMT")
@@ -490,8 +507,9 @@ with main_holder.container():
                     st.info("생산 데이터가 없습니다.")
 
             with c2:
-                st.subheader("🍩 금일 생산 품목 비율")
-                # [수정] 차트와 데이터 테이블을 나란히 배치 (이미지 대체)
+                # [수정] 아이콘 변경 🍩 -> 🏭
+                st.subheader("🏭 금일 생산 품목 비율")
+                # 차트와 데이터 테이블을 나란히 배치
                 c2_chart, c2_data = st.columns([1.5, 1]) 
                 
                 pie_data = pd.DataFrame()
@@ -520,8 +538,7 @@ with main_holder.container():
                         st.info("데이터 없음")
                 
                 with c2_data:
-                    # [NEW] 회사명 및 데이터 테이블 표시
-                    st.markdown("##### 🏭 Smart Symon")
+                    # [수정] 🏭 Smart Symon 텍스트 삭제
                     if not pie_data.empty:
                         total = pie_data['수량'].sum()
                         pie_data['비중(%)'] = (pie_data['수량'] / total * 100).round(1)
@@ -531,7 +548,7 @@ with main_holder.container():
                             hide_index=True, 
                             use_container_width=True
                         )
-                    # 중복 메시지 삭제 (차트 쪽에 이미 표시됨)
+                    # 중복 메시지 삭제
 
             st.markdown("---")
             
