@@ -437,9 +437,9 @@ def generate_production_report_pdf(df_prod, date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
-    # [수정] 사용자 이름 변경 (박종선, 김윤석)
-    "park": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
-    "suk": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
+    # [수정] 사용자 로그인 ID 변경 (키 값을 한글로 변경)
+    "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
+    "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
 }
 def check_password():
@@ -661,7 +661,7 @@ with main_holder.container():
 
     elif menu == "🏭 생산관리":
         try:
-            t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산 분석", "📑 일일 보고서"])
+            t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 스마트 생산 분석", "📑 일일 보고서"])
             with t1:
                 c1, c2 = st.columns([1, 1.5])
                 with c1:
@@ -737,15 +737,100 @@ with main_holder.container():
                     df_inv = df_inv[df_inv['현재고'] != 0]
                 st.dataframe(df_inv, use_container_width=True)
             with t3:
+                st.markdown("#### 📊 스마트 생산 분석")
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
-                if not df.empty and HAS_ALTAIR:
+                
+                if not df.empty:
+                    # Data Preprocessing
                     df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-                    c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
-                        x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")), # Added :T and format
-                        y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0, title="수량"))
-                    ).interactive()
-                    st.altair_chart(c, use_container_width=True)
+                    df = df.dropna(subset=['날짜']) # Drop invalid dates
+
+                    # Date Filter
+                    min_date = df['날짜'].min().date()
+                    max_date = df['날짜'].max().date()
+                    
+                    c_filter1, c_filter2 = st.columns([1, 1])
+                    with c_filter1:
+                        date_range = st.date_input(
+                            "분석 기간 선택",
+                            value=(max_date - timedelta(days=29), max_date),
+                            min_value=min_date,
+                            max_value=max_date
+                        )
+                    
+                    # Filtering Logic
+                    if isinstance(date_range, tuple) and len(date_range) == 2:
+                        start_date, end_date = date_range
+                        mask = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
+                        df_filtered = df[mask]
+                    else:
+                        st.warning("종료 날짜를 선택해주세요.")
+                        df_filtered = df.copy() # Fallback
+
+                    if not df_filtered.empty:
+                        # 1. KPI Metrics
+                        total_qty = df_filtered['수량'].sum()
+                        daily_avg = total_qty / len(df_filtered['날짜'].unique()) if len(df_filtered['날짜'].unique()) > 0 else 0
+                        top_cat = df_filtered.groupby('구분')['수량'].sum().idxmax() if not df_filtered.empty else "-"
+                        
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("총 생산량", f"{total_qty:,.0f} EA")
+                        m2.metric("일일 평균", f"{daily_avg:,.0f} EA")
+                        m3.metric("최다 생산 공정", top_cat)
+                        m4.metric("가동 일수", f"{len(df_filtered['날짜'].unique())} 일")
+                        
+                        st.divider()
+
+                        # 2. Advanced Charts
+                        col_chart1, col_chart2 = st.columns([2, 1])
+                        
+                        with col_chart1:
+                            st.markdown("##### 📅 일별/공정별 생산 추이")
+                            if HAS_ALTAIR:
+                                # Aggregate for chart
+                                chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
+                                
+                                # Stacked Bar Chart
+                                bar = alt.Chart(chart_data).mark_bar().encode(
+                                    x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
+                                    y=alt.Y('수량:Q', axis=alt.Axis(title="생산량")),
+                                    color=alt.Color('구분', legend=alt.Legend(title="공정", orient="top")),
+                                    tooltip=['날짜', '구분', '수량']
+                                ).properties(height=350)
+                                
+                                st.altair_chart(bar, use_container_width=True)
+
+                        with col_chart2:
+                            st.markdown("##### 🥧 기간 내 공정 점유율")
+                            if HAS_ALTAIR:
+                                pie_data = df_filtered.groupby('구분')['수량'].sum().reset_index()
+                                
+                                base = alt.Chart(pie_data).encode(
+                                    theta=alt.Theta("수량", stack=True),
+                                    color=alt.Color("구분", legend=None)
+                                )
+                                pie = base.mark_arc(outerRadius=120, innerRadius=0).encode( # Full Pie for variety
+                                    tooltip=["구분", "수량"]
+                                )
+                                text = base.mark_text(radius=140).encode(
+                                    text=alt.Text("수량", format=",.0f"),
+                                    order=alt.Order("구분"),
+                                    color=alt.value("black")
+                                )
+                                st.altair_chart(pie + text, use_container_width=True)
+                                
+                                # Simple legend table below pie
+                                st.dataframe(
+                                    pie_data.sort_values('수량', ascending=False).assign(비중=lambda x: (x['수량']/x['수량'].sum()*100).round(1).astype(str)+'%'),
+                                    hide_index=True,
+                                    use_container_width=True
+                                )
+                    else:
+                        st.info("선택한 기간에 데이터가 없습니다.")
+
+                else:
+                    st.info("생산 데이터가 없습니다.")
             with t4:
                 st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
                 
