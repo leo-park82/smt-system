@@ -32,7 +32,8 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
-st.set_page_config(page_title="SMT 통합 관리 시스템", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
+# [수정] 타이틀 CIMON SMT로 변경
+st.set_page_config(page_title="CIMON SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -344,11 +345,9 @@ USERS = {
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
 }
 def check_password():
-    # [수정] 세션 상태 초기화
     if "logged_in" not in st.session_state: 
         st.session_state.logged_in = False
     
-    # [수정] 새로고침 시 로그인 유지를 위한 쿼리 파라미터 확인
     if not st.session_state.logged_in:
         try:
             qp = st.query_params
@@ -364,7 +363,10 @@ def check_password():
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.title("SMT 통합 시스템")
+        # [수정] 로그인 화면 로고 및 타이틀 변경
+        if os.path.exists("logo.png"):
+            st.image("logo.png", width=200)
+        st.title("CIMON SMT")
         with st.form("login"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
@@ -373,7 +375,6 @@ def check_password():
                     st.session_state.logged_in = True
                     st.session_state.user_info = USERS[id]
                     st.session_state.user_info['id'] = id
-                    # [수정] 로그인 성공 시 URL에 세션 정보 저장
                     try: st.query_params["session"] = id
                     except: pass
                     st.rerun()
@@ -383,14 +384,16 @@ def check_password():
 if not check_password(): st.stop()
 
 with st.sidebar:
-    st.title("Cloud SMT")
+    # [수정] 사이드바 로고 및 타이틀 변경
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=180)
+    st.title("CIMON SMT")
     u = st.session_state.user_info
     role_badge = "👑 Admin" if u["role"] == "admin" else "👤 User"
     st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
     menu = st.radio("업무 선택", ["📊 대시보드", "🏭 생산관리", "🛠 설비보전관리", "✅ 일일점검관리", "⚙ 기준정보관리"])
     st.divider()
     if st.button("로그아웃"): 
-        # [수정] 로그아웃 시 세션 및 URL 정보 모두 삭제
         st.session_state.logged_in = False
         try: st.query_params.clear()
         except: pass
@@ -488,8 +491,10 @@ with main_holder.container():
 
             with c2:
                 st.subheader("🍩 금일 생산 품목 비율")
-                # [NEW] 도넛 차트와 회사 이미지를 나란히 배치하기 위한 하위 컬럼
-                c2_chart, c2_img = st.columns([2, 1]) 
+                # [수정] 차트와 데이터 테이블을 나란히 배치 (이미지 대체)
+                c2_chart, c2_data = st.columns([1.5, 1]) 
+                
+                pie_data = pd.DataFrame()
                 
                 with c2_chart:
                     if not df_prod.empty:
@@ -500,10 +505,10 @@ with main_holder.container():
                                 theta=alt.Theta("수량", stack=True),
                                 color=alt.Color("구분", legend=None)
                             )
-                            pie = base.mark_arc(outerRadius=120, innerRadius=80).encode(
+                            pie = base.mark_arc(outerRadius=100, innerRadius=60).encode(
                                 tooltip=["구분", "수량"]
                             )
-                            text = base.mark_text(radius=140).encode(
+                            text = base.mark_text(radius=120).encode(
                                 text="구분",
                                 order=alt.Order("구분"),
                                 color=alt.value("black")  
@@ -514,9 +519,20 @@ with main_holder.container():
                     else:
                         st.info("데이터 없음")
                 
-                with c2_img:
-                    # [NEW] 회사 이미지 추가
-                    st.image("", caption="스마트 싸이몬 (Smart Symon)")
+                with c2_data:
+                    # [NEW] 회사명 및 데이터 테이블 표시
+                    st.markdown("##### 🏭 Smart Symon")
+                    if not pie_data.empty:
+                        total = pie_data['수량'].sum()
+                        pie_data['비중(%)'] = (pie_data['수량'] / total * 100).round(1)
+                        st.dataframe(
+                            pie_data.sort_values('수량', ascending=False), 
+                            column_order=("구분", "수량", "비중(%)"),
+                            hide_index=True, 
+                            use_container_width=True
+                        )
+                    else:
+                        st.caption("생산 데이터가 집계되지 않았습니다.")
 
             st.markdown("---")
             
