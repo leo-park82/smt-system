@@ -32,8 +32,8 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
-# [수정] 타이틀 CIMON SMT로 변경
-st.set_page_config(page_title="CIMON SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
+# [수정] 타이틀 SMT로 변경
+st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -363,10 +363,10 @@ def check_password():
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        # [수정] 로그인 화면 로고 및 타이틀 변경
+        # [수정] 로그인 화면 로고 크기 맞춤 (use_container_width=True) 및 타이틀 'SMT'로 변경
         if os.path.exists("logo.png"):
-            st.image("logo.png", width=200)
-        st.title("CIMON SMT")
+            st.image("logo.png", use_container_width=True)
+        st.title("SMT")
         with st.form("login"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
@@ -384,10 +384,10 @@ def check_password():
 if not check_password(): st.stop()
 
 with st.sidebar:
-    # [수정] 사이드바 로고 및 타이틀 변경
+    # [수정] 사이드바 로고 및 타이틀 'SMT'로 변경
     if os.path.exists("logo.png"):
         st.image("logo.png", width=180)
-    st.title("CIMON SMT")
+    st.title("SMT")
     u = st.session_state.user_info
     role_badge = "👑 Admin" if u["role"] == "admin" else "👤 User"
     st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
@@ -531,8 +531,7 @@ with main_holder.container():
                             hide_index=True, 
                             use_container_width=True
                         )
-                    else:
-                        st.caption("생산 데이터가 집계되지 않았습니다.")
+                    # 중복 메시지 삭제 (차트 쪽에 이미 표시됨)
 
             st.markdown("---")
             
