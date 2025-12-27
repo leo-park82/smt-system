@@ -575,9 +575,10 @@ with main_holder.container():
                     if not chart_data.empty:
                         chart_agg = chart_data.groupby(['날짜', '구분'])['수량'].sum().reset_index()
                         
+                        # [수정] 생산량 세로쓰기 타이틀 적용
                         chart = alt.Chart(chart_agg).mark_line(point=True).encode(
                             x=alt.X('날짜:T', axis=alt.Axis(format="%m-%d", labelAngle=0, title="날짜")),
-                            y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생산량")),
+                            y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                             color=alt.Color('구분', legend=alt.Legend(title="공정 구분")),
                             tooltip=['날짜', '구분', '수량']
                         ).properties(height=300)
@@ -591,7 +592,6 @@ with main_holder.container():
             with c2:
                 # [수정] 타이틀 변경
                 st.subheader("🏭 월간 생산 품목 비율 (Monthly)")
-                # [수정] 데이터 테이블 삭제하고 차트 영역 전체 사용
                 
                 if not df_prod.empty:
                     # [수정] 이번 달 데이터 필터링
@@ -611,19 +611,19 @@ with main_holder.container():
                         )
                         
                         # 도넛 차트 (크기 확대)
-                        pie = base.mark_arc(outerRadius=150, innerRadius=90).encode(
+                        pie = base.mark_arc(outerRadius=130, innerRadius=90).encode(
                             tooltip=["구분", "수량", "비율"]
                         )
                         
                         # 텍스트 라벨 (도넛 안쪽에 표시)
-                        text = base.mark_text(radius=120).encode(
+                        text = base.mark_text(radius=110).encode(
                             text="Label",
                             order=alt.Order("구분"),
                             color=alt.value("black") 
                         )
                         
                         # 차트 표시
-                        st.altair_chart((pie + text).properties(height=400), use_container_width=True)
+                        st.altair_chart((pie + text).properties(height=350), use_container_width=True)
                     else:
                         st.info("이번 달 생산 실적이 없습니다.")
                 else:
@@ -785,10 +785,10 @@ with main_holder.container():
                                 # Aggregate for chart
                                 chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
                                 
-                                # Stacked Bar Chart
+                                # Stacked Bar Chart with vertical title
                                 bar = alt.Chart(chart_data).mark_bar().encode(
                                     x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
-                                    y=alt.Y('수량:Q', axis=alt.Axis(title="생산량")),
+                                    y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                     color=alt.Color('구분', legend=alt.Legend(title="공정", orient="top")),
                                     tooltip=['날짜', '구분', '수량']
                                 ).properties(height=350)
@@ -914,9 +914,10 @@ with main_holder.container():
                 if not df.empty:
                     df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
                     if HAS_ALTAIR:
+                        # [수정] 비용 세로쓰기 타이틀 적용
                         c = alt.Chart(df).mark_bar().encode(
                             x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                            y=alt.Y('비용', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                            y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
                             color='작업구분'
                         ).interactive()
                         st.altair_chart(c, use_container_width=True)
