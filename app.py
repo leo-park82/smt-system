@@ -590,8 +590,8 @@ with main_holder.container():
                     st.info("생산 데이터가 없습니다.")
 
             with c2:
-                # [수정] 타이틀 변경
-                st.subheader("🏭 월간 생산 품목 비율 (Monthly)")
+                # [수정] 타이틀 변경 - (Monthly) 삭제
+                st.subheader("🏭 월간 생산 품목 비율")
                 
                 if not df_prod.empty:
                     # [수정] 이번 달 데이터 필터링
@@ -603,27 +603,31 @@ with main_holder.container():
                         # 비율 및 라벨 계산
                         total_q = pie_data['수량'].sum()
                         pie_data['비율'] = (pie_data['수량'] / total_q * 100).round(1)
+                        # [수정] 가독성을 위해 글씨가 잘리지 않도록 포맷 변경 (줄바꿈 제거 등 고려, 여기서는 한 줄로)
                         pie_data['Label'] = pie_data['수량'].astype(str) + " (" + pie_data['비율'].astype(str) + "%)"
                         
+                        # [수정] 글씨 겹침 방지: threshold 설정 (비중이 3% 이상인 경우만 라벨 표시)
+                        pie_data['DisplayLabel'] = pie_data.apply(lambda x: x['Label'] if x['비율'] > 3 else "", axis=1)
+
                         base = alt.Chart(pie_data).encode(
                             theta=alt.Theta("수량", stack=True),
                             color=alt.Color("구분", legend=alt.Legend(title="공정 구분", orient="bottom")) 
                         )
                         
                         # 도넛 차트 (크기 확대)
-                        pie = base.mark_arc(outerRadius=130, innerRadius=90).encode(
+                        pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(
                             tooltip=["구분", "수량", "비율"]
                         )
                         
-                        # 텍스트 라벨 (도넛 안쪽에 표시)
-                        text = base.mark_text(radius=110).encode(
-                            text="Label",
+                        # 텍스트 라벨 (도넛 바깥쪽에 표시하여 가독성 확보)
+                        text = base.mark_text(radius=140).encode(
+                            text="DisplayLabel",
                             order=alt.Order("구분"),
                             color=alt.value("black") 
                         )
                         
                         # 차트 표시
-                        st.altair_chart((pie + text).properties(height=350), use_container_width=True)
+                        st.altair_chart((pie + text).properties(height=400), use_container_width=True)
                     else:
                         st.info("이번 달 생산 실적이 없습니다.")
                 else:
@@ -788,7 +792,7 @@ with main_holder.container():
                                 # Stacked Bar Chart with vertical title
                                 bar = alt.Chart(chart_data).mark_bar().encode(
                                     x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
-                                    y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
+                                    y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                     color=alt.Color('구분', legend=alt.Legend(title="공정", orient="top")),
                                     tooltip=['날짜', '구분', '수량']
                                 ).properties(height=350)
