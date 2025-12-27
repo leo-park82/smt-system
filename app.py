@@ -344,8 +344,24 @@ USERS = {
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
 }
 def check_password():
-    if "logged_in" not in st.session_state: st.session_state.logged_in = False
+    # [수정] 세션 상태 초기화
+    if "logged_in" not in st.session_state: 
+        st.session_state.logged_in = False
+    
+    # [수정] 새로고침 시 로그인 유지를 위한 쿼리 파라미터 확인
+    if not st.session_state.logged_in:
+        try:
+            qp = st.query_params
+            if "session" in qp:
+                saved_id = qp["session"]
+                if saved_id in USERS:
+                    st.session_state.logged_in = True
+                    st.session_state.user_info = USERS[saved_id]
+                    st.session_state.user_info['id'] = saved_id
+        except: pass
+
     if st.session_state.logged_in: return True
+    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.title("SMT 통합 시스템")
@@ -357,6 +373,9 @@ def check_password():
                     st.session_state.logged_in = True
                     st.session_state.user_info = USERS[id]
                     st.session_state.user_info['id'] = id
+                    # [수정] 로그인 성공 시 URL에 세션 정보 저장
+                    try: st.query_params["session"] = id
+                    except: pass
                     st.rerun()
                 else: st.error("로그인 실패")
     return False
@@ -370,7 +389,12 @@ with st.sidebar:
     st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
     menu = st.radio("업무 선택", ["📊 대시보드", "🏭 생산관리", "🛠 설비보전관리", "✅ 일일점검관리", "⚙ 기준정보관리"])
     st.divider()
-    if st.button("로그아웃"): st.session_state.logged_in = False; st.rerun()
+    if st.button("로그아웃"): 
+        # [수정] 로그아웃 시 세션 및 URL 정보 모두 삭제
+        st.session_state.logged_in = False
+        try: st.query_params.clear()
+        except: pass
+        st.rerun()
 
 st.markdown(f'<div class="dashboard-header"><h3>{menu}</h3></div>', unsafe_allow_html=True)
 
