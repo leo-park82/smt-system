@@ -607,13 +607,6 @@ with main_holder.container():
                                 theta=alt.Theta("수량", stack=True),
                                 color=alt.Color("구분", legend=None)
                             )
-                            # [수정] 날짜 표시에서 시간(pm) 제거: format="%y-%m-%d"
-                            c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
-                                x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")), 
-                                y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0, title="수량"))
-                            ).interactive()
-                            st.altair_chart(c, use_container_width=True)
-                            
                             # 차트 크기 확대
                             pie = base.mark_arc(outerRadius=160, innerRadius=100).encode(
                                 tooltip=["구분", "수량"]
@@ -691,14 +684,8 @@ with main_holder.container():
                                 if c_name:
                                     rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
                                     if append_data(rec, SHEET_RECORDS):
-                                        # [수정] 배전은 재고 업데이트 제외, 후공정은 차감
-                                        if cat == "배전":
-                                            pass
-                                        elif cat in ["후공정", "후공정 외주"]:
-                                            update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
-                                        else:
-                                            update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
-                                        
+                                        if cat in ["후공정", "후공정 외주"] and auto_deduct: update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
+                                        else: update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                         st.session_state.code_in = ""; st.session_state.name_in = ""; st.session_state.prod_qty = 100
                                         st.toast("저장되었습니다.", icon="✅")
                                 else: st.toast("제품명을 입력하세요.", icon="⚠️")
