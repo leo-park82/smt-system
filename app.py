@@ -59,7 +59,7 @@ st.markdown("""
     }
     div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
 
-    /* [NEW] 일일점검 리스트 스타일 개선 */
+    /* 일일점검 리스트 스타일 개선 */
     .check-item-container { padding: 5px 0; }
     .check-item-title { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; letter-spacing: -0.5px; }
     .check-item-content { font-size: 0.95rem; color: #64748b; margin-bottom: 2px; line-height: 1.4; }
@@ -83,7 +83,7 @@ SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
 SHEET_CHECK_SIGNATURE = "daily_check_signature"
 
-# 컬럼 정의 (비고/장비점검 컬럼 추가)
+# 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_ITEMS = ["품목코드", "제품명"]
 COLS_INVENTORY = ["품목코드", "제품명", "현재고"]
@@ -192,7 +192,6 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
-    # [수정] 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -224,7 +223,6 @@ def generate_all_daily_check_pdf(date_str):
             df_r['timestamp'] = pd.to_datetime(df_r['timestamp'], errors='coerce')
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
             
-            # [NEW] 첫 페이지 표시용 점검자 이름 추출 (데이터가 있으면 첫번째 사람)
             checkers = df_r['checker'].unique()
             if len(checkers) > 0 and checkers[0]:
                 checker_name = checkers[0]
@@ -245,7 +243,7 @@ def generate_all_daily_check_pdf(date_str):
 
         lines = df_m['line'].unique()
         
-        first_page = True # 첫 페이지만 점검자 표시를 위한 플래그
+        first_page = True 
 
         for line in lines:
             pdf.add_page()
@@ -260,11 +258,10 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
             
-            # [NEW] 첫 페이지 상단에만 점검자 성명 출력
             if first_page and checker_name:
-                pdf.set_xy(10, 12) # 날짜 아래 위치
+                pdf.set_xy(10, 12) 
                 pdf.cell(0, 15, f"Checker: {checker_name}", 0, 0, 'R')
-                first_page = False # 이후 페이지에는 출력 안함
+                first_page = False 
 
             pdf.ln(25)
             
@@ -356,7 +353,6 @@ def generate_all_daily_check_pdf(date_str):
     except Exception as e:
         return None
 
-# [NEW] 생산 일일 보고서 PDF 생성 함수
 def generate_production_report_pdf(df_prod, date_str):
     try:
         font_filename = 'NanumGothic.ttf'
@@ -437,7 +433,6 @@ def generate_production_report_pdf(df_prod, date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
-    # [수정] 사용자 이름 변경 (박종선, 김윤석)
     "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
     "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
@@ -513,11 +508,8 @@ with main_holder.container():
             today = datetime.now()
             today_str = today.strftime("%Y-%m-%d")
             yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-            
-            # [수정] 이번 달 1일 날짜 구하기 (월간 집계용)
             this_month_start = today.replace(day=1)
             
-            # 1. 생산량 KPI
             prod_today_val = 0
             prod_yesterday_val = 0
             
@@ -530,7 +522,6 @@ with main_holder.container():
             
             delta_prod = prod_today_val - prod_yesterday_val
             
-            # 2. 품질 KPI
             check_today_cnt = 0
             ng_today_cnt = 0
             ng_rate = 0.0
@@ -547,23 +538,17 @@ with main_holder.container():
                     if check_today_cnt > 0:
                         ng_rate = (ng_today_cnt / check_today_cnt) * 100
 
-            # 3. 보전 KPI
             maint_today_cnt = 0
             if not df_maint.empty:
                 maint_today_cnt = len(df_maint[df_maint['날짜'].astype(str) == today_str])
 
-            # KPI 카드 재배치 및 통합
             col1, col2, col3 = st.columns(3)
-            # 1. 오늘 생산량
             col1.metric("오늘 생산량", f"{prod_today_val:,.0f} EA", f"{delta_prod:,.0f} (전일비)")
-            # 2. 금일 설비 정비
             col2.metric("금일 설비 정비", f"{maint_today_cnt} 건", "특이사항 없음" if maint_today_cnt == 0 else "확인 필요", delta_color="inverse")
-            # 3. 일일점검 (완료/NG 통합)
             col3.metric("일일점검 (완료/NG)", f"{check_today_cnt} 건 / {ng_today_cnt} 건", f"불량률: {ng_rate:.1f}%", delta_color="inverse")
 
             st.markdown("---")
 
-            # 차트 및 상세 분석 섹션
             c1, c2 = st.columns([2, 1])
 
             with c1:
@@ -590,23 +575,17 @@ with main_holder.container():
                     st.info("생산 데이터가 없습니다.")
 
             with c2:
-                # [수정] 타이틀 변경 - (Monthly) 삭제
                 st.subheader("🏭 월간 생산 품목 비율")
                 
                 if not df_prod.empty:
-                    # [수정] 이번 달 데이터 필터링
                     df_month_prod = df_prod[(df_prod['날짜'] >= this_month_start) & (df_prod['날짜'] <= today)]
                     
                     if not df_month_prod.empty:
                         pie_data = df_month_prod.groupby('구분')['수량'].sum().reset_index()
                         
-                        # 비율 및 라벨 계산
                         total_q = pie_data['수량'].sum()
                         pie_data['비율'] = (pie_data['수량'] / total_q * 100).round(1)
-                        # [수정] 가독성을 위해 글씨가 잘리지 않도록 포맷 변경 (줄바꿈 제거 등 고려, 여기서는 한 줄로)
                         pie_data['Label'] = pie_data['수량'].astype(str) + " (" + pie_data['비율'].astype(str) + "%)"
-                        
-                        # [수정] 글씨 겹침 방지: threshold 설정 (비중이 3% 이상인 경우만 라벨 표시)
                         pie_data['DisplayLabel'] = pie_data.apply(lambda x: x['Label'] if x['비율'] > 3 else "", axis=1)
 
                         base = alt.Chart(pie_data).encode(
@@ -614,19 +593,16 @@ with main_holder.container():
                             color=alt.Color("구분", legend=alt.Legend(title="공정 구분", orient="bottom")) 
                         )
                         
-                        # 도넛 차트 (크기 확대)
                         pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(
                             tooltip=["구분", "수량", "비율"]
                         )
                         
-                        # 텍스트 라벨 (도넛 바깥쪽에 표시하여 가독성 확보)
                         text = base.mark_text(radius=140).encode(
                             text="DisplayLabel",
                             order=alt.Order("구분"),
                             color=alt.value("black") 
                         )
                         
-                        # 차트 표시
                         st.altair_chart((pie + text).properties(height=400), use_container_width=True)
                     else:
                         st.info("이번 달 생산 실적이 없습니다.")
@@ -693,9 +669,7 @@ with main_holder.container():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
-                        # [NEW] 삭제 기능을 위한 Data Editor 적용
                         df_display = df.sort_values("입력시간", ascending=False).head(50)
-                        # 체크박스 컬럼 추가
                         df_display.insert(0, "삭제", False)
                         
                         edited_df = st.data_editor(
@@ -703,20 +677,17 @@ with main_holder.container():
                             hide_index=True, 
                             use_container_width=True,
                             column_config={"삭제": st.column_config.CheckboxColumn(required=True)},
-                            disabled=COLS_RECORDS, # 다른 컬럼은 수정 불가
+                            disabled=COLS_RECORDS, 
                             key="recent_records_editor"
                         )
                         
                         if st.button("선택 항목 삭제", type="secondary"):
-                            # 삭제 체크된 항목 식별
                             to_delete = edited_df[edited_df["삭제"] == True]
                             if not to_delete.empty:
                                 try:
                                     ws = get_worksheet(SHEET_RECORDS)
                                     all_records = get_as_dataframe(ws)
-                                    # 입력시간을 기준으로 삭제 (고유 키 역할)
                                     for t in to_delete['입력시간']:
-                                        # 날짜 포맷 이슈 방지를 위해 문자열 변환 비교
                                         idx_to_drop = all_records[all_records['입력시간'].astype(str) == str(t)].index
                                         all_records = all_records.drop(idx_to_drop)
                                     
@@ -730,7 +701,6 @@ with main_holder.container():
                                 st.info("삭제할 항목을 선택해주세요.")
             with t2:
                 df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
-                # [수정] 0인 항목은 이미 update_inventory에서 삭제되지만 표시할 때도 필터링
                 if not df_inv.empty:
                     df_inv = df_inv[df_inv['현재고'] != 0]
                 st.dataframe(df_inv, use_container_width=True)
@@ -739,93 +709,88 @@ with main_holder.container():
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
                 
                 if not df.empty:
-                    # Data Preprocessing
                     df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-                    df = df.dropna(subset=['날짜']) # Drop invalid dates
-
-                    # Date Filter
-                    min_date = df['날짜'].min().date()
-                    max_date = df['날짜'].max().date()
+                    df = df.dropna(subset=['날짜']) 
                     
-                    c_filter1, c_filter2 = st.columns([1, 1])
-                    with c_filter1:
-                        date_range = st.date_input(
-                            "분석 기간 선택",
-                            value=(max_date - timedelta(days=29), max_date),
-                            min_value=min_date,
-                            max_value=max_date
-                        )
-                    
-                    # Filtering Logic
-                    if isinstance(date_range, tuple) and len(date_range) == 2:
-                        start_date, end_date = date_range
-                        mask = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
-                        df_filtered = df[mask]
+                    if df.empty:
+                        st.info("유효한 날짜 데이터가 없습니다.")
                     else:
-                        st.warning("종료 날짜를 선택해주세요.")
-                        df_filtered = df.copy() # Fallback
-
-                    if not df_filtered.empty:
-                        # 1. KPI Metrics
-                        total_qty = df_filtered['수량'].sum()
-                        daily_avg = total_qty / len(df_filtered['날짜'].unique()) if len(df_filtered['날짜'].unique()) > 0 else 0
-                        top_cat = df_filtered.groupby('구분')['수량'].sum().idxmax() if not df_filtered.empty else "-"
+                        min_date = df['날짜'].min().date()
+                        max_date = df['날짜'].max().date()
                         
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("총 생산량", f"{total_qty:,.0f} EA")
-                        m2.metric("일일 평균", f"{daily_avg:,.0f} EA")
-                        m3.metric("최다 생산 공정", top_cat)
-                        m4.metric("가동 일수", f"{len(df_filtered['날짜'].unique())} 일")
+                        c_filter1, c_filter2 = st.columns([1, 1])
+                        with c_filter1:
+                            date_range = st.date_input(
+                                "분석 기간 선택",
+                                value=(max_date - timedelta(days=29), max_date),
+                                min_value=min_date,
+                                max_value=max_date
+                            )
                         
-                        st.divider()
+                        if isinstance(date_range, tuple) and len(date_range) == 2:
+                            start_date, end_date = date_range
+                            mask = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
+                            df_filtered = df[mask]
+                        else:
+                            st.warning("종료 날짜를 선택해주세요.")
+                            df_filtered = df.copy()
 
-                        # 2. Advanced Charts
-                        col_chart1, col_chart2 = st.columns([2, 1])
-                        
-                        with col_chart1:
-                            st.markdown("##### 📅 일별/공정별 생산 추이")
-                            if HAS_ALTAIR:
-                                # Aggregate for chart
-                                chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
-                                
-                                # Stacked Bar Chart with vertical title
-                                bar = alt.Chart(chart_data).mark_bar().encode(
-                                    x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
-                                    y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
-                                    color=alt.Color('구분', legend=alt.Legend(title="공정", orient="top")),
-                                    tooltip=['날짜', '구분', '수량']
-                                ).properties(height=350)
-                                
-                                st.altair_chart(bar, use_container_width=True)
+                        if not df_filtered.empty:
+                            total_qty = df_filtered['수량'].sum()
+                            daily_avg = total_qty / len(df_filtered['날짜'].unique()) if len(df_filtered['날짜'].unique()) > 0 else 0
+                            top_cat = df_filtered.groupby('구분')['수량'].sum().idxmax() if not df_filtered.empty else "-"
+                            
+                            m1, m2, m3, m4 = st.columns(4)
+                            m1.metric("총 생산량", f"{total_qty:,.0f} EA")
+                            m2.metric("일일 평균", f"{daily_avg:,.0f} EA")
+                            m3.metric("최다 생산 공정", top_cat)
+                            m4.metric("가동 일수", f"{len(df_filtered['날짜'].unique())} 일")
+                            
+                            st.divider()
 
-                        with col_chart2:
-                            st.markdown("##### 🥧 기간 내 공정 점유율")
-                            if HAS_ALTAIR:
-                                pie_data = df_filtered.groupby('구분')['수량'].sum().reset_index()
-                                
-                                base = alt.Chart(pie_data).encode(
-                                    theta=alt.Theta("수량", stack=True),
-                                    color=alt.Color("구분", legend=None)
-                                )
-                                pie = base.mark_arc(outerRadius=120, innerRadius=0).encode( # Full Pie for variety
-                                    tooltip=["구분", "수량"]
-                                )
-                                text = base.mark_text(radius=140).encode(
-                                    text=alt.Text("수량", format=",.0f"),
-                                    order=alt.Order("구분"),
-                                    color=alt.value("black")
-                                )
-                                st.altair_chart(pie + text, use_container_width=True)
-                                
-                                # Simple legend table below pie
-                                st.dataframe(
-                                    pie_data.sort_values('수량', ascending=False).assign(비중=lambda x: (x['수량']/x['수량'].sum()*100).round(1).astype(str)+'%'),
-                                    hide_index=True,
-                                    use_container_width=True
-                                )
-                    else:
-                        st.info("선택한 기간에 데이터가 없습니다.")
+                            col_chart1, col_chart2 = st.columns([2, 1])
+                            
+                            with col_chart1:
+                                st.markdown("##### 📅 일별/공정별 생산 추이")
+                                if HAS_ALTAIR:
+                                    chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
+                                    
+                                    bar = alt.Chart(chart_data).mark_bar().encode(
+                                        x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
+                                        y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
+                                        color=alt.Color('구분', legend=alt.Legend(title="공정", orient="top")),
+                                        tooltip=['날짜', '구분', '수량']
+                                    ).properties(height=350)
+                                    
+                                    st.altair_chart(bar, use_container_width=True)
+
+                            with col_chart2:
+                                st.markdown("##### 🥧 기간 내 공정 점유율")
+                                if HAS_ALTAIR:
+                                    pie_data = df_filtered.groupby('구분')['수량'].sum().reset_index()
+                                    
+                                    base = alt.Chart(pie_data).encode(
+                                        theta=alt.Theta("수량", stack=True),
+                                        color=alt.Color("구분", legend=None)
+                                    )
+                                    pie = base.mark_arc(outerRadius=120, innerRadius=0).encode( 
+                                        tooltip=["구분", "수량"]
+                                    )
+                                    text = base.mark_text(radius=140).encode(
+                                        text=alt.Text("수량", format=",.0f"),
+                                        order=alt.Order("구분"),
+                                        color=alt.value("black")
+                                    )
+                                    st.altair_chart(pie + text, use_container_width=True)
+                                    
+                                    st.dataframe(
+                                        pie_data.sort_values('수량', ascending=False).assign(비중=lambda x: (x['수량']/x['수량'].sum()*100).round(1).astype(str)+'%'),
+                                        hide_index=True,
+                                        use_container_width=True
+                                    )
+                        else:
+                            st.info("선택한 기간에 데이터가 없습니다.")
 
                 else:
                     st.info("생산 데이터가 없습니다.")
@@ -835,13 +800,11 @@ with main_holder.container():
                 c_rep1, c_rep2 = st.columns([1, 2])
                 report_date = c_rep1.date_input("보고서 날짜", datetime.now())
                 
-                # [NEW] PDF 생성 버튼 추가
                 if c_rep2.button("📄 PDF 다운로드"):
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
                         df['날짜'] = pd.to_datetime(df['날짜']).dt.date
                         daily_df = df[df['날짜'] == report_date].copy()
-                        # 외주 제외 필터링 (기존 로직 유지)
                         daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
                         
                         if not daily_df.empty:
