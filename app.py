@@ -184,12 +184,17 @@ def update_inventory(code, name, change, reason, user):
     df = load_data(SHEET_INVENTORY, COLS_INVENTORY)
     if not df.empty:
         df['현재고'] = pd.to_numeric(df['현재고'], errors='coerce').fillna(0).astype(int)
+    
     if not df.empty and code in df['품목코드'].values:
         idx = df[df['품목코드'] == code].index[0]
         df.at[idx, '현재고'] = df.at[idx, '현재고'] + change
     else:
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
+    
+    # [수정] 현재고가 0인 항목 자동 삭제
+    df = df[df['현재고'] != 0]
+    
     save_data(df, SHEET_INVENTORY)
     hist = {"날짜": datetime.now().strftime("%Y-%m-%d"), "품목코드": code, "구분": "입고" if change > 0 else "출고", "수량": change, "비고": reason, "작성자": user, "입력시간": str(datetime.now())}
     append_data(hist, SHEET_INV_HISTORY)
@@ -351,6 +356,82 @@ def generate_all_daily_check_pdf(date_str):
     except Exception as e:
         return None
 
+# [NEW] 생산 일일 보고서 PDF 생성 함수
+def generate_production_report_pdf(df_prod, date_str):
+    try:
+        font_filename = 'NanumGothic.ttf'
+        if not os.path.exists(font_filename):
+            try:
+                url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+                urllib.request.urlretrieve(url, font_filename)
+            except: pass
+
+        pdf = FPDF()
+        font_name = 'Arial'
+        try:
+            pdf.add_font('Korean', '', font_filename, uni=True)
+            font_name = 'Korean'
+        except: pass
+        
+        pdf.add_page()
+        
+        # Header
+        pdf.set_fill_color(50, 50, 50) 
+        pdf.rect(0, 0, 210, 25, 'F')
+        pdf.set_font(font_name, '', 20)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(10, 5)
+        pdf.cell(0, 15, "Production Daily Report", 0, 0, 'L')
+        pdf.set_font(font_name, '', 10)
+        pdf.set_xy(10, 5)
+        pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
+        pdf.ln(25)
+        
+        # Table Header
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.set_font(font_name, '', 10)
+        
+        headers = ["구분", "품목코드", "제품명", "수량", "작성자"]
+        widths = [25, 35, 80, 25, 25]
+        
+        for i, h in enumerate(headers):
+            pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
+        pdf.ln()
+        
+        # Body
+        fill = False
+        pdf.set_fill_color(250, 250, 250)
+        
+        total_qty = 0
+        for _, row in df_prod.iterrows():
+            pdf.cell(widths[0], 8, str(row['구분']), 1, 0, 'C', fill)
+            pdf.cell(widths[1], 8, str(row['품목코드']), 1, 0, 'C', fill)
+            
+            p_name = str(row['제품명'])
+            if len(p_name) > 25: p_name = p_name[:24] + ".."
+            pdf.cell(widths[2], 8, p_name, 1, 0, 'L', fill)
+            
+            qty = int(float(str(row['수량']).replace(',','')))
+            total_qty += qty
+            pdf.cell(widths[3], 8, f"{qty:,}", 1, 0, 'R', fill)
+            pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
+            
+            fill = not fill
+            
+        # Total
+        pdf.ln(2)
+        pdf.set_font(font_name, '', 12)
+        pdf.cell(0, 10, f"Total Quantity: {total_qty:,} EA", 0, 1, 'R')
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            pdf.output(tmp_file.name)
+            with open(tmp_file.name, "rb") as f:
+                pdf_bytes = f.read()
+        os.unlink(tmp_file.name)
+        return pdf_bytes
+    except: return None
+
 # ------------------------------------------------------------------
 # 4. 사용자 인증
 # ------------------------------------------------------------------
@@ -378,10 +459,8 @@ def check_password():
 
     if st.session_state.logged_in: return True
     
-    # [수정] 로그인 컬럼 비율 조정하여 창과 로고 작게 만들기
     col1, col2, col3 = st.columns([5, 2, 5])
     with col2:
-        # [수정] 로그인 화면 로고 크기 맞춤 (use_container_width=True) 및 타이틀 'SMT'로 변경
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         st.title("SMT")
@@ -402,7 +481,6 @@ def check_password():
 if not check_password(): st.stop()
 
 with st.sidebar:
-    # [수정] 사이드바 로고 및 타이틀 'SMT'로 변경
     if os.path.exists("logo.png"):
         st.image("logo.png", width=180)
     st.title("SMT")
@@ -435,6 +513,9 @@ with main_holder.container():
             today = datetime.now()
             today_str = today.strftime("%Y-%m-%d")
             yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+            
+            # [수정] 이번 달 1일 날짜 구하기 (월간 집계용)
+            this_month_start = today.replace(day=1)
             
             # 1. 생산량 KPI
             prod_today_val = 0
@@ -508,40 +589,41 @@ with main_holder.container():
                     st.info("생산 데이터가 없습니다.")
 
             with c2:
-                # [수정] 아이콘 변경 🍩 -> 🏭
-                st.subheader("🏭 금일 생산 품목 비율")
-                # 차트와 데이터 테이블을 나란히 배치
+                # [수정] 타이틀 변경
+                st.subheader("🏭 월간 생산 품목 비율 (Monthly)")
+                # 차트와 데이터 테이블을 나란히 배치 (비율 조정 2:1)
                 c2_chart, c2_data = st.columns([2, 1]) 
                 
                 pie_data = pd.DataFrame()
                 
                 with c2_chart:
                     if not df_prod.empty:
-                        df_today_prod = df_prod[df_prod['날짜'].dt.strftime("%Y-%m-%d") == today_str]
-                        if not df_today_prod.empty:
-                            pie_data = df_today_prod.groupby('구분')['수량'].sum().reset_index()
+                        # [수정] 이번 달 데이터 필터링
+                        df_month_prod = df_prod[(df_prod['날짜'] >= this_month_start) & (df_prod['날짜'] <= today)]
+                        
+                        if not df_month_prod.empty:
+                            pie_data = df_month_prod.groupby('구분')['수량'].sum().reset_index()
                             base = alt.Chart(pie_data).encode(
                                 theta=alt.Theta("수량", stack=True),
                                 color=alt.Color("구분", legend=None)
                             )
-                            # [수정] 차트 크기 확대
-                            pie = base.mark_arc(outerRadius=130, innerRadius=100).encode(
+                            # 차트 크기 확대
+                            pie = base.mark_arc(outerRadius=160, innerRadius=100).encode(
                                 tooltip=["구분", "수량"]
                             )
-                            text = base.mark_text(radius=160).encode(
+                            text = base.mark_text(radius=185).encode(
                                 text="구분",
                                 order=alt.Order("구분"),
                                 color=alt.value("black")  
                             )
                             st.altair_chart(pie + text, use_container_width=True)
                         else:
-                            st.info("오늘 생산 실적이 없습니다.")
+                            st.info("이번 달 생산 실적이 없습니다.")
                     else:
                         st.info("데이터 없음")
                 
                 with c2_data:
-                    # [수정] 🏭 Smart Symon 텍스트 삭제 (공백)
-                    
+                    # [수정] 🏭 Smart Symon 텍스트 삭제
                     if not pie_data.empty:
                         total = pie_data['수량'].sum()
                         pie_data['비중(%)'] = (pie_data['수량'] / total * 100).round(1)
@@ -602,8 +684,14 @@ with main_holder.container():
                                 if c_name:
                                     rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
                                     if append_data(rec, SHEET_RECORDS):
-                                        if cat in ["후공정", "후공정 외주"] and auto_deduct: update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
-                                        else: update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
+                                        # [수정] 배전은 재고 업데이트 제외, 후공정은 차감
+                                        if cat == "배전":
+                                            pass
+                                        elif cat in ["후공정", "후공정 외주"]:
+                                            update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
+                                        else:
+                                            update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
+                                        
                                         st.session_state.code_in = ""; st.session_state.name_in = ""; st.session_state.prod_qty = 100
                                         st.toast("저장되었습니다.", icon="✅")
                                 else: st.toast("제품명을 입력하세요.", icon="⚠️")
@@ -613,10 +701,46 @@ with main_holder.container():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
-                        df = df.sort_values("입력시간", ascending=False).head(50)
-                        st.dataframe(df, use_container_width=True, hide_index=True)
+                        # [NEW] 삭제 기능을 위한 Data Editor 적용
+                        df_display = df.sort_values("입력시간", ascending=False).head(50)
+                        # 체크박스 컬럼 추가
+                        df_display.insert(0, "삭제", False)
+                        
+                        edited_df = st.data_editor(
+                            df_display, 
+                            hide_index=True, 
+                            use_container_width=True,
+                            column_config={"삭제": st.column_config.CheckboxColumn(required=True)},
+                            disabled=COLS_RECORDS, # 다른 컬럼은 수정 불가
+                            key="recent_records_editor"
+                        )
+                        
+                        if st.button("선택 항목 삭제", type="secondary"):
+                            # 삭제 체크된 항목 식별
+                            to_delete = edited_df[edited_df["삭제"] == True]
+                            if not to_delete.empty:
+                                try:
+                                    ws = get_worksheet(SHEET_RECORDS)
+                                    all_records = get_as_dataframe(ws)
+                                    # 입력시간을 기준으로 삭제 (고유 키 역할)
+                                    for t in to_delete['입력시간']:
+                                        # 날짜 포맷 이슈 방지를 위해 문자열 변환 비교
+                                        idx_to_drop = all_records[all_records['입력시간'].astype(str) == str(t)].index
+                                        all_records = all_records.drop(idx_to_drop)
+                                    
+                                    save_data(all_records, SHEET_RECORDS)
+                                    st.success(f"{len(to_delete)}건 삭제 완료")
+                                    time.sleep(1)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"삭제 중 오류 발생: {e}")
+                            else:
+                                st.info("삭제할 항목을 선택해주세요.")
             with t2:
                 df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
+                # [수정] 0인 항목은 이미 update_inventory에서 삭제되지만 표시할 때도 필터링
+                if not df_inv.empty:
+                    df_inv = df_inv[df_inv['현재고'] != 0]
                 st.dataframe(df_inv, use_container_width=True)
             with t3:
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
@@ -630,7 +754,35 @@ with main_holder.container():
                     st.altair_chart(c, use_container_width=True)
             with t4:
                 st.markdown("#### 📑 SMT 일일 생산현황 (PDF)")
-                report_date = st.date_input("보고서 날짜", datetime.now())
+                
+                c_rep1, c_rep2 = st.columns([1, 2])
+                report_date = c_rep1.date_input("보고서 날짜", datetime.now())
+                
+                # [NEW] PDF 생성 버튼 추가
+                if c_rep2.button("📄 PDF 다운로드"):
+                    df = load_data(SHEET_RECORDS, COLS_RECORDS)
+                    if not df.empty:
+                        df['날짜'] = pd.to_datetime(df['날짜']).dt.date
+                        daily_df = df[df['날짜'] == report_date].copy()
+                        # 외주 제외 필터링 (기존 로직 유지)
+                        daily_df = daily_df[~daily_df['구분'].astype(str).str.contains("외주")]
+                        
+                        if not daily_df.empty:
+                            pdf_bytes = generate_production_report_pdf(daily_df, str(report_date))
+                            if pdf_bytes:
+                                st.download_button(
+                                    label="PDF 파일 받기",
+                                    data=pdf_bytes,
+                                    file_name=f"Production_Report_{report_date}.pdf",
+                                    mime='application/pdf'
+                                )
+                            else:
+                                st.error("PDF 생성 실패")
+                        else:
+                            st.warning("해당 날짜에 생산 실적이 없습니다.")
+                    else:
+                        st.warning("데이터가 없습니다.")
+
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
                 if not df.empty:
                     df['날짜'] = pd.to_datetime(df['날짜']).dt.date
