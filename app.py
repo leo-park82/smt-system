@@ -59,7 +59,7 @@ st.markdown("""
     }
     div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
 
-    /* [NEW] 일일점검 리스트 스타일 개선 */
+    /* 일일점검 리스트 스타일 개선 */
     .check-item-container { padding: 5px 0; }
     .check-item-title { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; letter-spacing: -0.5px; }
     .check-item-content { font-size: 0.95rem; color: #64748b; margin-bottom: 2px; line-height: 1.4; }
@@ -83,7 +83,7 @@ SHEET_CHECK_MASTER = "daily_check_master"
 SHEET_CHECK_RESULT = "daily_check_result"
 SHEET_CHECK_SIGNATURE = "daily_check_signature"
 
-# 컬럼 정의 (비고/장비점검 컬럼 추가)
+# 컬럼 정의
 COLS_RECORDS = ["날짜", "구분", "품목코드", "제품명", "수량", "입력시간", "작성자", "수정자", "수정시간"]
 COLS_ITEMS = ["품목코드", "제품명"]
 COLS_INVENTORY = ["품목코드", "제품명", "현재고"]
@@ -192,7 +192,6 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
-    # [수정] 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -224,7 +223,6 @@ def generate_all_daily_check_pdf(date_str):
             df_r['timestamp'] = pd.to_datetime(df_r['timestamp'], errors='coerce')
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
             
-            # [NEW] 첫 페이지 표시용 점검자 이름 추출 (데이터가 있으면 첫번째 사람)
             checkers = df_r['checker'].unique()
             if len(checkers) > 0 and checkers[0]:
                 checker_name = checkers[0]
@@ -244,8 +242,7 @@ def generate_all_daily_check_pdf(date_str):
         except: pass
 
         lines = df_m['line'].unique()
-        
-        first_page = True # 첫 페이지만 점검자 표시를 위한 플래그
+        first_page = True 
 
         for line in lines:
             pdf.add_page()
@@ -260,11 +257,10 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
             
-            # [NEW] 첫 페이지 상단에만 점검자 성명 출력
             if first_page and checker_name:
-                pdf.set_xy(10, 12) # 날짜 아래 위치
+                pdf.set_xy(10, 12) 
                 pdf.cell(0, 15, f"Checker: {checker_name}", 0, 0, 'R')
-                first_page = False # 이후 페이지에는 출력 안함
+                first_page = False 
 
             pdf.ln(25)
             
@@ -356,7 +352,6 @@ def generate_all_daily_check_pdf(date_str):
     except Exception as e:
         return None
 
-# [NEW] 생산 일일 보고서 PDF 생성 함수
 def generate_production_report_pdf(df_prod, date_str):
     try:
         font_filename = 'NanumGothic.ttf'
@@ -437,7 +432,6 @@ def generate_production_report_pdf(df_prod, date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
-    # [수정] 사용자 이름 변경 (박종선, 김윤석)
     "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
     "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
@@ -590,7 +584,7 @@ with main_holder.container():
                     st.info("생산 데이터가 없습니다.")
 
             with c2:
-                # [수정] 타이틀 변경 - (Monthly) 삭제
+                # [수정] 타이틀 변경
                 st.subheader("🏭 월간 생산 품목 비율")
                 
                 if not df_prod.empty:
@@ -698,6 +692,7 @@ with main_holder.container():
                     if not df.empty:
                         df_display = df.sort_values("입력시간", ascending=False).head(50)
                         df_display.insert(0, "삭제", False)
+                        
                         edited_df = st.data_editor(
                             df_display, 
                             hide_index=True, 
@@ -706,6 +701,7 @@ with main_holder.container():
                             disabled=COLS_RECORDS, 
                             key="recent_records_editor"
                         )
+                        
                         if st.button("선택 항목 삭제", type="secondary"):
                             to_delete = edited_df[edited_df["삭제"] == True]
                             if not to_delete.empty:
@@ -715,6 +711,7 @@ with main_holder.container():
                                     for t in to_delete['입력시간']:
                                         idx_to_drop = all_records[all_records['입력시간'].astype(str) == str(t)].index
                                         all_records = all_records.drop(idx_to_drop)
+                                    
                                     save_data(all_records, SHEET_RECORDS)
                                     st.success(f"{len(to_delete)}건 삭제 완료")
                                     time.sleep(1)
@@ -725,14 +722,50 @@ with main_holder.container():
                                 st.info("삭제할 항목을 선택해주세요.")
 
             with t2:
-                # ... (재고 현황)
+                # [수정] 재고 현황 삭제 기능 추가 (data_editor 사용)
                 df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
                 if not df_inv.empty:
-                    df_inv = df_inv[df_inv['현재고'] != 0]
-                st.dataframe(df_inv, use_container_width=True)
+                    df_inv = df_inv[df_inv['현재고'] != 0] # 0인 항목 제외
+
+                    # 삭제용 체크박스 컬럼 추가
+                    df_inv.insert(0, "삭제", False)
+
+                    # Data Editor로 표시
+                    edited_inv = st.data_editor(
+                        df_inv,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={"삭제": st.column_config.CheckboxColumn(required=True)},
+                        disabled=COLS_INVENTORY, # 기존 데이터 수정 방지 (삭제만 허용)
+                        key="inventory_editor"
+                    )
+
+                    # 삭제 버튼
+                    if st.button("선택 항목 삭제", type="primary", key="delete_inv_btn"):
+                        to_delete = edited_inv[edited_inv["삭제"] == True]
+                        if not to_delete.empty:
+                            try:
+                                ws = get_worksheet(SHEET_INVENTORY)
+                                all_inv = get_as_dataframe(ws)
+                                
+                                # 품목코드를 기준으로 삭제
+                                for code in to_delete['품목코드']:
+                                    # 품목코드가 일치하는 행 인덱스 찾기
+                                    idx_to_drop = all_inv[all_inv['품목코드'] == code].index
+                                    all_inv = all_inv.drop(idx_to_drop)
+                                
+                                save_data(all_inv, SHEET_INVENTORY)
+                                st.success(f"{len(to_delete)}개 품목 삭제 완료")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"삭제 중 오류 발생: {e}")
+                        else:
+                            st.info("삭제할 항목을 선택해주세요.")
+                else:
+                    st.info("재고 데이터가 없습니다.")
 
             with t3:
-                # [수정] 스마트 생산 분석 에러 방어 로직 강화
                 st.markdown("#### 📊 스마트 생산 분석")
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
                 
@@ -862,8 +895,8 @@ with main_holder.container():
     elif menu == "🛠 설비보전관리":
         try:
             t1, t2, t3 = st.tabs(["📝 정비 이력 등록", "📋 이력 조회", "📊 분석 및 리포트"])
-            # ... (설비보전관리 기존 코드 유지)
             with t1:
+                # ... (이전 코드 동일)
                 c1, c2 = st.columns([1, 1.5])
                 with c1:
                     if st.session_state.user_info['role'] in ['admin', 'editor']:
@@ -902,24 +935,70 @@ with main_holder.container():
             with t2:
                 df_hist = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 st.dataframe(df_hist, use_container_width=True)
+
             with t3:
-                st.markdown("#### 📊 설비 고장 분석")
+                # [수정] 설비 보전관리 분석 대시보드화
+                st.markdown("#### 📊 설비 보전 분석")
                 df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 if not df.empty:
+                    # 데이터 전처리
                     df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
+                    df['비가동시간'] = pd.to_numeric(df['비가동시간'], errors='coerce').fillna(0)
+                    
+                    # KPI Cards
+                    total_cost = df['비용'].sum()
+                    total_downtime = df['비가동시간'].sum()
+                    count_maint = len(df)
+                    top_type = df['작업구분'].mode()[0] if not df.empty else "-"
+
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("총 소요 비용", f"{total_cost:,.0f} 원")
+                    k2.metric("총 비가동 시간", f"{total_downtime} 분")
+                    k3.metric("총 정비 건수", f"{count_maint} 건")
+                    k4.metric("주요 정비 유형", top_type)
+
+                    st.divider()
+
+                    # Charts
                     if HAS_ALTAIR:
-                        c = alt.Chart(df).mark_bar().encode(
-                            x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                            y=alt.Y('비용', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                            color='작업구분'
-                        ).interactive()
-                        st.altair_chart(c, use_container_width=True)
+                        chart_col1, chart_col2 = st.columns(2)
+                        
+                        with chart_col1:
+                            st.markdown("##### 🥧 정비 유형별 비율")
+                            # Pie chart for Maintenance Type
+                            base = alt.Chart(df).encode(
+                                theta=alt.Theta("count()", stack=True),
+                                color=alt.Color("작업구분")
+                            )
+                            pie = base.mark_arc(outerRadius=120).encode(
+                                tooltip=["작업구분", "count()"]
+                            )
+                            text = base.mark_text(radius=140).encode(
+                                text=alt.Text("count()"),
+                                order=alt.Order("작업구분"),
+                                color=alt.value("black")
+                            )
+                            st.altair_chart(pie + text, use_container_width=True)
+
+                        with chart_col2:
+                            st.markdown("##### 💸 설비별 유지보수 비용")
+                            # Bar chart for Cost by Equipment
+                            bar = alt.Chart(df).mark_bar().encode(
+                                x=alt.X('설비명', axis=alt.Axis(labelAngle=0)), # Horizontal labels
+                                y=alt.Y('sum(비용)', axis=alt.Axis(title="비\n용", titleAngle=0, titlePadding=20)),
+                                color='설비명',
+                                tooltip=['설비명', 'sum(비용)']
+                            ).interactive()
+                            st.altair_chart(bar, use_container_width=True)
+                else:
+                    st.info("정비 데이터가 없습니다.")
+
         except: st.error("보전관리 페이지 오류")
 
     elif menu == "✅ 일일점검관리":
         try:
             tab1, tab2, tab3 = st.tabs(["✍ 점검 입력 (Native)", "📊 점검 현황", "📄 점검 이력 / PDF"])
-            # ... (일일점검관리 기존 코드 유지 - 스크롤, 탭 분리 등 반영됨)
+            # ... (일일점검관리 기존 코드 유지)
             with tab1:
                 if st.session_state.get('scroll_to_top'):
                     components.html(
