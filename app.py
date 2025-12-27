@@ -525,10 +525,10 @@ with main_holder.container():
                                 color=alt.Color("구분", legend=None)
                             )
                             # [수정] 차트 크기 확대
-                            pie = base.mark_arc(outerRadius=160, innerRadius=100).encode(
+                            pie = base.mark_arc(outerRadius=130, innerRadius=100).encode(
                                 tooltip=["구분", "수량"]
                             )
-                            text = base.mark_text(radius=185).encode(
+                            text = base.mark_text(radius=160).encode(
                                 text="구분",
                                 order=alt.Order("구분"),
                                 color=alt.value("black")  
@@ -540,8 +540,8 @@ with main_holder.container():
                         st.info("데이터 없음")
                 
                 with c2_data:
-                    # [수정] 🏭 Smart Symon 텍스트 삭제
-                    st.markdown("##### 🏭 Smart Symon")
+                    # [수정] 🏭 Smart Symon 텍스트 삭제 (공백)
+                    
                     if not pie_data.empty:
                         total = pie_data['수량'].sum()
                         pie_data['비중(%)'] = (pie_data['수량'] / total * 100).round(1)
