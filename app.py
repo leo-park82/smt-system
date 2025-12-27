@@ -32,7 +32,7 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
-# 타이틀 SMT로 변경
+# [수정] 타이틀 SMT로 변경
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -59,7 +59,7 @@ st.markdown("""
     }
     div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
 
-    /* 일일점검 리스트 스타일 개선 */
+    /* [NEW] 일일점검 리스트 스타일 개선 */
     .check-item-container { padding: 5px 0; }
     .check-item-title { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; letter-spacing: -0.5px; }
     .check-item-content { font-size: 0.95rem; color: #64748b; margin-bottom: 2px; line-height: 1.4; }
@@ -381,10 +381,10 @@ def check_password():
     # [수정] 로그인 컬럼 비율 조정하여 창과 로고 작게 만들기
     col1, col2, col3 = st.columns([5, 2, 5])
     with col2:
+        # [수정] 로그인 화면 로고 크기 맞춤 (use_container_width=True) 및 타이틀 'SMT'로 변경
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
-        # SMT 글씨 삭제
-        # st.title("SMT") 
+        st.title("SMT")
         with st.form("login"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
@@ -402,6 +402,7 @@ def check_password():
 if not check_password(): st.stop()
 
 with st.sidebar:
+    # [수정] 사이드바 로고 및 타이틀 'SMT'로 변경
     if os.path.exists("logo.png"):
         st.image("logo.png", width=180)
     st.title("SMT")
@@ -510,7 +511,7 @@ with main_holder.container():
                 # [수정] 아이콘 변경 🍩 -> 🏭
                 st.subheader("🏭 금일 생산 품목 비율")
                 # 차트와 데이터 테이블을 나란히 배치
-                c2_chart, c2_data = st.columns([1.5, 1]) 
+                c2_chart, c2_data = st.columns([2, 1]) 
                 
                 pie_data = pd.DataFrame()
                 
@@ -523,10 +524,11 @@ with main_holder.container():
                                 theta=alt.Theta("수량", stack=True),
                                 color=alt.Color("구분", legend=None)
                             )
-                            pie = base.mark_arc(outerRadius=100, innerRadius=60).encode(
+                            # [수정] 차트 크기 확대
+                            pie = base.mark_arc(outerRadius=160, innerRadius=100).encode(
                                 tooltip=["구분", "수량"]
                             )
-                            text = base.mark_text(radius=120).encode(
+                            text = base.mark_text(radius=185).encode(
                                 text="구분",
                                 order=alt.Order("구분"),
                                 color=alt.value("black")  
@@ -539,6 +541,7 @@ with main_holder.container():
                 
                 with c2_data:
                     # [수정] 🏭 Smart Symon 텍스트 삭제
+                    st.markdown("##### 🏭 Smart Symon")
                     if not pie_data.empty:
                         total = pie_data['수량'].sum()
                         pie_data['비중(%)'] = (pie_data['수량'] / total * 100).round(1)
