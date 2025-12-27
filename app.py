@@ -607,6 +607,13 @@ with main_holder.container():
                                 theta=alt.Theta("수량", stack=True),
                                 color=alt.Color("구분", legend=None)
                             )
+                            # [수정] 날짜 표시에서 시간(pm) 제거: format="%y-%m-%d"
+                            c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
+                                x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")), 
+                                y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0, title="수량"))
+                            ).interactive()
+                            st.altair_chart(c, use_container_width=True)
+                            
                             # 차트 크기 확대
                             pie = base.mark_arc(outerRadius=160, innerRadius=100).encode(
                                 tooltip=["구분", "수량"]
@@ -748,8 +755,8 @@ with main_holder.container():
                     df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
                     c = alt.Chart(df.groupby('날짜')['수량'].sum().reset_index()).mark_bar().encode(
-                        x=alt.X('날짜', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                        y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0))
+                        x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")), # Added :T and format
+                        y=alt.Y('수량', axis=alt.Axis(labelAngle=0, titleAngle=0, title="수량"))
                     ).interactive()
                     st.altair_chart(c, use_container_width=True)
             with t4:
