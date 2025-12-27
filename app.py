@@ -437,7 +437,7 @@ def generate_production_report_pdf(df_prod, date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
-    # [수정] 사용자 로그인 ID 변경 (키 값을 한글로 변경)
+    # [수정] 사용자 이름 변경 (박종선, 김윤석)
     "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
     "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
@@ -591,49 +591,43 @@ with main_holder.container():
             with c2:
                 # [수정] 타이틀 변경
                 st.subheader("🏭 월간 생산 품목 비율 (Monthly)")
-                # 차트와 데이터 테이블을 나란히 배치 (비율 조정 1.5:1.2 로 변경)
-                c2_chart, c2_data = st.columns([1.5, 1.2]) 
+                # [수정] 데이터 테이블 삭제하고 차트 영역 전체 사용
                 
-                pie_data = pd.DataFrame()
-                
-                with c2_chart:
-                    if not df_prod.empty:
-                        # [수정] 이번 달 데이터 필터링
-                        df_month_prod = df_prod[(df_prod['날짜'] >= this_month_start) & (df_prod['날짜'] <= today)]
+                if not df_prod.empty:
+                    # [수정] 이번 달 데이터 필터링
+                    df_month_prod = df_prod[(df_prod['날짜'] >= this_month_start) & (df_prod['날짜'] <= today)]
+                    
+                    if not df_month_prod.empty:
+                        pie_data = df_month_prod.groupby('구분')['수량'].sum().reset_index()
                         
-                        if not df_month_prod.empty:
-                            pie_data = df_month_prod.groupby('구분')['수량'].sum().reset_index()
-                            base = alt.Chart(pie_data).encode(
-                                theta=alt.Theta("수량", stack=True),
-                                color=alt.Color("구분", legend=None)
-                            )
-                            # 차트 크기 확대
-                            pie = base.mark_arc(outerRadius=160, innerRadius=100).encode(
-                                tooltip=["구분", "수량"]
-                            )
-                            text = base.mark_text(radius=185).encode(
-                                text="구분",
-                                order=alt.Order("구분"),
-                                color=alt.value("black")  
-                            )
-                            st.altair_chart(pie + text, use_container_width=True)
-                        else:
-                            st.info("이번 달 생산 실적이 없습니다.")
-                    else:
-                        st.info("데이터 없음")
-                
-                with c2_data:
-                    # [수정] 🏭 Smart Symon 텍스트 삭제
-                    if not pie_data.empty:
-                        total = pie_data['수량'].sum()
-                        pie_data['비중(%)'] = (pie_data['수량'] / total * 100).round(1)
-                        st.dataframe(
-                            pie_data.sort_values('수량', ascending=False), 
-                            column_order=("구분", "수량", "비중(%)"),
-                            hide_index=True, 
-                            use_container_width=True
+                        # 비율 및 라벨 계산
+                        total_q = pie_data['수량'].sum()
+                        pie_data['비율'] = (pie_data['수량'] / total_q * 100).round(1)
+                        pie_data['Label'] = pie_data['수량'].astype(str) + " (" + pie_data['비율'].astype(str) + "%)"
+                        
+                        base = alt.Chart(pie_data).encode(
+                            theta=alt.Theta("수량", stack=True),
+                            color=alt.Color("구분", legend=alt.Legend(title="공정 구분", orient="bottom")) 
                         )
-                    # 중복 메시지 삭제
+                        
+                        # 도넛 차트 (크기 확대)
+                        pie = base.mark_arc(outerRadius=150, innerRadius=90).encode(
+                            tooltip=["구분", "수량", "비율"]
+                        )
+                        
+                        # 텍스트 라벨 (도넛 안쪽에 표시)
+                        text = base.mark_text(radius=120).encode(
+                            text="Label",
+                            order=alt.Order("구분"),
+                            color=alt.value("black") 
+                        )
+                        
+                        # 차트 표시
+                        st.altair_chart((pie + text).properties(height=400), use_container_width=True)
+                    else:
+                        st.info("이번 달 생산 실적이 없습니다.")
+                else:
+                    st.info("데이터 없음")
 
             st.markdown("---")
             
