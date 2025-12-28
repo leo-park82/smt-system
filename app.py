@@ -614,18 +614,9 @@ with main_tabs[0]:
                         pie_data['Label'] = pie_data['수량'].astype(str) + " (" + pie_data['비율'].astype(str) + "%)"
                         pie_data['DisplayLabel'] = pie_data.apply(lambda x: x['Label'] if x['비율'] > 3 else "", axis=1)
 
-                        base = alt.Chart(pie_data).encode(
-                            theta=alt.Theta("수량", stack=True),
-                            color=alt.Color("구분", legend=alt.Legend(title="공정 구분", orient="bottom")) 
-                        )
-                        pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(
-                            tooltip=["구분", "수량", "비율"]
-                        )
-                        text = base.mark_text(radius=140).encode(
-                            text="DisplayLabel",
-                            order=alt.Order("구분"),
-                            color=alt.value("black") 
-                        )
+                        base = alt.Chart(pie_data).encode(theta=alt.Theta("수량", stack=True), color=alt.Color("구분", legend=alt.Legend(title="공정", orient="bottom")))
+                        pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(tooltip=["구분", "수량", "비율"])
+                        text = base.mark_text(radius=140).encode(text="DisplayLabel", order=alt.Order("구분"), color=alt.value("black"))
                         st.altair_chart((pie + text).properties(height=400), use_container_width=True)
                     else: st.info("이번 달 실적 없음")
                 else: st.info("데이터 없음")
@@ -939,9 +930,11 @@ with main_tabs[2]:
                     st.info("🔒 뷰어 모드입니다.")
 
             with c2:
+                # [수정] 최근 정비 내역 - 관리자만 수정/삭제 가능
                 st.markdown("#### 📋 최근 정비 내역")
                 df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 if not df.empty:
+                    # 관리자인 경우 수정/삭제 가능 (Data Editor)
                     if st.session_state.user_info['role'] == 'admin':
                         df_display = df.sort_values("입력시간", ascending=False).head(50)
                         df_display.insert(0, "삭제", False)
@@ -966,6 +959,7 @@ with main_tabs[2]:
                                     try:
                                         ws = get_worksheet(SHEET_MAINTENANCE)
                                         all_data = get_as_dataframe(ws)
+                                        # 입력시간 기준 삭제
                                         for t in to_delete['입력시간']:
                                             idx_to_drop = all_data[all_data['입력시간'].astype(str) == str(t)].index
                                             all_data = all_data.drop(idx_to_drop)
@@ -984,15 +978,18 @@ with main_tabs[2]:
                                 try:
                                     ws = get_worksheet(SHEET_MAINTENANCE)
                                     all_data = get_as_dataframe(ws)
-                                    all_data['입력시간'] = all_data['입력시간'].astype(str)
+                                    all_data['입력시간'] = all_data['입력시간'].astype(str) # 비교 위해 문자열 변환
                                     
+                                    # 변경된 내용 반영
                                     for index, row in edited_df.iterrows():
-                                        if row['삭제']: continue
+                                        if row['삭제']: continue # 삭제 체크된건 건너뜀
                                         
+                                        # 입력시간이 일치하는 원본 행 찾기
                                         match_idx = all_data[all_data['입력시간'] == str(row['입력시간'])].index
                                         if not match_idx.empty:
+                                            # 컬럼별 업데이트
                                             for col in COLS_MAINTENANCE:
-                                                if col != '입력시간':
+                                                if col != '입력시간': # 키 값 제외
                                                     all_data.at[match_idx[0], col] = row[col]
                                     
                                     save_data(all_data, SHEET_MAINTENANCE)
@@ -1002,6 +999,7 @@ with main_tabs[2]:
                                 except Exception as e:
                                     st.error(f"저장 중 오류: {e}")
                     else:
+                        # 관리자 아니면 조회만
                         st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
         
         with t2:
@@ -1013,6 +1011,7 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
+                # [수정] 비용 세로쓰기 타이틀 적용
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
