@@ -219,6 +219,7 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
+    # 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -989,7 +990,7 @@ with main_tabs[2]:
                                         if not match_idx.empty:
                                             # 컬럼별 업데이트
                                             for col in COLS_MAINTENANCE:
-                                                if col != '입력시간': # 키 값 제외
+                                                if col != '입력시간':
                                                     all_data.at[match_idx[0], col] = row[col]
                                     
                                     save_data(all_data, SHEET_MAINTENANCE)
@@ -999,7 +1000,6 @@ with main_tabs[2]:
                                 except Exception as e:
                                     st.error(f"저장 중 오류: {e}")
                     else:
-                        # 관리자 아니면 조회만
                         st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
         
         with t2:
