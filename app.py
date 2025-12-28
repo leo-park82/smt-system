@@ -1219,11 +1219,31 @@ with main_tabs[3]:
                             key_memo = f"m_{uid}_{sel_date}"
                             prev = prev_data.get(uid, {})
                             
+                            # [추가] NG 판단 및 메모 입력을 위한 현재 상태 추적
+                            current_val = None
+                            is_ng_condition = False
+
                             with c2:
                                 if row['check_type'] == 'OX':
-                                    st.radio("판정", ["OK", "NG"], key=key_val, horizontal=True, label_visibility="collapsed", index=0 if prev.get('ox')=='OK' else 1 if prev.get('ox')=='NG' else 0, disabled=is_viewer)
+                                    # st.radio 값을 변수로 받아 즉시 판단
+                                    current_val = st.radio("판정", ["OK", "NG"], key=key_val, horizontal=True, label_visibility="collapsed", index=0 if prev.get('ox')=='OK' else 1 if prev.get('ox')=='NG' else 0, disabled=is_viewer)
+                                    if current_val == 'NG':
+                                        is_ng_condition = True
                                 else:
-                                    st.number_input("수치", key=key_val, step=0.1, value=float(prev.get('val')) if prev.get('val') and prev.get('val').replace('.','',1).isdigit() else None, disabled=is_viewer)
+                                    current_val = st.number_input("수치", key=key_val, step=0.1, value=float(prev.get('val')) if prev.get('val') and str(prev.get('val')).replace('.','',1).isdigit() else None, disabled=is_viewer)
+                                    # 수치형 NG 판단 로직
+                                    if current_val is not None:
+                                        try:
+                                            v_f = float(current_val)
+                                            mn = float(row['min_val']) if row['min_val'] != "" else None
+                                            mx = float(row['max_val']) if row['max_val'] != "" else None
+                                            if mn is not None and v_f < mn: is_ng_condition = True
+                                            if mx is not None and v_f > mx: is_ng_condition = True
+                                        except: pass
+
+                                # [추가] NG 발생 시 사유 입력 필드 표시
+                                if is_ng_condition:
+                                    st.text_input("📝 불량 사유 / 조치 내역", value=prev.get('memo', ''), key=key_memo, placeholder="사유를 입력하세요")
                             
                             with c3:
                                 st.caption(f"기준: {row['standard']}")
@@ -1240,8 +1260,10 @@ with main_tabs[3]:
                         for _, row in line_data.iterrows():
                             uid = f"{row['equip_id']}_{row['item_name']}"
                             key_val = f"v_{uid}_{sel_date}"
+                            key_memo = f"m_{uid}_{sel_date}" # 메모 키
                             
                             val = st.session_state.get(key_val)
+                            memo_val = st.session_state.get(key_memo, "") # 메모 값 가져오기
                             
                             # 값이 입력된 경우에만 저장
                             if val is not None:
@@ -1272,7 +1294,7 @@ with main_tabs[3]:
                                     final_ox,
                                     signer,
                                     now_ts,
-                                    "" # 비고란 (현재 UI 없음)
+                                    memo_val # [수정] 비고란에 메모 저장
                                 ])
                         
                         if rows_to_add:
