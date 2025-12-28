@@ -32,6 +32,7 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
+# [수정] 타이틀 SMT로 변경
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -760,7 +761,7 @@ with main_tabs[1]:
                             chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
                             bar = alt.Chart(chart_data).mark_bar().encode(
                                 x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
-                                y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0)),
+                                y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                 color='구분', tooltip=['날짜', '구분', '수량']
                             ).properties(height=350)
                             st.altair_chart(bar, use_container_width=True)
@@ -810,10 +811,77 @@ with main_tabs[2]:
                             st.toast("저장 완료", icon="✅")
                 else: st.info("🔒 뷰어 모드입니다.")
             with c2:
-                st.markdown("#### 📋 최근 내역")
+                # [수정] 최근 정비 내역 - 관리자만 수정/삭제 가능
+                st.markdown("#### 📋 최근 정비 내역")
                 df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 if not df.empty:
-                     st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
+                    # 관리자인 경우 수정/삭제 가능 (Data Editor)
+                    if st.session_state.user_info['role'] == 'admin':
+                        df_display = df.sort_values("입력시간", ascending=False).head(50)
+                        df_display.insert(0, "삭제", False)
+
+                        edited_df = st.data_editor(
+                            df_display,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "삭제": st.column_config.CheckboxColumn(required=True),
+                                "입력시간": st.column_config.TextColumn(disabled=True) # 키 값 보호
+                            },
+                            disabled=["입력시간"], # 입력시간은 절대 수정 불가
+                            key="maint_editor"
+                        )
+                        
+                        c_btn1, c_btn2 = st.columns(2)
+                        with c_btn1:
+                            if st.button("선택 항목 삭제", type="secondary", key="del_maint"):
+                                to_delete = edited_df[edited_df["삭제"] == True]
+                                if not to_delete.empty:
+                                    try:
+                                        ws = get_worksheet(SHEET_MAINTENANCE)
+                                        all_data = get_as_dataframe(ws)
+                                        # 입력시간 기준 삭제
+                                        for t in to_delete['입력시간']:
+                                            idx_to_drop = all_data[all_data['입력시간'].astype(str) == str(t)].index
+                                            all_data = all_data.drop(idx_to_drop)
+                                        
+                                        save_data(all_data, SHEET_MAINTENANCE)
+                                        st.success(f"{len(to_delete)}건 삭제 완료")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"삭제 중 오류: {e}")
+                                else:
+                                    st.info("삭제할 항목 선택 필요")
+                        
+                        with c_btn2:
+                            if st.button("수정사항 저장", type="primary", key="save_maint"):
+                                try:
+                                    ws = get_worksheet(SHEET_MAINTENANCE)
+                                    all_data = get_as_dataframe(ws)
+                                    all_data['입력시간'] = all_data['입력시간'].astype(str) # 비교 위해 문자열 변환
+                                    
+                                    # 변경된 내용 반영
+                                    for index, row in edited_df.iterrows():
+                                        if row['삭제']: continue # 삭제 체크된건 건너뜀
+                                        
+                                        # 입력시간이 일치하는 원본 행 찾기
+                                        match_idx = all_data[all_data['입력시간'] == str(row['입력시간'])].index
+                                        if not match_idx.empty:
+                                            # 컬럼별 업데이트
+                                            for col in COLS_MAINTENANCE:
+                                                if col != '입력시간': # 키 값 제외
+                                                    all_data.at[match_idx[0], col] = row[col]
+                                    
+                                    save_data(all_data, SHEET_MAINTENANCE)
+                                    st.success("수정사항 저장 완료")
+                                    time.sleep(1)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"저장 중 오류: {e}")
+                    else:
+                        # 관리자 아니면 조회만
+                        st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
         
         with t2:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
@@ -824,7 +892,12 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-                c = alt.Chart(df).mark_bar().encode(x='작업구분', y='sum(비용)', color='작업구분').interactive()
+                # [수정] 비용 세로쓰기 타이틀 적용
+                c = alt.Chart(df).mark_bar().encode(
+                    x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
+                    y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
+                    color='작업구분'
+                ).interactive()
                 st.altair_chart(c, use_container_width=True)
     except: st.error("설비보전 오류")
 
