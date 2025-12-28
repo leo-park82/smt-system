@@ -1167,8 +1167,13 @@ with main_tabs[3]:
     try:
         tab1, tab2, tab3 = st.tabs(["✍ 점검 입력", "📊 현황", "📄 리포트"])
         with tab1:
+            # [수정] 저장 후 스크롤 상단 이동 (부모 창 스크롤 제어)
             if st.session_state.get('scroll_to_top'):
-                components.html("""<script>window.scrollTo(0,0);</script>""", height=0)
+                components.html("""
+                    <script>
+                        window.parent.scrollTo({top: 0, behavior: 'smooth'});
+                    </script>
+                """, height=0)
                 st.session_state['scroll_to_top'] = False
 
             c_date, c_line = st.columns([1, 2])
