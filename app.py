@@ -1193,6 +1193,32 @@ with main_tabs[3]:
                 
                 line_data = df_master[df_master['line'] == sel_line]
                 
+                # [추가] 선택된 날짜의 점검 상태 판단 로직
+                total_items = len(line_data)
+                checked_count = 0
+                
+                if not df_res.empty:
+                    # 날짜 비교를 위한 전처리
+                    df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
+                    
+                    # 현재 날짜 및 라인에 해당하는 점검 이력 필터링
+                    status_df = df_res[
+                        (df_res['date_only'] == str(sel_date)) & 
+                        (df_res['line'] == sel_line)
+                    ]
+                    
+                    # 중복 제거(동일 항목 여러번 저장 시) 후 카운트
+                    if not status_df.empty:
+                        checked_count = len(status_df.drop_duplicates(['equip_id', 'item_name']))
+
+                # 상태 알림 메시지 표시
+                if checked_count == 0:
+                    st.error(f"❌ {sel_date} : 점검 미실시 (0/{total_items})")
+                elif checked_count < total_items:
+                    st.warning(f"⚠️ {sel_date} : 점검 진행 중 ({checked_count}/{total_items})")
+                else:
+                    st.success(f"✅ {sel_date} : 점검 완료 ({checked_count}/{total_items})")
+
                 prev_data = {}
                 if not df_res.empty:
                     df_res['date_only'] = df_res['date'].astype(str).str.split().str[0]
