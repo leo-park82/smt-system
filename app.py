@@ -192,6 +192,7 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
+    # [수정] 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -223,6 +224,7 @@ def generate_all_daily_check_pdf(date_str):
             df_r['timestamp'] = pd.to_datetime(df_r['timestamp'], errors='coerce')
             df_r = df_r.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
             
+            # [NEW] 첫 페이지 표시용 점검자 이름 추출 (데이터가 있으면 첫번째 사람)
             checkers = df_r['checker'].unique()
             if len(checkers) > 0 and checkers[0]:
                 checker_name = checkers[0]
@@ -242,7 +244,8 @@ def generate_all_daily_check_pdf(date_str):
         except: pass
 
         lines = df_m['line'].unique()
-        first_page = True 
+        
+        first_page = True # 첫 페이지만 점검자 표시를 위한 플래그
 
         for line in lines:
             pdf.add_page()
@@ -257,10 +260,11 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_xy(10, 5)
             pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
             
+            # [NEW] 첫 페이지 상단에만 점검자 성명 출력
             if first_page and checker_name:
-                pdf.set_xy(10, 12) 
+                pdf.set_xy(10, 12) # 날짜 아래 위치
                 pdf.cell(0, 15, f"Checker: {checker_name}", 0, 0, 'R')
-                first_page = False 
+                first_page = False # 이후 페이지에는 출력 안함
 
             pdf.ln(25)
             
@@ -352,6 +356,7 @@ def generate_all_daily_check_pdf(date_str):
     except Exception as e:
         return None
 
+# [NEW] 생산 일일 보고서 PDF 생성 함수
 def generate_production_report_pdf(df_prod, date_str):
     try:
         font_filename = 'NanumGothic.ttf'
@@ -432,6 +437,7 @@ def generate_production_report_pdf(df_prod, date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
+    # [수정] 사용자 이름 변경 (박종선, 김윤석)
     "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
     "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "editor"},
     "kim": {"name": "Kim", "password_hash": make_hash("8943"), "role": "editor"}
@@ -690,7 +696,9 @@ with main_holder.container():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
+                        # [NEW] 삭제 기능을 위한 Data Editor 적용
                         df_display = df.sort_values("입력시간", ascending=False).head(50)
+                        # 체크박스 컬럼 추가
                         df_display.insert(0, "삭제", False)
                         
                         edited_df = st.data_editor(
@@ -698,17 +706,20 @@ with main_holder.container():
                             hide_index=True, 
                             use_container_width=True,
                             column_config={"삭제": st.column_config.CheckboxColumn(required=True)},
-                            disabled=COLS_RECORDS, 
+                            disabled=COLS_RECORDS, # 다른 컬럼은 수정 불가
                             key="recent_records_editor"
                         )
                         
                         if st.button("선택 항목 삭제", type="secondary"):
+                            # 삭제 체크된 항목 식별
                             to_delete = edited_df[edited_df["삭제"] == True]
                             if not to_delete.empty:
                                 try:
                                     ws = get_worksheet(SHEET_RECORDS)
                                     all_records = get_as_dataframe(ws)
+                                    # 입력시간을 기준으로 삭제 (고유 키 역할)
                                     for t in to_delete['입력시간']:
+                                        # 날짜 포맷 이슈 방지를 위해 문자열 변환 비교
                                         idx_to_drop = all_records[all_records['입력시간'].astype(str) == str(t)].index
                                         all_records = all_records.drop(idx_to_drop)
                                     
@@ -1076,51 +1087,54 @@ with main_holder.container():
                     st.markdown(f"#### 📝 {selected_line} 점검 입력")
                     for equip_name, group in line_data.groupby("equip_name", sort=False):
                         st.markdown(f"**🛠 {equip_name}**")
-                        for _, row in group.iterrows():
-                            uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
-                            widget_key = f"val_{uid}_{sel_date}"
-                            memo_key = f"memo_{uid}_{sel_date}"
-                            default_val = prev_data.get(uid, {}).get('val', None)
-                            default_memo = prev_data.get(uid, {}).get('memo', "")
-                            c1, c2, c3 = st.columns([2, 2, 1])
+                        # [개선 1] 설비별 카드 컨테이너 적용
+                        with st.container(border=True):
+                            for _, row in group.iterrows():
+                                uid = f"{row['line']}_{row['equip_id']}_{row['item_name']}"
+                                widget_key = f"val_{uid}_{sel_date}"
+                                memo_key = f"memo_{uid}_{sel_date}"
+                                default_val = prev_data.get(uid, {}).get('val', None)
+                                default_memo = prev_data.get(uid, {}).get('memo', "")
+                                c1, c2, c3 = st.columns([2, 2, 1])
+                                
+                                item_html = f"""<div class="check-item-container"><div class="check-item-title">{row['item_name']}</div><div class="check-item-content">{row['check_content']}</div></div>"""
+                                c1.markdown(item_html, unsafe_allow_html=True)
+                                
+                                check_type = row['check_type']
+                                is_numeric = False
+                                if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
+                                    is_numeric = True
+                                
+                                is_ng = False
+                                with c2:
+                                    if not is_numeric and check_type == 'OX':
+                                        idx = None
+                                        if default_val == 'OK': idx = 0
+                                        elif default_val == 'NG': idx = 1
+                                        if widget_key in st.session_state:
+                                            if st.session_state[widget_key] == "OK": idx = 0
+                                            elif st.session_state[widget_key] == "NG": idx = 1
+                                        val = st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
+                                        if val == 'NG': is_ng = True
+                                    else:
+                                        num_val = None
+                                        if default_val and default_val != 'nan' and default_val != '-':
+                                            try: num_val = float(default_val)
+                                            except: num_val = None
+                                        val = st.number_input(f"수치 ({row['unit']})", value=num_val, key=widget_key, placeholder="입력", step=0.1, format="%.1f")
+                                        if val is not None:
+                                            try:
+                                                min_v = safe_float(row['min_val'], -999999)
+                                                max_v = safe_float(row['max_val'], 999999)
+                                                if not (min_v <= val <= max_v): is_ng = True
+                                            except: pass
+                                with c3:
+                                    std_html = f"<div class='check-item-badge'>기준: {row['standard']}</div>"
+                                    st.markdown(std_html, unsafe_allow_html=True)
+                                if is_ng:
+                                    st.text_input("⚠️ 장비점검 (조치내역)", value=default_memo, key=memo_key, placeholder="NG 사유 및 조치내용 입력")
                             
-                            item_html = f"""<div class="check-item-container"><div class="check-item-title">{row['item_name']}</div><div class="check-item-content">{row['check_content']}</div></div>"""
-                            c1.markdown(item_html, unsafe_allow_html=True)
-                            
-                            check_type = row['check_type']
-                            is_numeric = False
-                            if '온,습도' in row['line'] or '온습도' in row['line'] or check_type == 'NUMBER':
-                                is_numeric = True
-                            
-                            is_ng = False
-                            with c2:
-                                if not is_numeric and check_type == 'OX':
-                                    idx = None
-                                    if default_val == 'OK': idx = 0
-                                    elif default_val == 'NG': idx = 1
-                                    if widget_key in st.session_state:
-                                        if st.session_state[widget_key] == "OK": idx = 0
-                                        elif st.session_state[widget_key] == "NG": idx = 1
-                                    val = st.radio("판정", ["OK", "NG"], key=widget_key, index=idx, horizontal=True, label_visibility="collapsed")
-                                    if val == 'NG': is_ng = True
-                                else:
-                                    num_val = None
-                                    if default_val and default_val != 'nan' and default_val != '-':
-                                        try: num_val = float(default_val)
-                                        except: num_val = None
-                                    val = st.number_input(f"수치 ({row['unit']})", value=num_val, key=widget_key, placeholder="입력", step=0.1, format="%.1f")
-                                    if val is not None:
-                                        try:
-                                            min_v = safe_float(row['min_val'], -999999)
-                                            max_v = safe_float(row['max_val'], 999999)
-                                            if not (min_v <= val <= max_v): is_ng = True
-                                        except: pass
-                            with c3:
-                                std_html = f"<div class='check-item-badge'>기준: {row['standard']}</div>"
-                                st.markdown(std_html, unsafe_allow_html=True)
-                            if is_ng:
-                                st.text_input("⚠️ 장비점검 (조치내역)", value=default_memo, key=memo_key, placeholder="NG 사유 및 조치내용 입력")
-                        st.divider()
+                    st.divider()
 
                     st.markdown("---")
                     st.markdown("#### ✍️ 전자 서명 (필수)")
@@ -1132,7 +1146,9 @@ with main_holder.container():
                     c_s1, c_s2 = st.columns([3, 1])
                     signer_name = c_s1.text_input("점검자 성명", value=st.session_state.user_info['name'], key=f"signer_{selected_line}")
                     
-                    if st.button(f"💾 {selected_line} 점검 결과 저장", type="primary", use_container_width=True):
+                    # [개선 3] 저장 버튼 강조 및 안내 문구
+                    st.caption("⚠️ 저장 시 서명 및 입력값이 최종 확정됩니다.")
+                    if st.button(f"💾 {selected_line} 점검 완료 및 저장", type="primary", use_container_width=True):
                         # ... (저장 로직 동일)
                         missing_values = []
                         rows_to_save = []
