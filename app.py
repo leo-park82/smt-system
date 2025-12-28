@@ -1084,9 +1084,11 @@ with main_tabs[3]:
                 else:
                     st.info("🔒 뷰어 모드입니다.")
 
-        with t2:
+        # [수정] 변수명 t2 -> tab2
+        with tab2:
              pass
-        with t3:
+        # [수정] 변수명 t3 -> tab3
+        with tab3:
              pass
 
     except Exception as e: st.error(f"일일점검 오류: {e}")
