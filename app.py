@@ -76,6 +76,14 @@ st.markdown("""
         background-color: #f8fafc;
     }
     
+    /* 라디오 버튼 가로 배치 */
+    div.row-widget.stRadio > div { flex-direction: row !important; gap: 10px; }
+    div.row-widget.stRadio > div > label { 
+        background-color: #fff; padding: 4px 12px; border-radius: 5px; border: 1px solid #e2e8f0; 
+        cursor: pointer; transition: all 0.2s; font-size: 0.85rem;
+    }
+    div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
+
     /* 일일점검 리스트 스타일 개선 */
     .check-item-container { padding: 5px 0; }
     .check-item-title { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; letter-spacing: -0.5px; }
@@ -948,6 +956,7 @@ with main_tabs[2]:
                                     try:
                                         ws = get_worksheet(SHEET_MAINTENANCE)
                                         all_data = get_as_dataframe(ws)
+                                        # 입력시간 기준 삭제
                                         for t in to_delete['입력시간']:
                                             idx_to_drop = all_data[all_data['입력시간'].astype(str) == str(t)].index
                                             all_data = all_data.drop(idx_to_drop)
@@ -995,6 +1004,7 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
+                # [수정] 비용 세로쓰기 타이틀 적용
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
@@ -1039,6 +1049,7 @@ with main_tabs[3]:
 
                 st.markdown(f"##### 📝 {sel_line} 점검 입력")
                 
+                # 뷰어 모드 체크
                 is_viewer = st.session_state.user_info['role'] == 'viewer'
 
                 for equip_name, group in line_data.groupby("equip_name", sort=False):
@@ -1074,9 +1085,9 @@ with main_tabs[3]:
                 else:
                     st.info("🔒 뷰어 모드입니다.")
 
-        with tab2:
+        with t2:
              pass
-        with tab3:
+        with t3:
              pass
 
     except Exception as e: st.error(f"일일점검 오류: {e}")
