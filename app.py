@@ -32,6 +32,7 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
+# [수정] 타이틀 SMT로 변경
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -42,7 +43,7 @@ st.markdown("""
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     .metric-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     
-    /* 탭 스타일 개선 */
+    /* 탭 스타일 개선 - 상단 고정 및 디자인 */
     .stTabs [data-baseweb="tab-list"] { 
         gap: 8px; 
         background-color: #ffffff; 
@@ -218,6 +219,7 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
+    # 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -956,7 +958,6 @@ with main_tabs[2]:
                                     try:
                                         ws = get_worksheet(SHEET_MAINTENANCE)
                                         all_data = get_as_dataframe(ws)
-                                        # 입력시간 기준 삭제
                                         for t in to_delete['입력시간']:
                                             idx_to_drop = all_data[all_data['입력시간'].astype(str) == str(t)].index
                                             all_data = all_data.drop(idx_to_drop)
@@ -1004,7 +1005,6 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-                # [수정] 비용 세로쓰기 타이틀 적용
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
@@ -1049,7 +1049,6 @@ with main_tabs[3]:
 
                 st.markdown(f"##### 📝 {sel_line} 점검 입력")
                 
-                # 뷰어 모드 체크
                 is_viewer = st.session_state.user_info['role'] == 'viewer'
 
                 for equip_name, group in line_data.groupby("equip_name", sort=False):
