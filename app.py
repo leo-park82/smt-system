@@ -847,6 +847,36 @@ with main_tabs[1]:
                                 color='구분', tooltip=['날짜', '구분', '수량']
                             ).properties(height=350)
                             st.altair_chart(bar, use_container_width=True)
+
+                            # [추가] SMT 생산(PC, CM1, CM3, 배전) 모델별 분석 섹션
+                            st.markdown("---")
+                            st.subheader("🧩 SMT 생산 모델별 분석 (PC/CM/배전 합산)")
+                            
+                            smt_cats = ["PC", "CM1", "CM3", "배전"]
+                            df_smt = df_filtered[df_filtered['구분'].isin(smt_cats)]
+                            
+                            if not df_smt.empty:
+                                smt_agg = df_smt.groupby('제품명')['수량'].sum().reset_index().sort_values('수량', ascending=False)
+                                smt_total = smt_agg['수량'].sum()
+                                
+                                c_s1, c_s2 = st.columns([1, 2])
+                                with c_s1:
+                                    st.metric("SMT 총 생산량", f"{smt_total:,.0f} EA", help="PC, CM1, CM3, 배전 공정 합계")
+                                    st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=300)
+                                
+                                with c_s2:
+                                    smt_chart = alt.Chart(smt_agg).mark_bar().encode(
+                                        x=alt.X('제품명', sort='-y', axis=alt.Axis(labelAngle=-45, title="모델명")),
+                                        y=alt.Y('수량', axis=alt.Axis(title="생산 수량")),
+                                        color=alt.value("#3b82f6"), # 파란색 계열 단일 색상
+                                        tooltip=['제품명', alt.Tooltip('수량', format=',')]
+                                    ).properties(
+                                        title="SMT 생산 품목별 수량 순위"
+                                    )
+                                    st.altair_chart(smt_chart, use_container_width=True)
+                            else:
+                                st.info("선택된 기간에 SMT 생산(PC, CM, 배전) 데이터가 없습니다.")
+
                         else: st.info("데이터 없음")
             else: st.info("데이터 없음")
 
