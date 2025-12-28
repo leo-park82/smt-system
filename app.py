@@ -636,11 +636,34 @@ with main_tabs[0]:
                     st.info("점검 데이터가 없습니다.")
 
             with c4:
-                st.subheader("🛠 최근 설비 정비 이력 (Last 5)")
+                # [수정] 스마트 분석 리포트 기능 추가 (TOP 3, BM 비율)
+                st.subheader("🛠 분석 리포트")
                 df_m = metrics['df_maint']
+                
                 if not df_m.empty:
-                    recent_maint = df_m.sort_values("날짜", ascending=False).head(5)[['날짜', '설비명', '작업구분', '작업내용']]
-                    st.dataframe(recent_maint, hide_index=True, use_container_width=True)
+                    df_m['비가동시간'] = pd.to_numeric(df_m['비가동시간'], errors='coerce').fillna(0)
+                    
+                    # 1. 비가동시간 상위 설비
+                    top_down = df_m.groupby('설비명')['비가동시간'].sum().sort_values(ascending=False).head(3)
+                    if top_down.sum() > 0:
+                        st.error("🚨 비가동시간 상위 설비 (Top 3)")
+                        st.table(top_down.reset_index())
+                    
+                    # 2. BM 비율 경고
+                    bm_rate = 0
+                    if len(df_m) > 0:
+                        bm_count = len(df_m[df_m['작업구분'].str.contains('BM', case=False, na=False)])
+                        bm_rate = (bm_count / len(df_m)) * 100
+                    
+                    if bm_rate > 40:
+                         st.error(f"⚠️ 고장정비(BM) 비율 {bm_rate:.1f}% → 예방정비(PM) 강화 필요")
+                         
+                    # 3. 반복 고장 설비
+                    repeat_fail = df_m[df_m['작업구분'].str.contains('BM', case=False, na=False)]['설비명'].value_counts().head(3)
+                    if not repeat_fail.empty:
+                        st.warning("🔁 반복 고장 설비 (Top 3)")
+                        st.table(repeat_fail.reset_index(name='횟수').rename(columns={'index':'설비명'})) # index rename logic check based on pandas version
+                        
                 else:
                     st.info("정비 이력이 없습니다.")
 
@@ -732,18 +755,23 @@ with main_tabs[1]:
             else: st.info("재고 데이터가 없습니다.")
 
         with t3:
+            # [수정] 스마트 생산 분석 기능 추가 (전주 대비 비교)
             st.markdown("#### 📊 스마트 생산 분석")
             df = load_data(SHEET_RECORDS, COLS_RECORDS)
+            
             if not df.empty:
                 df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
                 df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
                 df = df.dropna(subset=['날짜']) 
-                if df.empty: st.info("유효한 생산 데이터가 없습니다.")
+                
+                if df.empty:
+                     st.info("유효한 생산 데이터가 없습니다.")
                 else:
                     min_date = df['날짜'].min().date()
                     max_date = df['날짜'].max().date()
-                    c1, c2 = st.columns([1, 1])
-                    with c1:
+                    
+                    c_filter1, c_filter2 = st.columns([1, 1])
+                    with c_filter1:
                         default_start = max_date - timedelta(days=29)
                         if default_start < min_date: default_start = min_date
                         date_range = st.date_input("기간 선택", value=(default_start, max_date), min_value=min_date, max_value=max_date)
@@ -751,22 +779,81 @@ with main_tabs[1]:
                     if isinstance(date_range, tuple) and len(date_range) == 2:
                         mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
                         df_filtered = df[mask]
+                        
+                        # [스마트 분석 로직 추가]
+                        # 최근 7일 vs 그 이전 7일 비교
+                        end_dt = df_filtered['날짜'].max()
+                        start_dt_recent = end_dt - timedelta(days=6)
+                        start_dt_prev = start_dt_recent - timedelta(days=7)
+
+                        recent_mask = (df_filtered['날짜'] >= start_dt_recent) & (df_filtered['날짜'] <= end_dt)
+                        prev_mask = (df_filtered['날짜'] >= start_dt_prev) & (df_filtered['날짜'] < start_dt_recent)
+                        
+                        recent_avg = df_filtered[recent_mask]['수량'].mean()
+                        prev_avg = df_filtered[prev_mask]['수량'].mean()
+                        
+                        if pd.notna(prev_avg) and prev_avg > 0:
+                            diff_rate = (recent_avg - prev_avg) / prev_avg * 100
+                            if diff_rate < -10:
+                                st.error(f"⚠️ 최근 7일 생산량이 전주 대비 {abs(diff_rate):.1f}% 감소했습니다.")
+                            elif diff_rate > 10:
+                                st.success(f"📈 최근 7일 생산량이 전주 대비 {diff_rate:.1f}% 증가했습니다.")
+                                
                         if not df_filtered.empty:
-                            total = df_filtered['수량'].sum()
-                            avg = total / len(df_filtered['날짜'].unique())
-                            m1, m2 = st.columns(2)
-                            m1.metric("총 생산", f"{total:,.0f}")
-                            m2.metric("일 평균", f"{avg:,.0f}")
+                            total_qty = df_filtered['수량'].sum()
+                            daily_avg = total_qty / len(df_filtered['날짜'].unique()) if len(df_filtered['날짜'].unique()) > 0 else 0
+                            top_cat = df_filtered.groupby('구분')['수량'].sum().idxmax() if not df_filtered.empty else "-"
                             
-                            chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
-                            bar = alt.Chart(chart_data).mark_bar().encode(
-                                x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
-                                y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
-                                color='구분', tooltip=['날짜', '구분', '수량']
-                            ).properties(height=350)
-                            st.altair_chart(bar, use_container_width=True)
-                        else: st.info("데이터 없음")
-            else: st.info("데이터 없음")
+                            m1, m2, m3, m4 = st.columns(4)
+                            m1.metric("총 생산량", f"{total_qty:,.0f} EA")
+                            m2.metric("일일 평균", f"{daily_avg:,.0f} EA")
+                            m3.metric("최다 생산 공정", top_cat)
+                            m4.metric("가동 일수", f"{len(df_filtered['날짜'].unique())} 일")
+                            
+                            st.divider()
+
+                            col_chart1, col_chart2 = st.columns([2, 1])
+                            
+                            with col_chart1:
+                                st.markdown("##### 📅 일별/공정별 생산 추이")
+                                if HAS_ALTAIR:
+                                    chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
+                                    bar = alt.Chart(chart_data).mark_bar().encode(
+                                        x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
+                                        y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
+                                        color=alt.Color('구분', legend=alt.Legend(title="공정", orient="top")),
+                                        tooltip=['날짜', '구분', '수량']
+                                    ).properties(height=350)
+                                    st.altair_chart(bar, use_container_width=True)
+
+                            with col_chart2:
+                                st.markdown("##### 🥧 기간 내 공정 점유율")
+                                if HAS_ALTAIR:
+                                    pie_data = df_filtered.groupby('구분')['수량'].sum().reset_index()
+                                    base = alt.Chart(pie_data).encode(
+                                        theta=alt.Theta("수량", stack=True),
+                                        color=alt.Color("구분", legend=None)
+                                    )
+                                    pie = base.mark_arc(outerRadius=120, innerRadius=0).encode( 
+                                        tooltip=["구분", "수량"]
+                                    )
+                                    text = base.mark_text(radius=140).encode(
+                                        text=alt.Text("수량", format=",.0f"),
+                                        order=alt.Order("구분"),
+                                        color=alt.value("black")
+                                    )
+                                    st.altair_chart(pie + text, use_container_width=True)
+                                    
+                                    st.dataframe(
+                                        pie_data.sort_values('수량', ascending=False).assign(비중=lambda x: (x['수량']/x['수량'].sum()*100).round(1).astype(str)+'%'),
+                                        hide_index=True,
+                                        use_container_width=True
+                                    )
+                        else:
+                            st.info("선택한 기간에 데이터가 없습니다.")
+
+                else:
+                    st.info("생산 데이터가 없습니다.")
 
         with t4:
             st.markdown("#### 📑 일일 보고서")
@@ -802,7 +889,7 @@ with main_tabs[2]:
                         f_type = st.selectbox("구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                         f_desc = st.text_area("내용")
                         
-                        # [수정] 부품 추가 로직 (리스트에 담기)
+                        # [수정] 부품 추가 로직
                         if 'maint_parts' not in st.session_state: st.session_state.maint_parts = []
                         
                         col_p1, col_p2, col_p3 = st.columns([2, 1, 0.8])
@@ -834,7 +921,6 @@ with main_tabs[2]:
                         f_down = st.number_input("비가동(분)", step=10)
                         
                         if st.button("저장", type="primary"):
-                            # 부품 목록 문자열 변환
                             parts_text = ", ".join([f"{item['부품명']}({item['금액']:,})" for item in st.session_state.maint_parts])
                             if not parts_text and p_in: # 입력창에만 있고 추가 안 누른 경우 처리
                                 parts_text = f"{p_in}({c_in:,})"
@@ -848,11 +934,10 @@ with main_tabs[2]:
                             st.rerun()
                 else: st.info("🔒 뷰어 모드입니다.")
             with c2:
-                # [수정] 최근 정비 내역 - 관리자만 수정/삭제 가능
+                # [수정] 관리자 전용 수정 기능 유지
                 st.markdown("#### 📋 최근 정비 내역")
                 df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 if not df.empty:
-                    # 관리자인 경우 수정/삭제 가능 (Data Editor)
                     if st.session_state.user_info['role'] == 'admin':
                         df_display = df.sort_values("입력시간", ascending=False).head(50)
                         df_display.insert(0, "삭제", False)
@@ -863,9 +948,9 @@ with main_tabs[2]:
                             use_container_width=True,
                             column_config={
                                 "삭제": st.column_config.CheckboxColumn(required=True),
-                                "입력시간": st.column_config.TextColumn(disabled=True) # 키 값 보호
+                                "입력시간": st.column_config.TextColumn(disabled=True)
                             },
-                            disabled=["입력시간"], # 입력시간은 절대 수정 불가
+                            disabled=["입력시간"],
                             key="maint_editor"
                         )
                         
@@ -877,7 +962,6 @@ with main_tabs[2]:
                                     try:
                                         ws = get_worksheet(SHEET_MAINTENANCE)
                                         all_data = get_as_dataframe(ws)
-                                        # 입력시간 기준 삭제
                                         for t in to_delete['입력시간']:
                                             idx_to_drop = all_data[all_data['입력시간'].astype(str) == str(t)].index
                                             all_data = all_data.drop(idx_to_drop)
@@ -896,18 +980,15 @@ with main_tabs[2]:
                                 try:
                                     ws = get_worksheet(SHEET_MAINTENANCE)
                                     all_data = get_as_dataframe(ws)
-                                    all_data['입력시간'] = all_data['입력시간'].astype(str) # 비교 위해 문자열 변환
+                                    all_data['입력시간'] = all_data['입력시간'].astype(str)
                                     
-                                    # 변경된 내용 반영
                                     for index, row in edited_df.iterrows():
-                                        if row['삭제']: continue # 삭제 체크된건 건너뜀
+                                        if row['삭제']: continue
                                         
-                                        # 입력시간이 일치하는 원본 행 찾기
                                         match_idx = all_data[all_data['입력시간'] == str(row['입력시간'])].index
                                         if not match_idx.empty:
-                                            # 컬럼별 업데이트
                                             for col in COLS_MAINTENANCE:
-                                                if col != '입력시간': # 키 값 제외
+                                                if col != '입력시간':
                                                     all_data.at[match_idx[0], col] = row[col]
                                     
                                     save_data(all_data, SHEET_MAINTENANCE)
@@ -917,7 +998,6 @@ with main_tabs[2]:
                                 except Exception as e:
                                     st.error(f"저장 중 오류: {e}")
                     else:
-                        # 관리자 아니면 조회만
                         st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
         
         with t2:
