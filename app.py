@@ -32,7 +32,6 @@ except Exception as e:
 # ------------------------------------------------------------------
 # 1. 기본 설정 및 데이터 스키마
 # ------------------------------------------------------------------
-# [수정] 타이틀 SMT로 변경
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -219,7 +218,6 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
-    # 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -931,9 +929,11 @@ with main_tabs[2]:
                     st.info("🔒 뷰어 모드입니다.")
 
             with c2:
+                # [수정] 최근 정비 내역 - 관리자만 수정/삭제 가능
                 st.markdown("#### 📋 최근 정비 내역")
                 df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 if not df.empty:
+                    # 관리자인 경우 수정/삭제 가능 (Data Editor)
                     if st.session_state.user_info['role'] == 'admin':
                         df_display = df.sort_values("입력시간", ascending=False).head(50)
                         df_display.insert(0, "삭제", False)
@@ -958,6 +958,7 @@ with main_tabs[2]:
                                     try:
                                         ws = get_worksheet(SHEET_MAINTENANCE)
                                         all_data = get_as_dataframe(ws)
+                                        # 입력시간 기준 삭제
                                         for t in to_delete['입력시간']:
                                             idx_to_drop = all_data[all_data['입력시간'].astype(str) == str(t)].index
                                             all_data = all_data.drop(idx_to_drop)
@@ -976,15 +977,18 @@ with main_tabs[2]:
                                 try:
                                     ws = get_worksheet(SHEET_MAINTENANCE)
                                     all_data = get_as_dataframe(ws)
-                                    all_data['입력시간'] = all_data['입력시간'].astype(str)
+                                    all_data['입력시간'] = all_data['입력시간'].astype(str) # 비교 위해 문자열 변환
                                     
+                                    # 변경된 내용 반영
                                     for index, row in edited_df.iterrows():
-                                        if row['삭제']: continue
+                                        if row['삭제']: continue # 삭제 체크된건 건너뜀
                                         
+                                        # 입력시간이 일치하는 원본 행 찾기
                                         match_idx = all_data[all_data['입력시간'] == str(row['입력시간'])].index
                                         if not match_idx.empty:
+                                            # 컬럼별 업데이트
                                             for col in COLS_MAINTENANCE:
-                                                if col != '입력시간':
+                                                if col != '입력시간': # 키 값 제외
                                                     all_data.at[match_idx[0], col] = row[col]
                                     
                                     save_data(all_data, SHEET_MAINTENANCE)
@@ -1005,6 +1009,7 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
+                # [수정] 비용 세로쓰기 타이틀 적용
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
@@ -1049,6 +1054,7 @@ with main_tabs[3]:
 
                 st.markdown(f"##### 📝 {sel_line} 점검 입력")
                 
+                # 뷰어 모드 체크
                 is_viewer = st.session_state.user_info['role'] == 'viewer'
 
                 for equip_name, group in line_data.groupby("equip_name", sort=False):
@@ -1084,11 +1090,9 @@ with main_tabs[3]:
                 else:
                     st.info("🔒 뷰어 모드입니다.")
 
-        # [수정] 변수명 t2 -> tab2
-        with tab2:
+        with t2:
              pass
-        # [수정] 변수명 t3 -> tab3
-        with tab3:
+        with t3:
              pass
 
     except Exception as e: st.error(f"일일점검 오류: {e}")
