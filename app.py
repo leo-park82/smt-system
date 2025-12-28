@@ -219,6 +219,7 @@ def update_inventory(code, name, change, reason, user):
         new_row = pd.DataFrame([{"품목코드": code, "제품명": name, "현재고": change}])
         df = pd.concat([df, new_row], ignore_index=True)
     
+    # 현재고가 0인 항목 자동 삭제
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
@@ -1004,7 +1005,6 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-                # [수정] 비용 세로쓰기 타이틀 적용
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
@@ -1084,9 +1084,11 @@ with main_tabs[3]:
                 else:
                     st.info("🔒 뷰어 모드입니다.")
 
-        with t2:
+        # [수정] 변수명 t2 -> tab2
+        with tab2:
              pass
-        with t3:
+        # [수정] 변수명 t3 -> tab3
+        with tab3:
              pass
 
     except Exception as e: st.error(f"일일점검 오류: {e}")
