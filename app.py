@@ -692,7 +692,8 @@ with main_tabs[0]:
 # --- 2. 생산관리 탭 ---
 with main_tabs[1]:
     try:
-        t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 스마트 생산 분석", "📑 일일 보고서"])
+        # [수정] 탭 이름 변경: "스마트 생산 분석" -> "생산분석"
+        t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산분석", "📑 일일 보고서"])
         with t1:
             c1, c2 = st.columns([1, 1.5])
             with c1:
@@ -790,7 +791,8 @@ with main_tabs[1]:
             else: st.info("재고 데이터가 없습니다.")
 
         with t3:
-            st.markdown("#### 📊 스마트 생산 분석")
+            # [수정] 헤더 제목 변경: "스마트 생산 분석" -> "생산분석"
+            st.markdown("#### 📊 생산분석")
             df = load_data(SHEET_RECORDS, COLS_RECORDS)
             if not df.empty:
                 df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
@@ -1019,6 +1021,10 @@ with main_tabs[2]:
                 # [추가] 1. 문제 설비 TOP 3 (비가동시간 기준)
                 top_down = df.groupby('설비명')['비가동시간'].sum().sort_values(ascending=False).head(3)
                 
+                # [수정] 소수점 제거 및 단위(분) 추가
+                top_down_display = top_down.astype(int).reset_index()
+                top_down_display.columns = ['설비명', '비가동시간(분)']
+                
                 # [추가] 2. BM 비율 경고
                 # 작업구분에는 "BM (고장)", "PM (예방)" 등의 문자열이 들어감. "BM"만 포함하면 카운트.
                 # 저장할 때 f_type.split()[0]을 했으므로 "BM", "PM" 등으로 저장됨.
@@ -1036,7 +1042,8 @@ with main_tabs[2]:
                 
                 with c_a1:
                     st.error("🚨 비가동시간 상위 설비 (TOP 3)")
-                    st.table(top_down.reset_index())
+                    # [수정] 포맷팅된 데이터프레임 표시
+                    st.table(top_down_display)
 
                 with c_a2:
                     if bm_rate > 40:
@@ -1051,16 +1058,55 @@ with main_tabs[2]:
                         st.info("반복 고장 데이터 없음")
 
                 st.markdown("---")
-                st.subheader("비용 분석 차트")
+                st.subheader("💰 유형별 정비 비용 분석")
                 
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-                # [수정] 비용 세로쓰기 타이틀 적용
-                c = alt.Chart(df).mark_bar().encode(
-                    x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
-                    y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
-                    color='작업구분'
-                ).interactive()
-                st.altair_chart(c, use_container_width=True)
+                
+                # [수정] 가독성 개선: 유형별 합계 집계 및 차트 고도화
+                if not df.empty:
+                    # 유형별 합계 계산
+                    cost_agg = df.groupby('작업구분')['비용'].sum().reset_index()
+                    
+                    # 기본 차트 베이스 (높은 비용 순 정렬)
+                    base = alt.Chart(cost_agg).encode(
+                        x=alt.X('작업구분', sort='-y', axis=alt.Axis(labelAngle=0, title="작업 구분")),
+                        y=alt.Y('비용', axis=alt.Axis(format=',d', title="총 비용 (원)")),
+                        color=alt.Color('작업구분', legend=None)
+                    )
+
+                    # 막대 그래프 (모서리 둥글게)
+                    bars = base.mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(
+                        tooltip=['작업구분', alt.Tooltip('비용', format=',d', title="비용(원)")]
+                    )
+
+                    # 텍스트 레이블 (막대 위 금액 표시)
+                    text = base.mark_text(
+                        align='center',
+                        baseline='bottom',
+                        dy=-5,  # 막대 위로 살짝 띄움
+                        fontSize=12,
+                        fontWeight='bold'
+                    ).encode(
+                        text=alt.Text('비용', format=',d')
+                    )
+
+                    # 차트 결합 및 스타일링
+                    chart = (bars + text).properties(
+                        height=400,
+                        title="작업 유형별 총 비용 비교"
+                    ).configure_axis(
+                        grid=False,
+                        labelFontSize=12,
+                        titleFontSize=14
+                    ).configure_title(
+                        fontSize=16,
+                        anchor='start'
+                    )
+
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("비용 데이터가 없습니다.")
+
             else:
                 st.info("데이터가 없습니다.")
     except Exception as e: st.error(f"설비보전 오류: {e}")
