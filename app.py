@@ -435,7 +435,7 @@ def generate_all_daily_check_pdf(date_str):
     except Exception as e:
         return None
 
-def generate_production_report_pdf(df_prod, date_str):
+def generate_production_report_pdf(df_prod, df_inv, date_str):
     try:
         font_filename = 'NanumGothic.ttf'
         if not os.path.exists(font_filename):
@@ -462,30 +462,72 @@ def generate_production_report_pdf(df_prod, date_str):
         pdf.set_xy(10, 5)
         pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
         pdf.ln(25)
+        
+        # 1. 생산 실적
         pdf.set_text_color(0, 0, 0)
+        pdf.set_font(font_name, '', 14)
+        pdf.cell(0, 10, "1. Daily Production Result", 0, 1, 'L')
+        
         pdf.set_fill_color(240, 240, 240)
         pdf.set_font(font_name, '', 10)
         headers = ["구분", "품목코드", "제품명", "수량", "작성자"]
         widths = [25, 35, 80, 25, 25]
         for i, h in enumerate(headers): pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
         pdf.ln()
+        
         fill = False
         pdf.set_fill_color(250, 250, 250)
         total_qty = 0
-        for _, row in df_prod.iterrows():
-            pdf.cell(widths[0], 8, str(row['구분']), 1, 0, 'C', fill)
-            pdf.cell(widths[1], 8, str(row['품목코드']), 1, 0, 'C', fill)
-            p_name = str(row['제품명'])
-            if len(p_name) > 25: p_name = p_name[:24] + ".."
-            pdf.cell(widths[2], 8, p_name, 1, 0, 'L', fill)
-            qty = int(float(str(row['수량']).replace(',','')))
-            total_qty += qty
-            pdf.cell(widths[3], 8, f"{qty:,}", 1, 0, 'R', fill)
-            pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
-            fill = not fill
+        if not df_prod.empty:
+            for _, row in df_prod.iterrows():
+                pdf.cell(widths[0], 8, str(row['구분']), 1, 0, 'C', fill)
+                pdf.cell(widths[1], 8, str(row['품목코드']), 1, 0, 'C', fill)
+                p_name = str(row['제품명'])
+                if len(p_name) > 25: p_name = p_name[:24] + ".."
+                pdf.cell(widths[2], 8, p_name, 1, 0, 'L', fill)
+                qty = int(float(str(row['수량']).replace(',','')))
+                total_qty += qty
+                pdf.cell(widths[3], 8, f"{qty:,}", 1, 0, 'R', fill)
+                pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
+                fill = not fill
+        else:
+            pdf.cell(sum(widths), 10, "No Production Data", 1, 1, 'C', fill)
+            
         pdf.ln(2)
         pdf.set_font(font_name, '', 12)
         pdf.cell(0, 10, f"Total Quantity: {total_qty:,} EA", 0, 1, 'R')
+        
+        # 2. 재고 현황
+        if df_inv is not None and not df_inv.empty:
+            pdf.ln(10)
+            pdf.set_font(font_name, '', 14)
+            pdf.cell(0, 10, "2. Current Inventory Status", 0, 1, 'L')
+            
+            pdf.set_font(font_name, '', 10)
+            pdf.set_fill_color(240, 240, 240)
+            
+            inv_headers = ["품목코드", "제품명", "현재고"]
+            inv_widths = [40, 100, 50]
+            
+            for i, h in enumerate(inv_headers):
+                pdf.cell(inv_widths[i], 10, h, 1, 0, 'C', 1)
+            pdf.ln()
+            
+            fill = False
+            pdf.set_fill_color(250, 250, 250)
+            
+            for _, row in df_inv.iterrows():
+                pdf.cell(inv_widths[0], 8, str(row['품목코드']), 1, 0, 'C', fill)
+                
+                p_name = str(row['제품명'])
+                if len(p_name) > 35: p_name = p_name[:34] + ".."
+                pdf.cell(inv_widths[1], 8, p_name, 1, 0, 'L', fill)
+                
+                curr_stock = int(float(str(row['현재고']).replace(',', '')))
+                pdf.cell(inv_widths[2], 8, f"{curr_stock:,}", 1, 1, 'R', fill)
+                
+                fill = not fill
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             pdf.output(tmp_file.name)
             with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
@@ -677,8 +719,14 @@ with main_tabs[1]:
                             if c_name:
                                 rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
                                 if append_data(rec, SHEET_RECORDS):
-                                    if cat in ["후공정", "후공정 외주"] and auto_deduct: update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
-                                    else: update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
+                                    # [수정] 배전 공정은 재고 반영에서 제외
+                                    if cat == "배전":
+                                        pass
+                                    elif cat in ["후공정", "후공정 외주"] and auto_deduct: 
+                                        update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
+                                    else: 
+                                        update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
+                                    
                                     st.session_state.code_in = ""; st.session_state.name_in = ""; st.session_state.prod_qty = 100
                                     st.toast("저장되었습니다.", icon="✅")
                             else: st.toast("제품명을 입력하세요.", icon="⚠️")
@@ -796,14 +844,20 @@ with main_tabs[1]:
             r_date = c1.date_input("날짜", datetime.now(), key="rep_date")
             if c2.button("📄 PDF 다운로드"):
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
+                df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
+                
+                if not df_inv.empty:
+                    df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0)
+                    df_inv = df_inv[df_inv['현재고'] != 0]
+
                 if not df.empty:
                     df['날짜'] = pd.to_datetime(df['날짜']).dt.date
                     daily = df[df['날짜'] == r_date]
                     if not daily.empty:
-                        pdf_bytes = generate_production_report_pdf(daily, str(r_date))
+                        pdf_bytes = generate_production_report_pdf(daily, df_inv, str(r_date))
                         if pdf_bytes:
                             st.download_button("다운로드", pdf_bytes, file_name=f"Report_{r_date}.pdf", mime='application/pdf')
-                    else: st.warning("데이터 없음")
+                    else: st.warning("생산 데이터가 없습니다.")
 
     except Exception as e: st.error(f"생산관리 오류: {e}")
 
