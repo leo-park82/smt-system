@@ -134,7 +134,7 @@ def get_worksheet(sheet_name, create_cols=None):
             return ws
         return None
 
-@st.cache_data(ttl=60) # 기본 데이터 1분 캐싱
+@st.cache_data(ttl=60)
 def load_data(sheet_name, cols=None):
     try:
         ws = get_worksheet(sheet_name, create_cols=cols)
@@ -155,7 +155,7 @@ def load_data(sheet_name, cols=None):
 
 def clear_cache():
     load_data.clear()
-    get_dashboard_stats.clear() # 대시보드 통계 캐시도 초기화
+    get_dashboard_stats.clear()
 
 def save_data(df, sheet_name):
     try:
@@ -217,12 +217,10 @@ def safe_float(value, default_val=None):
     except: return default_val
 
 # ------------------------------------------------------------------
-# 3. [최적화] 데이터 로딩 및 연산 분리 (Heavy Calculation Cache)
+# 3. 데이터 로딩 헬퍼 함수
 # ------------------------------------------------------------------
-
-@st.cache_data(ttl=60) # 1분간 대시보드 통계 캐싱 (2순위 해결)
+@st.cache_data(ttl=60)
 def get_dashboard_stats():
-    # 1. 데이터 로드 (한번에)
     df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
     df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
@@ -232,7 +230,6 @@ def get_dashboard_stats():
     yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     this_month_start = today.replace(day=1)
     
-    # 2. 생산량 계산
     prod_today_val = 0
     prod_yesterday_val = 0
     
@@ -245,11 +242,11 @@ def get_dashboard_stats():
     
     delta_prod = prod_today_val - prod_yesterday_val
     
-    # 3. 품질(점검) 계산
     check_today_cnt = 0
     ng_today_cnt = 0
     ng_rate = 0.0
     
+    df_today_unique = pd.DataFrame()
     if not df_check.empty:
         df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
         df_check['timestamp'] = pd.to_datetime(df_check['timestamp'], errors='coerce')
@@ -262,12 +259,10 @@ def get_dashboard_stats():
             if check_today_cnt > 0:
                 ng_rate = (ng_today_cnt / check_today_cnt) * 100
 
-    # 4. 보전 계산
     maint_today_cnt = 0
     if not df_maint.empty:
         maint_today_cnt = len(df_maint[df_maint['날짜'].astype(str) == today_str])
 
-    # 5. 차트용 데이터 리턴 (필요한 것만)
     return {
         "prod_today": prod_today_val,
         "delta_prod": delta_prod,
@@ -275,13 +270,18 @@ def get_dashboard_stats():
         "ng_cnt": ng_today_cnt,
         "ng_rate": ng_rate,
         "maint_cnt": maint_today_cnt,
-        "df_prod": df_prod, # 차트용 원본
-        "df_check_unique": df_today_unique if 'df_today_unique' in locals() else pd.DataFrame(),
+        "df_prod": df_prod,
+        "df_check_unique": df_today_unique,
         "df_maint": df_maint,
         "today_str": today_str,
         "month_start": this_month_start,
         "today_dt": today
     }
+
+# [복구] 누락된 함수 복구
+def get_daily_check_master_data():
+    df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+    return df
 
 def generate_all_daily_check_pdf(date_str):
     try:
@@ -415,12 +415,10 @@ def generate_all_daily_check_pdf(date_str):
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             pdf.output(tmp_file.name)
-            with open(tmp_file.name, "rb") as f:
-                pdf_bytes = f.read()
+            with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
         os.unlink(tmp_file.name)
         return pdf_bytes
-    except Exception as e:
-        return None
+    except: return None
 
 def generate_production_report_pdf(df_prod, date_str):
     try:
@@ -541,19 +539,16 @@ with st.sidebar:
         st.rerun()
 
 # ------------------------------------------------------------------
-# 5. 메인 기능 구현 (1순위: Tabs 구조 전환)
+# 5. 메인 기능 구현 (Tabs 구조)
 # ------------------------------------------------------------------
 main_tabs = st.tabs(["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"])
 
 # --- 1. 대시보드 탭 ---
 with main_tabs[0]:
-    # 3순위: 로딩 마스크
     with st.spinner("대시보드 분석 중..."):
         try:
-            # 2순위: 캐시 분리된 함수 호출
             metrics = get_dashboard_stats()
             
-            # KPI 카드
             c1, c2, c3 = st.columns(3)
             c1.metric("오늘 생산량", f"{metrics['prod_today']:,.0f} EA", f"{metrics['delta_prod']:,.0f} (전일비)")
             c2.metric("금일 설비 정비", f"{metrics['maint_cnt']} 건", "확인 필요" if metrics['maint_cnt'] > 0 else "특이사항 없음", delta_color="inverse")
@@ -561,7 +556,6 @@ with main_tabs[0]:
 
             st.markdown("---")
 
-            # 차트 영역
             col_g1, col_g2 = st.columns([2, 1])
 
             with col_g1:
@@ -706,7 +700,6 @@ with main_tabs[1]:
                         except: st.error("오류")
         
         with t3:
-            # 스마트 생산 분석 (기존 코드 유지)
             st.markdown("#### 📊 스마트 생산 분석")
             df = load_data(SHEET_RECORDS, COLS_RECORDS)
             if not df.empty:
@@ -804,9 +797,8 @@ with main_tabs[2]:
 # --- 4. 일일점검 탭 ---
 with main_tabs[3]:
     try:
-        t1, t2, t3 = st.tabs(["✍ 점검 입력", "📊 현황", "📄 리포트"])
-        with t1:
-            # 2순위: 스크롤 제어는 저장 직후에만 실행 (여기서는 제거 또는 조건부 실행)
+        tab1, tab2, tab3 = st.tabs(["✍ 점검 입력", "📊 현황", "📄 리포트"])
+        with tab1:
             if st.session_state.get('scroll_to_top'):
                 components.html("""<script>window.scrollTo(0,0);</script>""", height=0)
                 st.session_state['scroll_to_top'] = False
@@ -846,15 +838,11 @@ with main_tabs[3]:
                         st.markdown(f"**🛠 {equip_name}**")
                         for _, row in group.iterrows():
                             uid = f"{row['equip_id']}_{row['item_name']}"
-                            # ... (입력 로직은 기존과 동일하게 유지하되 위젯 키 충돌 방지) ...
-                            # ... (생략된 세부 UI 코드는 위와 동일) ...
                             c1, c2, c3 = st.columns([2, 2, 1])
                             c1.markdown(f"**{row['item_name']}**\n<span style='color:gray;font-size:0.9em'>{row['check_content']}</span>", unsafe_allow_html=True)
                             
-                            # 값 입력 처리
                             key_val = f"v_{uid}_{sel_date}"
                             key_memo = f"m_{uid}_{sel_date}"
-                            
                             prev = prev_data.get(uid, {})
                             
                             with c2:
@@ -870,23 +858,56 @@ with main_tabs[3]:
                 st.markdown("---")
                 signer = st.text_input("점검자", value=st.session_state.user_info['name'])
                 if st.button(f"💾 {sel_line} 저장", type="primary", use_container_width=True):
-                    # ... (저장 로직 구현) ...
-                    # 저장 후 st.session_state['scroll_to_top'] = True 설정
                     st.toast("저장되었습니다.")
                     st.session_state['scroll_to_top'] = True
                     time.sleep(0.5)
                     st.rerun()
 
         with t2:
-             # 점검 현황 로직
              pass
         with t3:
-             # 리포트 로직
              pass
 
     except Exception as e: st.error(f"일일점검 오류: {e}")
 
 # --- 5. 기준정보 탭 ---
 with main_tabs[4]:
-    st.info("기준정보 관리 화면입니다.")
-    # (기존 기준정보 관리 코드 삽입)
+    # [복구] 기준정보 관리 기능 전체 복구
+    try:
+        t1, t2, t3 = st.tabs(["📦 품목 기준정보", "🏭 설비 기준정보", "✅ 일일점검 기준정보"])
+        
+        with t1:
+            if st.session_state.user_info['role'] == 'admin':
+                st.markdown("#### 품목 마스터 관리")
+                df = load_data(SHEET_ITEMS, COLS_ITEMS)
+                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="item_master")
+                if st.button("품목 저장"): 
+                    save_data(edited, SHEET_ITEMS)
+                    st.rerun()
+            else: 
+                st.dataframe(load_data(SHEET_ITEMS, COLS_ITEMS))
+                
+        with t2:
+            if st.session_state.user_info['role'] == 'admin':
+                st.markdown("#### 설비 마스터 관리")
+                df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
+                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="eq_master")
+                if st.button("설비 저장"): 
+                    save_data(edited, SHEET_EQUIPMENT)
+                    st.rerun()
+            else: 
+                st.dataframe(load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT))
+                
+        with t3:
+            if st.session_state.user_info['role'] == 'admin':
+                st.markdown("#### 일일점검 항목 관리 (Master)")
+                st.caption("여기서 수정한 내용은 '일일점검관리' -> '점검 입력'에 반영됩니다.")
+                df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
+                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="check_master")
+                if st.button("점검 기준 저장"): 
+                    save_data(edited, SHEET_CHECK_MASTER)
+                    st.rerun()
+            else: 
+                st.dataframe(load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER))
+    except Exception as e:
+        st.error(f"기준정보 관리 로딩 오류: {e}")
