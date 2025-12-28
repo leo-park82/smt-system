@@ -565,7 +565,8 @@ def check_password():
 
     if st.session_state.logged_in: return True
     
-    col1, col2, col3 = st.columns([5, 2, 5])
+    # [수정] 로그인 창 크기 및 로고 크기 조절 (컬럼 비율 변경 5:2:5 -> 4:3:4)
+    col1, col2, col3 = st.columns([4, 3, 4])
     with col2:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
