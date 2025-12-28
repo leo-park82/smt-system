@@ -614,9 +614,18 @@ with main_tabs[0]:
                         pie_data['Label'] = pie_data['수량'].astype(str) + " (" + pie_data['비율'].astype(str) + "%)"
                         pie_data['DisplayLabel'] = pie_data.apply(lambda x: x['Label'] if x['비율'] > 3 else "", axis=1)
 
-                        base = alt.Chart(pie_data).encode(theta=alt.Theta("수량", stack=True), color=alt.Color("구분", legend=alt.Legend(title="공정", orient="bottom")))
-                        pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(tooltip=["구분", "수량", "비율"])
-                        text = base.mark_text(radius=140).encode(text="DisplayLabel", order=alt.Order("구분"), color=alt.value("black"))
+                        base = alt.Chart(pie_data).encode(
+                            theta=alt.Theta("수량", stack=True),
+                            color=alt.Color("구분", legend=alt.Legend(title="공정 구분", orient="bottom")) 
+                        )
+                        pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(
+                            tooltip=["구분", "수량", "비율"]
+                        )
+                        text = base.mark_text(radius=140).encode(
+                            text="DisplayLabel",
+                            order=alt.Order("구분"),
+                            color=alt.value("black") 
+                        )
                         st.altair_chart((pie + text).properties(height=400), use_container_width=True)
                     else: st.info("이번 달 실적 없음")
                 else: st.info("데이터 없음")
@@ -636,7 +645,6 @@ with main_tabs[0]:
                     st.info("점검 데이터가 없습니다.")
 
             with c4:
-                # [수정] 스마트 분석 리포트 기능 추가 (TOP 3, BM 비율)
                 st.subheader("🛠 분석 리포트")
                 df_m = metrics['df_maint']
                 
@@ -662,8 +670,7 @@ with main_tabs[0]:
                     repeat_fail = df_m[df_m['작업구분'].str.contains('BM', case=False, na=False)]['설비명'].value_counts().head(3)
                     if not repeat_fail.empty:
                         st.warning("🔁 반복 고장 설비 (Top 3)")
-                        st.table(repeat_fail.reset_index(name='횟수').rename(columns={'index':'설비명'})) # index rename logic check based on pandas version
-                        
+                        st.table(repeat_fail.reset_index(name='횟수').rename(columns={'index':'설비명'}))
                 else:
                     st.info("정비 이력이 없습니다.")
 
@@ -755,7 +762,6 @@ with main_tabs[1]:
             else: st.info("재고 데이터가 없습니다.")
 
         with t3:
-            # [수정] 스마트 생산 분석 기능 추가 (전주 대비 비교)
             st.markdown("#### 📊 스마트 생산 분석")
             df = load_data(SHEET_RECORDS, COLS_RECORDS)
             
@@ -774,14 +780,12 @@ with main_tabs[1]:
                     with c_filter1:
                         default_start = max_date - timedelta(days=29)
                         if default_start < min_date: default_start = min_date
-                        date_range = st.date_input("기간 선택", value=(default_start, max_date), min_value=min_date, max_value=max_date)
+                        date_range = st.date_input("분석 기간 선택", value=(default_start, max_date), min_value=min_date, max_value=max_date)
                     
                     if isinstance(date_range, tuple) and len(date_range) == 2:
                         mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
                         df_filtered = df[mask]
                         
-                        # [스마트 분석 로직 추가]
-                        # 최근 7일 vs 그 이전 7일 비교
                         end_dt = df_filtered['날짜'].max()
                         start_dt_recent = end_dt - timedelta(days=6)
                         start_dt_prev = start_dt_recent - timedelta(days=7)
@@ -843,7 +847,6 @@ with main_tabs[1]:
                                         color=alt.value("black")
                                     )
                                     st.altair_chart(pie + text, use_container_width=True)
-                                    
                                     st.dataframe(
                                         pie_data.sort_values('수량', ascending=False).assign(비중=lambda x: (x['수량']/x['수량'].sum()*100).round(1).astype(str)+'%'),
                                         hide_index=True,
@@ -922,19 +925,20 @@ with main_tabs[2]:
                         
                         if st.button("저장", type="primary"):
                             parts_text = ", ".join([f"{item['부품명']}({item['금액']:,})" for item in st.session_state.maint_parts])
-                            if not parts_text and p_in: # 입력창에만 있고 추가 안 누른 경우 처리
+                            if not parts_text and p_in:
                                 parts_text = f"{p_in}({c_in:,})"
                                 if f_cost == 0: f_cost = c_in
 
                             rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_text, "비용": f_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
                             append_data(rec, SHEET_MAINTENANCE)
-                            st.session_state.maint_parts = [] # 초기화
+                            st.session_state.maint_parts = [] 
                             st.toast("저장 완료", icon="✅")
                             time.sleep(0.5)
                             st.rerun()
-                else: st.info("🔒 뷰어 모드입니다.")
+                else: 
+                    st.info("🔒 뷰어 모드입니다.")
+
             with c2:
-                # [수정] 관리자 전용 수정 기능 유지
                 st.markdown("#### 📋 최근 정비 내역")
                 df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
                 if not df.empty:
@@ -1009,7 +1013,6 @@ with main_tabs[2]:
             df = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
             if not df.empty:
                 df['비용'] = pd.to_numeric(df['비용'], errors='coerce').fillna(0)
-                # [수정] 비용 세로쓰기 타이틀 적용
                 c = alt.Chart(df).mark_bar().encode(
                     x=alt.X('작업구분', axis=alt.Axis(labelAngle=0, titleAngle=0)), 
                     y=alt.Y('비용', axis=alt.Axis(labelAngle=0, title="비\n용", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)), 
