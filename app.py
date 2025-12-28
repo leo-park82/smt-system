@@ -801,14 +801,51 @@ with main_tabs[2]:
                         f_eq = st.selectbox("설비", list(eq_map.keys()), format_func=lambda x: f"[{x}] {eq_map[x]}")
                         f_type = st.selectbox("구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                         f_desc = st.text_area("내용")
-                        p_name = st.text_input("부품명")
-                        p_cost = st.number_input("비용", step=1000)
+                        
+                        # [수정] 부품 추가 로직 (리스트에 담기)
+                        if 'maint_parts' not in st.session_state: st.session_state.maint_parts = []
+                        
+                        col_p1, col_p2, col_p3 = st.columns([2, 1, 0.8])
+                        with col_p1:
+                            p_in = st.text_input("부품명", key="p_in_val")
+                        with col_p2:
+                            c_in = st.number_input("금액", step=1000, key="c_in_val")
+                        with col_p3:
+                            st.write("")
+                            st.write("")
+                            def add_part():
+                                if st.session_state.p_in_val:
+                                    st.session_state.maint_parts.append({"부품명": st.session_state.p_in_val, "금액": st.session_state.c_in_val})
+                                    st.session_state.p_in_val = ""
+                                    st.session_state.c_in_val = 0
+                            
+                            st.button("추가", on_click=add_part)
+
+                        if st.session_state.maint_parts:
+                            st.caption("등록된 부품 목록")
+                            st.dataframe(pd.DataFrame(st.session_state.maint_parts), use_container_width=True, hide_index=True)
+                            if st.button("목록 초기화", type="secondary"):
+                                st.session_state.maint_parts = []
+                                st.rerun()
+
+                        # 비용 자동 합산
+                        calc_cost = sum([p['금액'] for p in st.session_state.maint_parts])
+                        f_cost = st.number_input("총 정비 비용", value=calc_cost, step=1000)
                         f_down = st.number_input("비가동(분)", step=10)
                         
                         if st.button("저장", type="primary"):
-                            rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": p_name, "비용": p_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                            # 부품 목록 문자열 변환
+                            parts_text = ", ".join([f"{item['부품명']}({item['금액']:,})" for item in st.session_state.maint_parts])
+                            if not parts_text and p_in: # 입력창에만 있고 추가 안 누른 경우 처리
+                                parts_text = f"{p_in}({c_in:,})"
+                                if f_cost == 0: f_cost = c_in
+
+                            rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_text, "비용": f_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
                             append_data(rec, SHEET_MAINTENANCE)
+                            st.session_state.maint_parts = [] # 초기화
                             st.toast("저장 완료", icon="✅")
+                            time.sleep(0.5)
+                            st.rerun()
                 else: st.info("🔒 뷰어 모드입니다.")
             with c2:
                 # [수정] 최근 정비 내역 - 관리자만 수정/삭제 가능
