@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+# [수정] timezone 추가
+from datetime import datetime, timedelta, timezone
 import time
 import hashlib
 import json
@@ -149,6 +150,11 @@ def get_worksheet(sheet_name, create_cols=None):
             return ws
         return None
 
+# [추가] 한국 시간(KST) 구하기 헬퍼 함수
+def get_now():
+    """시스템 시간이 UTC일 경우를 대비해 강제로 한국 시간(UTC+9)을 반환"""
+    return datetime.now(timezone(timedelta(hours=9)))
+
 @st.cache_data(ttl=60)
 def load_data(sheet_name, cols=None):
     try:
@@ -222,7 +228,9 @@ def update_inventory(code, name, change, reason, user):
     df = df[df['현재고'] != 0]
     
     save_data(df, SHEET_INVENTORY)
-    hist = {"날짜": datetime.now().strftime("%Y-%m-%d"), "품목코드": code, "구분": "입고" if change > 0 else "출고", "수량": change, "비고": reason, "작성자": user, "입력시간": str(datetime.now())}
+    # [수정] 한국 시간 적용
+    now_kst = get_now()
+    hist = {"날짜": now_kst.strftime("%Y-%m-%d"), "품목코드": code, "구분": "입고" if change > 0 else "출고", "수량": change, "비고": reason, "작성자": user, "입력시간": str(now_kst)}
     append_data(hist, SHEET_INV_HISTORY)
 
 def safe_float(value, default_val=None):
@@ -240,7 +248,8 @@ def get_dashboard_stats():
     df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
     
-    today = datetime.now()
+    # [수정] 한국 시간 적용
+    today = get_now()
     today_str = today.strftime("%Y-%m-%d")
     yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     this_month_start = today.replace(day=1)
@@ -703,7 +712,8 @@ with main_tabs[1]:
                         st.markdown("#### ✏️ 신규 생산 등록")
                         with st.spinner("로딩 중..."):
                             item_df = load_data(SHEET_ITEMS, COLS_ITEMS)
-                        date = st.date_input("작업 일자")
+                        # [수정] 한국 시간 적용 (기본값)
+                        date = st.date_input("작업 일자", value=get_now())
                         cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"])
                         item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
                         
@@ -719,7 +729,8 @@ with main_tabs[1]:
                         def save_production():
                             c_code = st.session_state.code_in; c_name = st.session_state.name_in; c_qty = st.session_state.prod_qty
                             if c_name:
-                                rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                                # [수정] 한국 시간 적용
+                                rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(get_now()), "작성자": st.session_state.user_info['id']}
                                 if append_data(rec, SHEET_RECORDS):
                                     # [수정] 배전 공정은 재고 반영에서 제외
                                     if cat == "배전":
@@ -890,7 +901,8 @@ with main_tabs[1]:
         with t4:
             st.markdown("#### 📑 일일 보고서")
             c1, c2 = st.columns([1,2])
-            r_date = c1.date_input("날짜", datetime.now(), key="rep_date")
+            # [수정] 한국 시간 적용
+            r_date = c1.date_input("날짜", get_now(), key="rep_date")
             if c2.button("📄 PDF 다운로드"):
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
                 df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
@@ -922,7 +934,8 @@ with main_tabs[2]:
                         st.markdown("#### 🔧 정비 등록")
                         eq_df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
                         eq_map = dict(zip(eq_df['id'], eq_df['name'])) if not eq_df.empty else {}
-                        f_date = st.date_input("날짜", key="maint_date")
+                        # [수정] 한국 시간 적용
+                        f_date = st.date_input("날짜", key="maint_date", value=get_now())
                         f_eq = st.selectbox("설비", list(eq_map.keys()), format_func=lambda x: f"[{x}] {eq_map[x]}")
                         f_type = st.selectbox("구분", ["PM (예방)", "BM (고장)", "CM (개선)"])
                         f_desc = st.text_area("내용")
@@ -965,7 +978,8 @@ with main_tabs[2]:
                                 parts_text = f"{p_in}({c_in:,})"
                                 if f_cost == 0: f_cost = c_in
 
-                            rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_text, "비용": f_cost, "비가동시간": f_down, "입력시간": str(datetime.now()), "작성자": st.session_state.user_info['id']}
+                            # [수정] 한국 시간 적용
+                            rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_text, "비용": f_cost, "비가동시간": f_down, "입력시간": str(get_now()), "작성자": st.session_state.user_info['id']}
                             append_data(rec, SHEET_MAINTENANCE)
                             st.session_state.maint_parts = [] # 초기화
                             st.toast("저장 완료", icon="✅")
@@ -1159,7 +1173,8 @@ with main_tabs[3]:
 
             c_date, c_line = st.columns([1, 2])
             with c_date:
-                sel_date = st.date_input("점검 일자", datetime.now(), key="check_date_input")
+                # [수정] 한국 시간 적용
+                sel_date = st.date_input("점검 일자", get_now(), key="check_date_input")
             
             df_res = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
             df_master = get_daily_check_master_data()
