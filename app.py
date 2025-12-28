@@ -862,16 +862,22 @@ with main_tabs[1]:
                                 c_s1, c_s2 = st.columns([1, 2])
                                 with c_s1:
                                     st.metric("SMT 총 생산량", f"{smt_total:,.0f} EA", help="PC, CM1, CM3, 배전 공정 합계")
-                                    st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=300)
+                                    # 전체 데이터는 표로 확인
+                                    st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=400)
                                 
                                 with c_s2:
-                                    smt_chart = alt.Chart(smt_agg).mark_bar().encode(
+                                    # [수정] 모델이 많을 경우를 대비해 상위 N개만 표시하는 슬라이더 추가
+                                    top_n = st.slider("차트 표시 개수 (상위 N개)", min_value=5, max_value=50, value=15, key="smt_chart_limit")
+                                    
+                                    chart_data_smt = smt_agg.head(top_n)
+                                    
+                                    smt_chart = alt.Chart(chart_data_smt).mark_bar().encode(
                                         x=alt.X('제품명', sort='-y', axis=alt.Axis(labelAngle=-45, title="모델명")),
                                         y=alt.Y('수량', axis=alt.Axis(title="생산 수량")),
                                         color=alt.value("#3b82f6"), # 파란색 계열 단일 색상
                                         tooltip=['제품명', alt.Tooltip('수량', format=',')]
                                     ).properties(
-                                        title="SMT 생산 품목별 수량 순위"
+                                        title=f"SMT 생산 상위 {top_n}개 모델"
                                     )
                                     st.altair_chart(smt_chart, use_container_width=True)
                             else:
