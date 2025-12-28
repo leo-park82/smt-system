@@ -745,15 +745,20 @@ with main_tabs[1]:
                             if not to_delete.empty:
                                 try:
                                     ws = get_worksheet(SHEET_RECORDS)
+                                    # [수정] 데이터 로드 후 빈 행 제거 및 타입 통일
                                     all_records = get_as_dataframe(ws)
+                                    all_records = all_records.dropna(how='all')
+                                    all_records['입력시간'] = all_records['입력시간'].astype(str)
+                                    
                                     for t in to_delete['입력시간']:
-                                        idx_to_drop = all_records[all_records['입력시간'].astype(str) == str(t)].index
+                                        idx_to_drop = all_records[all_records['입력시간'] == str(t)].index
                                         all_records = all_records.drop(idx_to_drop)
+                                    
                                     save_data(all_records, SHEET_RECORDS)
                                     st.success("삭제 완료")
                                     time.sleep(0.5)
                                     st.rerun()
-                                except: st.error("삭제 실패")
+                                except Exception as e: st.error(f"삭제 실패: {e}")
                     else: st.dataframe(df.sort_values("입력시간", ascending=False).head(50), hide_index=True, use_container_width=True)
 
         with t2:
@@ -768,14 +773,19 @@ with main_tabs[1]:
                         if not to_delete.empty:
                             try:
                                 ws = get_worksheet(SHEET_INVENTORY)
+                                # [수정] 데이터 로드 후 빈 행 제거 및 타입 통일
                                 all_inv = get_as_dataframe(ws)
+                                all_inv = all_inv.dropna(how='all')
+                                all_inv['품목코드'] = all_inv['품목코드'].astype(str)
+                                
                                 for code in to_delete['품목코드']:
-                                    idx = all_inv[all_inv['품목코드'] == code].index
+                                    idx = all_inv[all_inv['품목코드'] == str(code)].index
                                     all_inv = all_inv.drop(idx)
+                                
                                 save_data(all_inv, SHEET_INVENTORY)
                                 st.success("삭제 완료")
                                 st.rerun()
-                            except: st.error("오류")
+                            except Exception as e: st.error(f"오류: {e}")
                 else: st.dataframe(df_inv, use_container_width=True)
             else: st.info("재고 데이터가 없습니다.")
 
