@@ -248,8 +248,8 @@ def get_dashboard_stats():
     df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
     
-    # [수정] 한국 시간 적용
-    today = get_now()
+    # [수정] 한국 시간 적용 후 Naive 변환 (비교 오류 방지)
+    today = get_now().replace(tzinfo=None) # 시간대 정보 제거
     today_str = today.strftime("%Y-%m-%d")
     yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     this_month_start = today.replace(day=1)
@@ -1228,10 +1228,56 @@ with main_tabs[3]:
                 
                 if not is_viewer:
                     if st.button(f"💾 {sel_line} 저장", type="primary", use_container_width=True):
-                        st.toast("저장되었습니다.")
-                        st.session_state['scroll_to_top'] = True
-                        time.sleep(0.5)
-                        st.rerun()
+                        # [복구] 점검 데이터 수집 및 저장 로직
+                        rows_to_add = []
+                        now_ts = str(get_now())
+                        
+                        for _, row in line_data.iterrows():
+                            uid = f"{row['equip_id']}_{row['item_name']}"
+                            key_val = f"v_{uid}_{sel_date}"
+                            
+                            val = st.session_state.get(key_val)
+                            
+                            # 값이 입력된 경우에만 저장
+                            if val is not None:
+                                final_ox = "OK"
+                                final_val = str(val)
+                                
+                                if row['check_type'] == 'OX':
+                                    final_ox = val # "OK" or "NG"
+                                    final_val = "" 
+                                else:
+                                    # 수치형 판단 로직 (기준값 있다면)
+                                    try:
+                                        v_num = float(val)
+                                        mn = float(row['min_val']) if row['min_val'] != '' else None
+                                        mx = float(row['max_val']) if row['max_val'] != '' else None
+                                        
+                                        if mn is not None and v_num < mn: final_ox = "NG"
+                                        if mx is not None and v_num > mx: final_ox = "NG"
+                                    except:
+                                        pass
+                                
+                                rows_to_add.append([
+                                    str(sel_date),
+                                    sel_line,
+                                    row['equip_id'],
+                                    row['item_name'],
+                                    final_val,
+                                    final_ox,
+                                    signer,
+                                    now_ts,
+                                    "" # 비고란 (현재 UI 없음)
+                                ])
+                        
+                        if rows_to_add:
+                            append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
+                            st.toast("저장되었습니다.")
+                            st.session_state['scroll_to_top'] = True
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.warning("저장할 내용이 없습니다.")
                 else:
                     st.info("🔒 뷰어 모드입니다.")
 
