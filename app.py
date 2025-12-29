@@ -1334,10 +1334,33 @@ with main_tabs[3]:
                 else:
                     st.info("🔒 뷰어 모드입니다.")
 
-        with t2:
-             pass
-        with t3:
-             pass
+        with tab2:
+             st.info("준비 중입니다.")
+        
+        with tab3:
+             st.markdown("#### 📄 일일점검 리포트 출력")
+             c_r1, c_r2 = st.columns([1, 2])
+             
+             # [수정] 한국 시간 적용
+             report_date = c_r1.date_input("리포트 날짜", get_now(), key="daily_report_date")
+             
+             c_r2.write("") # 여백
+             c_r2.write("") 
+             
+             if c_r2.button("PDF 생성", key="btn_generate_daily_pdf"):
+                 with st.spinner("PDF 생성 중..."):
+                     pdf_bytes = generate_all_daily_check_pdf(str(report_date))
+                     if pdf_bytes:
+                         st.download_button(
+                             label="📥 PDF 다운로드",
+                             data=pdf_bytes,
+                             file_name=f"Daily_Check_Report_{report_date}.pdf",
+                             mime="application/pdf",
+                             key="download_daily_pdf"
+                         )
+                         st.success("생성 완료! 위 버튼을 눌러 다운로드하세요.")
+                     else:
+                         st.error("해당 날짜의 데이터가 없거나 생성 중 오류가 발생했습니다.")
 
     except Exception as e: st.error(f"일일점검 오류: {e}")
 
