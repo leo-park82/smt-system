@@ -425,7 +425,6 @@ def generate_all_daily_check_pdf(date_str):
                     
                 pdf.cell(15, 8, ox, 1, 0, 'C', fill)
                 pdf.set_text_color(0, 0, 0)
-                pdf.set_font(font_name, '', 10)
                 pdf.cell(15, 8, str(row['checker']), 1, 1, 'C', fill)
                 pdf.ln()
                 
@@ -552,7 +551,8 @@ def generate_production_report_pdf(df_prod, df_inv, date_str):
 # ------------------------------------------------------------------
 def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 USERS = {
-    "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "admin"},
+    "cimon": {"name": "관리자", "password_hash": make_hash("7801083"), "role": "admin"},
+    "박종선": {"name": "박종선", "password_hash": make_hash("1083"), "role": "worker"},
     "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "worker"},
     "김명숙": {"name": "김명숙", "password_hash": make_hash("8943"), "role": "worker"}
 }
