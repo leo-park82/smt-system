@@ -391,7 +391,9 @@ def generate_all_daily_check_pdf(date_str):
             pdf.set_font(font_name, '', 10)
             
             headers = ["설비명", "점검항목", "기준", "측정값", "판정", "점검자"]
-            widths = [45, 65, 30, 20, 15, 15]
+            # [수정] PDF 컬럼 너비 조정 (점검항목 축소, 기준 확대)
+            # 기존: [45, 65, 30, 20, 15, 15]
+            widths = [45, 50, 45, 20, 15, 15]
             
             for i, h in enumerate(headers):
                 pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
@@ -404,9 +406,10 @@ def generate_all_daily_check_pdf(date_str):
                 equip_name = str(row['equip_name'])
                 if len(equip_name) > 18: equip_name = equip_name[:17] + ".."
                 
+                # [수정] 조정된 너비 적용
                 pdf.cell(45, 8, equip_name, 1, 0, 'L', fill)
-                pdf.cell(65, 8, str(row['item_name']), 1, 0, 'L', fill)
-                pdf.cell(30, 8, str(row['standard']), 1, 0, 'C', fill)
+                pdf.cell(50, 8, str(row['item_name']), 1, 0, 'L', fill) # 65 -> 50
+                pdf.cell(45, 8, str(row['standard']), 1, 0, 'C', fill)  # 30 -> 45
                 pdf.cell(20, 8, str(row['value']), 1, 0, 'C', fill)
                 
                 ox = str(row['ox'])
