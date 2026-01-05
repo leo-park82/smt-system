@@ -722,7 +722,9 @@ def run_app():
                             item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
                             
                             def on_code():
-                                c = st.session_state.code_in.upper().strip()
+                                # [수정] 입력값을 대문자로 변환하여 세션 상태 업데이트 (UI 반영)
+                                st.session_state.code_in = st.session_state.code_in.upper().strip()
+                                c = st.session_state.code_in
                                 if c in item_map: st.session_state.name_in = item_map[c]
                             
                             code = st.text_input("품목 코드", key="code_in", on_change=on_code)
@@ -731,7 +733,11 @@ def run_app():
                             auto_deduct = st.checkbox("재고 차감 적용", value=True) if cat in ["후공정", "후공정 외주"] else False
                             
                             def save_production():
-                                c_code = st.session_state.code_in; c_name = st.session_state.name_in; c_qty = st.session_state.prod_qty
+                                # [수정] 저장 시에도 대문자 강제 변환 확인
+                                c_code = st.session_state.code_in.upper().strip()
+                                c_name = st.session_state.name_in
+                                c_qty = st.session_state.prod_qty
+                                
                                 if c_name:
                                     # [수정] 한국 시간 적용
                                     rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(get_now()), "작성자": st.session_state.user_info['id']}
