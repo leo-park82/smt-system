@@ -468,16 +468,19 @@ def generate_production_report_pdf(df_prod, df_inv, date_str):
         pdf.set_font(font_name, '', 20)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(10, 5)
-        pdf.cell(0, 15, "Production Daily Report", 0, 0, 'L')
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 15, "생산 일일 보고서", 0, 0, 'L')
         pdf.set_font(font_name, '', 10)
         pdf.set_xy(10, 5)
-        pdf.cell(0, 15, f"Date: {date_str}", 0, 0, 'R')
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 15, f"일자: {date_str}", 0, 0, 'R')
         pdf.ln(25)
         
         # 1. 생산 실적
         pdf.set_text_color(0, 0, 0)
         pdf.set_font(font_name, '', 14)
-        pdf.cell(0, 10, "1. Daily Production Result", 0, 1, 'L')
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 10, "1. 일일 생산 실적", 0, 1, 'L')
         
         pdf.set_fill_color(240, 240, 240)
         pdf.set_font(font_name, '', 10)
@@ -502,17 +505,20 @@ def generate_production_report_pdf(df_prod, df_inv, date_str):
                 pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
                 fill = not fill
         else:
-            pdf.cell(sum(widths), 10, "No Production Data", 1, 1, 'C', fill)
+            # [수정] 한글 제목 변경
+            pdf.cell(sum(widths), 10, "생산 실적 없음", 1, 1, 'C', fill)
             
         pdf.ln(2)
         pdf.set_font(font_name, '', 12)
-        pdf.cell(0, 10, f"Total Quantity: {total_qty:,} EA", 0, 1, 'R')
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 10, f"총 생산량: {total_qty:,} EA", 0, 1, 'R')
         
         # 2. 재고 현황
         if df_inv is not None and not df_inv.empty:
             pdf.ln(10)
             pdf.set_font(font_name, '', 14)
-            pdf.cell(0, 10, "2. Current Inventory Status", 0, 1, 'L')
+            # [수정] 한글 제목 변경
+            pdf.cell(0, 10, "2. 현재 재고 현황", 0, 1, 'L')
             
             pdf.set_font(font_name, '', 10)
             pdf.set_fill_color(240, 240, 240)
