@@ -880,8 +880,11 @@ def run_app():
                                     
                                     # 일별 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
+                                    
+                                    # [중요 수정] x축 인코딩을 Temporal(:T)에서 Ordinal(:O)로 변경
+                                    # 이렇게 하면 Altair가 날짜 문자열을 시간으로 재해석하지 않고 순서가 있는 카테고리로 인식하여 중복 틱 문제를 해결함
                                     bar = alt.Chart(chart_data).mark_bar().encode(
-                                        x=alt.X('날짜_str:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
+                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                         color='구분', tooltip=['날짜_str', '구분', '수량']
                                     ).properties(height=350)
@@ -896,7 +899,7 @@ def run_app():
                                         if cat == "PC": return "PC"
                                         elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
                                         elif cat == "배전": return "배전"
-                                        elif cat == "후공정": return "후공정" # [수정] 후공정만 포함
+                                        elif cat == "후공정": return "후공정" # [수정] 후공정만 포함 (외주 제외)
                                         # 후공정 외주는 포함하지 않음 (None 반환)
                                         return None 
 
