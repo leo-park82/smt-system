@@ -865,8 +865,11 @@ def run_app():
                             # 2. 기간별 상세 분석
                             if isinstance(date_range, tuple) and len(date_range) == 2:
                                 mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
-                                df_filtered = df[mask]
+                                df_filtered = df[mask].copy()
                                 if not df_filtered.empty:
+                                    # [수정] 시간 성분 제거 (00:00:00으로 통일)하여 같은 날짜가 여러 번 나오는 문제 해결
+                                    df_filtered['날짜'] = df_filtered['날짜'].dt.normalize()
+                                    
                                     total = df_filtered['수량'].sum()
                                     avg = total / len(df_filtered['날짜'].unique())
                                     m1, m2 = st.columns(2)
