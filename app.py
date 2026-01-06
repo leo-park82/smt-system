@@ -868,22 +868,22 @@ def run_app():
                                 mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
                                 df_filtered = df[mask].copy()
                                 if not df_filtered.empty:
-                                    # [수정] 시간 성분 제거 (00:00:00으로 통일) 및 Timezone 제거
-                                    df_filtered['날짜'] = df_filtered['날짜'].apply(lambda x: x.replace(tzinfo=None) if pd.notnull(x) else x)
-                                    df_filtered['날짜'] = df_filtered['날짜'].dt.normalize()
+                                    # [수정] 날짜를 문자열로 변환하여 완벽하게 시간 제거 및 그룹화
+                                    df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
                                     
                                     total = df_filtered['수량'].sum()
-                                    avg = total / len(df_filtered['날짜'].unique())
+                                    # 날짜_str 유니크 개수로 나눔
+                                    avg = total / len(df_filtered['날짜_str'].unique())
                                     m1, m2 = st.columns(2)
                                     m1.metric("총 생산", f"{total:,.0f}")
                                     m2.metric("일 평균", f"{avg:,.0f}")
                                     
                                     # 일별 차트
-                                    chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
+                                    chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                                     bar = alt.Chart(chart_data).mark_bar().encode(
-                                        x=alt.X('날짜:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
+                                        x=alt.X('날짜_str:T', axis=alt.Axis(format="%y-%m-%d", labelAngle=0, title="날짜")),
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
-                                        color='구분', tooltip=['날짜', '구분', '수량']
+                                        color='구분', tooltip=['날짜_str', '구분', '수량']
                                     ).properties(height=350)
                                     st.altair_chart(bar, use_container_width=True)
 
@@ -896,15 +896,16 @@ def run_app():
                                         if cat == "PC": return "PC"
                                         elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
                                         elif cat == "배전": return "배전"
-                                        elif cat in ["후공정", "후공정 외주"]: return "후공정 (외주포함)"
-                                        return None # 그 외(샘플 등)는 제외하거나 별도 표시
+                                        elif cat == "후공정": return "후공정" # [수정] 후공정만 포함
+                                        # 후공정 외주는 포함하지 않음 (None 반환)
+                                        return None 
 
                                     df_filtered['Group'] = df_filtered['구분'].apply(map_category)
                                     df_grouped = df_filtered.dropna(subset=['Group']).groupby('Group')['수량'].sum().reset_index()
                                     
                                     if not df_grouped.empty:
                                         # 순서 정렬 (PC, PLC, 배전, 후공정 순)
-                                        sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정 (외주포함)"]
+                                        sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정"]
                                         df_grouped['Group'] = pd.Categorical(df_grouped['Group'], categories=sort_order, ordered=True)
                                         df_grouped = df_grouped.sort_values('Group')
                                         
@@ -916,9 +917,10 @@ def run_app():
                                     else:
                                         st.info("해당 기간에 집계할 주요 공정 데이터가 없습니다.")
 
-                                    # [기존] SMT 생산(PC, CM1, CM3, 배전) 모델별 분석 섹션
+                                    # [기존] SMT 생산(PC, PLC, 배전) 모델별 분석 섹션
                                     st.markdown("---")
-                                    st.subheader("🔎 SMT 생산 모델별 분석 (PC/CM/배전 합산)")
+                                    # [수정] CM -> PLC 표기 변경
+                                    st.subheader("🔎 SMT 생산 모델별 분석 (PC/PLC/배전 합산)")
                                     
                                     smt_cats = ["PC", "CM1", "CM3", "배전"]
                                     df_smt = df_filtered[df_filtered['구분'].isin(smt_cats)]
@@ -929,7 +931,8 @@ def run_app():
                                         
                                         c_s1, c_s2 = st.columns([1, 2])
                                         with c_s1:
-                                            st.metric("SMT 총 생산량", f"{smt_total:,.0f} EA", help="PC, CM1, CM3, 배전 공정 합계")
+                                            # [수정] help 텍스트 내 CM -> PLC 변경
+                                            st.metric("SMT 총 생산량", f"{smt_total:,.0f} EA", help="PC, PLC(CM1, CM3), 배전 공정 합계")
                                             # 전체 데이터는 표로 확인
                                             st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=400)
                                         
@@ -949,7 +952,8 @@ def run_app():
                                             )
                                             st.altair_chart(smt_chart, use_container_width=True)
                                     else:
-                                        st.info("선택된 기간에 SMT 생산(PC, CM, 배전) 데이터가 없습니다.")
+                                        # [수정] 안내 메시지 내 CM -> PLC 변경
+                                        st.info("선택된 기간에 SMT 생산(PC, PLC, 배전) 데이터가 없습니다.")
 
                                 else: st.info("선택된 기간에 데이터가 없습니다.")
                 else: st.info("생산 데이터가 없습니다.")
