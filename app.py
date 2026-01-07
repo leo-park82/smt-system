@@ -8,6 +8,8 @@ import json
 import os
 import tempfile
 import urllib.request
+# [추가] 정규표현식 라이브러리 추가
+import re
 from fpdf import FPDF
 import streamlit.components.v1 as components
 
@@ -144,6 +146,21 @@ def get_worksheet(sheet_name, create_cols=None):
 def get_now():
     """시스템 시간이 UTC일 경우를 대비해 강제로 한국 시간(UTC+9)을 반환"""
     return datetime.now(timezone(timedelta(hours=9)))
+
+# [추가] 한국어 날짜 정규화 함수
+def normalize_korean_datetime(x):
+    if pd.isna(x):
+        return None
+
+    s = str(x).strip()
+
+    # 한국어 오전/오후 처리
+    if "오전" in s or "오후" in s:
+        s = s.replace("오전", "AM").replace("오후", "PM")
+        s = re.sub(r"[.]", "-", s) # 2026.01.08 -> 2026-01-08
+        return s
+
+    return s
 
 @st.cache_data(ttl=60)
 def load_data(sheet_name, cols=None):
@@ -788,23 +805,31 @@ def run_app():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
-                        # [NEW] 1. datetime 컬럼 생성 (정렬용) - infer_datetime_format=True 추가
-                        # errors='coerce'를 사용하여 파싱 실패시 NaT 반환 (이후 처리)
-                        df['입력시간_dt'] = pd.to_datetime(df['입력시간'], infer_datetime_format=True, errors='coerce')
+                        # [NEW] 1. 별도 copy를 생성하여 처리
+                        recent_df = df[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간', '작성자']].copy()
+
+                        # [NEW] 2. 한국어/포맷 혼합 정규화
+                        recent_df['입력시간_norm'] = recent_df['입력시간'].apply(normalize_korean_datetime)
+
+                        # [NEW] 3. datetime 컬럼 생성 (정렬용)
+                        recent_df['입력시간_dt'] = pd.to_datetime(
+                            recent_df['입력시간_norm'], 
+                            errors='coerce' # infer_datetime_format=True (deprecated in new pandas but safe to omit or use format if needed, but errors=coerce is key)
+                        )
                         
-                        # [NEW] 2. 정렬 (최신이 위로)
-                        df = df.sort_values(by='입력시간_dt', ascending=False)
+                        # [NEW] 4. 정렬 (최신이 위로)
+                        recent_df = recent_df.sort_values(by='입력시간_dt', ascending=False)
                         
-                        # [NEW] 3. 표시용 컬럼 생성 (포맷팅 + None 처리)
-                        # NaT인 경우에도 strftime은 NaN 반환, fillna로 처리
-                        df['입력시간_표시'] = df['입력시간_dt'].dt.strftime('%Y-%m-%d %H:%M').fillna("-")
+                        # [NEW] 5. 표시용 컬럼 생성 (포맷팅 + None 처리)
+                        recent_df['입력시간_표시'] = recent_df['입력시간_dt'].dt.strftime('%Y-%m-%d %H:%M').fillna("-")
                         
                         if st.session_state.user_info['role'] == 'admin':
-                            df_display = df.head(50).copy() # 정렬된 데이터 복사
+                            df_display = recent_df.head(50).copy() 
                             df_display.insert(0, "삭제", False)
                             
-                            # [NEW] 표시용 컬럼 사용 및 숨겨진 원본 '입력시간' 유지
-                            # 입력시간(원본)은 삭제 로직에 필요하므로 데이터에는 포함
+                            # 표시할 컬럼 지정
+                            # 입력시간_표시 -> "입력시간" 헤더로 보여주고, 실제 키값인 원본 '입력시간'은 숨기거나 뒤에 배치
+                            # 여기서는 사용자가 보기 편하게 '입력시간_표시'를 보여주고, 삭제 로직에 필요한 '입력시간'은 숨김 처리
                             
                             cols_to_show = ['삭제', '날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자', '입력시간']
                             
@@ -815,9 +840,9 @@ def run_app():
                                 column_config={
                                     "삭제": st.column_config.CheckboxColumn(required=True),
                                     "입력시간_표시": st.column_config.TextColumn("입력시간", disabled=True),
-                                    "입력시간": None # 원본 입력시간 컬럼 숨김 (삭제 로직용)
+                                    "입력시간": None # 원본 입력시간 컬럼 숨김 (삭제 로직용 필수)
                                 },
-                                disabled=['날짜', '구분', '품목코드', '제품명', '수량', '작성자', '입력시간_표시', '입력시간'],
+                                disabled=['날짜', '구분', '품목코드', '제품명', '수량', '작성자', '입력시간_표시'],
                                 key="recent_records_editor"
                             )
                             
@@ -830,7 +855,6 @@ def run_app():
                                         all_records = all_records.dropna(how='all')
                                         
                                         # 삭제 기준: 원본 '입력시간' 문자열 매칭
-                                        # to_delete['입력시간']에는 숨겨져 있던 원본 문자열이 그대로 있음
                                         all_records['입력시간'] = all_records['입력시간'].astype(str)
                                         
                                         for t in to_delete['입력시간']:
@@ -849,7 +873,7 @@ def run_app():
                         else: 
                             # [NEW] 일반 사용자 뷰
                             # 정렬된 df 사용, 표시용 컬럼만 선택하고 이름 변경
-                            df_user = df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
+                            df_user = recent_df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
                             df_user = df_user.rename(columns={'입력시간_표시': '입력시간'})
                             
                             st.dataframe(
