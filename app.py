@@ -44,47 +44,37 @@ st.markdown("""
     .dashboard-header { background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%); padding: 20px 30px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     .metric-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     
-    /* 탭 스타일 개선 - 상단 고정 및 디자인 */
-    .stTabs [data-baseweb="tab-list"] { 
+    /* 탭(라디오버튼) 스타일 개선 */
+    div.row-widget.stRadio > div { 
+        flex-direction: row !important; 
+        justify-content: flex-start;
         gap: 8px; 
-        background-color: #ffffff; 
-        padding: 10px 10px 0 10px; 
-        border-radius: 12px 12px 0 0; 
+        background-color: #ffffff;
+        padding: 10px;
+        border-radius: 12px;
         border-bottom: 1px solid #e2e8f0;
-        position: sticky;
-        top: 0;
-        z-index: 999;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-bottom: 20px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     }
-    .stTabs [data-baseweb="tab"] { 
-        height: 50px; 
-        white-space: pre-wrap; 
-        background-color: transparent; 
-        border-radius: 8px 8px 0 0; 
-        padding: 0 24px; 
-        font-size: 1.05rem; 
-        font-weight: 600; 
-        border: none;
-        color: #64748b;
-        transition: all 0.2s;
-    }
-    .stTabs [aria-selected="true"] { 
-        background-color: #eff6ff; 
-        color: #3b82f6; 
-        border-bottom: 3px solid #3b82f6;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #3b82f6;
-        background-color: #f8fafc;
-    }
-    
-    /* 라디오 버튼 가로 배치 */
-    div.row-widget.stRadio > div { flex-direction: row !important; gap: 10px; }
     div.row-widget.stRadio > div > label { 
-        background-color: #fff; padding: 4px 12px; border-radius: 5px; border: 1px solid #e2e8f0; 
-        cursor: pointer; transition: all 0.2s; font-size: 0.85rem;
+        background-color: transparent; 
+        padding: 8px 16px; 
+        border-radius: 8px; 
+        border: 1px solid transparent; 
+        cursor: pointer; 
+        transition: all 0.2s; 
+        font-size: 1rem;
+        font-weight: 600;
+        color: #64748b;
     }
-    div.row-widget.stRadio > div > label:hover { background-color: #f1f5f9; }
+    div.row-widget.stRadio > div > label:hover { 
+        background-color: #f1f5f9; 
+        color: #3b82f6;
+    }
+    /* 선택된 항목 강조 (Streamlit 구조상 CSS만으로 완벽한 타겟팅은 어렵지만 기본 active 상태 활용) */
+    div.row-widget.stRadio > div > label[data-baseweb="radio"] {
+        /* This part is tricky with pure CSS in Streamlit, but the layout structure above gives a tab-like feel */
+    }
 
     /* 일일점검 리스트 스타일 개선 */
     .check-item-container { padding: 5px 0; }
@@ -636,15 +626,29 @@ def run_app():
             except: pass
             st.rerun()
 
-    # 메인 기능 탭 (세션 스테이트로 인덱스 제어)
-    main_tabs = st.tabs(
-        ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"],
-        index=st.session_state.main_tab
+    # [수정] TypeError 해결 및 탭 상태 유지를 위해 st.radio로 네비게이션 대체
+    # st.tabs는 index 파라미터를 지원하지 않으므로 상태 제어가 불가능함
+    
+    tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"]
+    
+    # 세션 상태와 라디오 버튼 동기화 함수
+    def update_tab_state():
+        selection = st.session_state.main_tab_radio
+        st.session_state.main_tab = tab_names.index(selection)
+
+    # 탭 모양의 라디오 버튼 생성
+    selected_tab = st.radio(
+        "메인 메뉴", 
+        tab_names, 
+        index=st.session_state.main_tab, 
+        horizontal=True, 
+        label_visibility="collapsed",
+        key="main_tab_radio",
+        on_change=update_tab_state
     )
 
     # --- 1. 대시보드 탭 ---
-    with main_tabs[0]:
-        # [Tab 0]
+    if selected_tab == tab_names[0]:
         with st.spinner("대시보드 분석 중..."):
             try:
                 metrics = get_dashboard_stats()
@@ -730,8 +734,7 @@ def run_app():
                 st.error(f"대시보드 로딩 오류: {e}")
 
     # --- 2. 생산관리 탭 ---
-    with main_tabs[1]:
-        # [Tab 1]
+    elif selected_tab == tab_names[1]:
         try:
             t1, t2, t3, t4 = st.tabs(["📝 실적 등록", "📦 재고 현황", "📊 생산분석", "📑 일일 보고서"])
             with t1:
@@ -983,8 +986,7 @@ def run_app():
         except Exception as e: st.error(f"생산관리 오류: {e}")
 
     # --- 3. 설비보전 탭 ---
-    with main_tabs[2]:
-        # [Tab 2]
+    elif selected_tab == tab_names[2]:
         try:
             t1, t2, t3 = st.tabs(["📝 정비 등록", "📋 이력 조회", "📊 분석 리포트"])
             with t1:
@@ -1139,8 +1141,7 @@ def run_app():
         except Exception as e: st.error(f"설비보전 오류: {e}")
 
     # --- 4. 일일점검 탭 ---
-    with main_tabs[3]:
-        # [Tab 3]
+    elif selected_tab == tab_names[3]:
         try:
             tab1, tab2 = st.tabs(["✍ 점검 입력", "📄 리포트"])
             with tab1:
@@ -1248,7 +1249,7 @@ def run_app():
                             if rows_to_add:
                                 append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                                 st.toast("저장되었습니다.")
-                                # [중요] 저장 후 현재 탭 유지
+                                # [중요] 저장 후 현재 탭 유지 (인덱스 3)
                                 st.session_state.main_tab = 3
                                 time.sleep(0.5)
                                 st.rerun()
@@ -1271,8 +1272,7 @@ def run_app():
         except Exception as e: st.error(f"일일점검 오류: {e}")
 
     # --- 5. 기준정보 탭 ---
-    with main_tabs[4]:
-        # [Tab 4]
+    elif selected_tab == tab_names[4]:
         if st.session_state.user_info['role'] == 'admin':
             try:
                 t1, t2, t3 = st.tabs(["📦 품목 기준정보", "🏭 설비 기준정보", "✅ 일일점검 기준정보"])
