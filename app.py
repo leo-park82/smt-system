@@ -790,9 +790,11 @@ def run_app():
                     if not df.empty:
                         # [NEW] 입력시간을 datetime 객체로 변환하여 포맷팅 준비
                         df['입력시간'] = pd.to_datetime(df['입력시간'], errors='coerce')
+                        # [NEW] 정렬: 최신이 위로
+                        df = df.sort_values(by='입력시간', ascending=False)
                         
                         if st.session_state.user_info['role'] == 'admin':
-                            df_display = df.sort_values("입력시간", ascending=False).head(50)
+                            df_display = df.head(50) # 정렬 후 상위 50개
                             df_display.insert(0, "삭제", False)
                             
                             # [NEW] column_config로 표시 포맷 지정 (YYYY-MM-DD HH:mm)
@@ -845,7 +847,7 @@ def run_app():
                         else: 
                             # [NEW] 일반 사용자 뷰에서도 포맷 적용
                             st.dataframe(
-                                df.sort_values("입력시간", ascending=False).head(50), 
+                                df.head(50), # 정렬 후 상위 50개
                                 hide_index=True, 
                                 use_container_width=True,
                                 column_config={
