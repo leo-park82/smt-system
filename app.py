@@ -788,29 +788,36 @@ def run_app():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
-                        # [NEW] 입력시간을 datetime 객체로 변환하여 포맷팅 준비
-                        df['입력시간'] = pd.to_datetime(df['입력시간'], errors='coerce')
-                        # [NEW] 정렬: 최신이 위로
-                        df = df.sort_values(by='입력시간', ascending=False)
+                        # [NEW] 1. datetime 컬럼 생성 (정렬용)
+                        df['입력시간_dt'] = pd.to_datetime(df['입력시간'], errors='coerce')
+                        
+                        # [NEW] 2. 정렬 (최신이 위로)
+                        df = df.sort_values(by='입력시간_dt', ascending=False)
+                        
+                        # [NEW] 3. 표시용 컬럼 생성 (포맷팅 + None 처리)
+                        df['입력시간_표시'] = df['입력시간_dt'].dt.strftime('%Y-%m-%d %H:%M').fillna("-")
                         
                         if st.session_state.user_info['role'] == 'admin':
-                            df_display = df.head(50) # 정렬 후 상위 50개
+                            df_display = df.head(50).copy() # 정렬된 데이터 복사
                             df_display.insert(0, "삭제", False)
                             
-                            # [NEW] column_config로 표시 포맷 지정 (YYYY-MM-DD HH:mm)
+                            # [NEW] 표시용 컬럼 사용 및 숨겨진 원본 '입력시간' 유지
+                            # 입력시간(원본)은 삭제 로직에 필요하므로 데이터에는 포함하되 column_config로 숨김 처리 가능
+                            # 하지만 Streamlit 버전에 따라 숨김이 완벽하지 않을 수 있으므로
+                            # 여기서는 '입력시간_표시'를 '입력시간' 라벨로 보여주고 원본은 뒤에 둠
+                            
+                            cols_to_show = ['삭제', '날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자', '입력시간']
+                            
                             edited_df = st.data_editor(
-                                df_display, 
+                                df_display[cols_to_show],
                                 hide_index=True, 
                                 use_container_width=True, 
                                 column_config={
                                     "삭제": st.column_config.CheckboxColumn(required=True),
-                                    "입력시간": st.column_config.DatetimeColumn(
-                                        "입력시간",
-                                        format="YYYY-MM-DD HH:mm",
-                                        disabled=True
-                                    )
-                                }, 
-                                disabled=COLS_RECORDS, 
+                                    "입력시간_표시": st.column_config.TextColumn("입력시간", disabled=True),
+                                    "입력시간": None # 원본 입력시간 컬럼 숨김 (삭제 로직용)
+                                },
+                                disabled=['날짜', '구분', '품목코드', '제품명', '수량', '작성자', '입력시간_표시', '입력시간'],
                                 key="recent_records_editor"
                             )
                             
@@ -822,19 +829,14 @@ def run_app():
                                         all_records = get_as_dataframe(ws)
                                         all_records = all_records.dropna(how='all')
                                         
-                                        # [NEW] 삭제 시 비교를 위해 원본 데이터도 datetime 변환하여 매칭
-                                        all_records['입력시간_dt'] = pd.to_datetime(all_records['입력시간'], errors='coerce')
+                                        # 삭제 기준: 원본 '입력시간' 문자열 매칭
+                                        # to_delete['입력시간']에는 숨겨져 있던 원본 문자열이 그대로 있음
+                                        all_records['입력시간'] = all_records['입력시간'].astype(str)
                                         
-                                        # to_delete['입력시간']은 이미 Timestamp 객체임
                                         for t in to_delete['입력시간']:
-                                            if pd.isnull(t): continue
-                                            # Timestamp끼리 비교하여 정확히 일치하는 행 찾기
-                                            idx_to_drop = all_records[all_records['입력시간_dt'] == t].index
+                                            if pd.isna(t) or t == "": continue
+                                            idx_to_drop = all_records[all_records['입력시간'] == str(t)].index
                                             all_records = all_records.drop(idx_to_drop)
-                                        
-                                        # 임시 컬럼 제거 후 저장
-                                        if '입력시간_dt' in all_records.columns:
-                                            all_records = all_records.drop(columns=['입력시간_dt'])
                                         
                                         save_data(all_records, SHEET_RECORDS)
                                         st.success("삭제 완료")
@@ -845,17 +847,15 @@ def run_app():
                                         st.rerun()
                                     except Exception as e: st.error(f"삭제 실패: {e}")
                         else: 
-                            # [NEW] 일반 사용자 뷰에서도 포맷 적용
+                            # [NEW] 일반 사용자 뷰
+                            # 정렬된 df 사용, 표시용 컬럼만 선택하고 이름 변경
+                            df_user = df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
+                            df_user = df_user.rename(columns={'입력시간_표시': '입력시간'})
+                            
                             st.dataframe(
-                                df.head(50), # 정렬 후 상위 50개
+                                df_user,
                                 hide_index=True, 
-                                use_container_width=True,
-                                column_config={
-                                    "입력시간": st.column_config.DatetimeColumn(
-                                        "입력시간",
-                                        format="YYYY-MM-DD HH:mm"
-                                    )
-                                }
+                                use_container_width=True
                             )
 
             with t2:
