@@ -892,11 +892,12 @@ def run_app():
                                     # 날짜 문자열 변환 (YYYY-MM-DD)
                                     df_filtered['날짜_str'] = df_filtered['날짜'].astype(str)
                                     
-                                    total = df_filtered['수량'].sum()
-                                    avg = total / len(df_filtered['날짜_str'].unique())
-                                    m1, m2 = st.columns(2)
-                                    m1.metric("총 생산", f"{total:,.0f}")
-                                    m2.metric("일 평균", f"{avg:,.0f}")
+                                    # [삭제] 총 생산, 일 평균 메트릭 표시 부분 삭제 요청
+                                    # total = df_filtered['수량'].sum()
+                                    # avg = total / len(df_filtered['날짜_str'].unique())
+                                    # m1, m2 = st.columns(2)
+                                    # m1.metric("총 생산", f"{total:,.0f}")
+                                    # m2.metric("일 평균", f"{avg:,.0f}")
                                     
                                     # 일별 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
