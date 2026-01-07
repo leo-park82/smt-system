@@ -768,7 +768,8 @@ def run_app():
                                 c_qty = st.session_state.prod_qty
                                 
                                 if c_name:
-                                    rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":str(get_now()), "작성자": st.session_state.user_info['id']}
+                                    # [수정] 입력시간 간략화: YYYY-MM-DD HH:MM
+                                    rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":get_now().strftime("%Y-%m-%d %H:%M"), "작성자": st.session_state.user_info['id']}
                                     if append_data(rec, SHEET_RECORDS):
                                         if cat == "배전":
                                             pass
