@@ -1034,20 +1034,26 @@ def run_app():
                             f_cost = st.number_input("총 정비 비용", value=calc_cost, step=1000)
                             f_down = st.number_input("비가동(분)", step=10)
                             
-                            if st.button("저장", type="primary"):
+                            # [수정] 정비 등록 저장 버튼도 on_click 방식으로 변경하여 스크롤 튐 방지
+                            def save_maintenance():
                                 # 부품 목록 문자열 변환
                                 parts_text = ", ".join([f"{item['부품명']}({item['금액']:,})" for item in st.session_state.maint_parts])
                                 if not parts_text and p_in: # 입력창에만 있고 추가 안 누른 경우 처리
                                     parts_text = f"{p_in}({c_in:,})"
-                                    if f_cost == 0: f_cost = c_in
+                                    # 비용이 0이면 입력된 부품값으로 대체 (UI 편의성)
+                                    final_cost = f_cost if f_cost > 0 else c_in
+                                else:
+                                    final_cost = f_cost
 
                                 # [수정] 한국 시간 적용
-                                rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_text, "비용": f_cost, "비가동시간": f_down, "입력시간": str(get_now()), "작성자": st.session_state.user_info['id']}
+                                rec = {"날짜": str(f_date), "설비ID": f_eq, "설비명": eq_map[f_eq], "작업구분": f_type.split()[0], "작업내용": f_desc, "교체부품": parts_text, "비용": final_cost, "비가동시간": f_down, "입력시간": str(get_now()), "작성자": st.session_state.user_info['id']}
                                 append_data(rec, SHEET_MAINTENANCE)
                                 st.session_state.maint_parts = [] # 초기화
                                 st.toast("저장 완료", icon="✅")
-                                time.sleep(0.5)
-                                st.rerun()
+                                # [중요] st.rerun() 제거 (on_click으로 처리되어 자동 리런됨)
+                            
+                            st.button("저장", type="primary", on_click=save_maintenance)
+
                     else: st.info("🔒 뷰어 모드입니다.")
                 with c2:
                     # [수정] 최근 정비 내역 - 관리자만 수정/삭제 가능
@@ -1225,15 +1231,8 @@ def run_app():
         try:
             tab1, tab2 = st.tabs(["✍ 점검 입력", "📄 리포트"])
             with tab1:
-                # [수정] 저장 후 스크롤 상단 이동 (부모 창 스크롤 제어)
-                if st.session_state.get('scroll_to_top'):
-                    components.html("""
-                        <script>
-                            window.parent.scrollTo({top: 0, behavior: 'smooth'});
-                        </script>
-                    """, height=0)
-                    st.session_state['scroll_to_top'] = False
-
+                # [수정] 저장 후 스크롤 상단 이동 코드 제거됨
+                
                 c_date, c_line = st.columns([1, 2])
                 with c_date:
                     # [수정] 한국 시간 적용
@@ -1384,7 +1383,7 @@ def run_app():
                             if rows_to_add:
                                 append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                                 st.toast("저장되었습니다.")
-                                st.session_state['scroll_to_top'] = True
+                                # st.session_state['scroll_to_top'] = True # [수정] 제거
                                 time.sleep(0.5)
                                 st.rerun()
                             else:
