@@ -788,13 +788,15 @@ def run_app():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
-                        # [NEW] 1. datetime 컬럼 생성 (정렬용)
-                        df['입력시간_dt'] = pd.to_datetime(df['입력시간'], errors='coerce')
+                        # [NEW] 1. datetime 컬럼 생성 (정렬용) - infer_datetime_format=True 추가
+                        # errors='coerce'를 사용하여 파싱 실패시 NaT 반환 (이후 처리)
+                        df['입력시간_dt'] = pd.to_datetime(df['입력시간'], infer_datetime_format=True, errors='coerce')
                         
                         # [NEW] 2. 정렬 (최신이 위로)
                         df = df.sort_values(by='입력시간_dt', ascending=False)
                         
                         # [NEW] 3. 표시용 컬럼 생성 (포맷팅 + None 처리)
+                        # NaT인 경우에도 strftime은 NaN 반환, fillna로 처리
                         df['입력시간_표시'] = df['입력시간_dt'].dt.strftime('%Y-%m-%d %H:%M').fillna("-")
                         
                         if st.session_state.user_info['role'] == 'admin':
@@ -802,9 +804,7 @@ def run_app():
                             df_display.insert(0, "삭제", False)
                             
                             # [NEW] 표시용 컬럼 사용 및 숨겨진 원본 '입력시간' 유지
-                            # 입력시간(원본)은 삭제 로직에 필요하므로 데이터에는 포함하되 column_config로 숨김 처리 가능
-                            # 하지만 Streamlit 버전에 따라 숨김이 완벽하지 않을 수 있으므로
-                            # 여기서는 '입력시간_표시'를 '입력시간' 라벨로 보여주고 원본은 뒤에 둠
+                            # 입력시간(원본)은 삭제 로직에 필요하므로 데이터에는 포함
                             
                             cols_to_show = ['삭제', '날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자', '입력시간']
                             
