@@ -239,7 +239,8 @@ def get_dashboard_stats():
     df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
     
     # [수정] 한국 시간 적용 후 Naive 변환 (비교 오류 방지)
-    today = get_now().replace(tzinfo=None).date() # 오늘 날짜 (Date 객체)
+    # today 변수는 이제 datetime.date 타입입니다.
+    today = get_now().replace(tzinfo=None).date() 
     today_str = today.strftime("%Y-%m-%d")
     yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     this_month_start = today.replace(day=1)
@@ -291,8 +292,8 @@ def get_dashboard_stats():
         "df_check_unique": df_today_unique,
         "df_maint": df_maint,
         "today_str": today_str,
-        "month_start": this_month_start,
-        "today_dt": today
+        "month_start": this_month_start, # datetime.date 객체
+        "today_dt": today # datetime.date 객체
     }
 
 def get_daily_check_master_data():
@@ -688,8 +689,9 @@ def run_app():
                     if not df_prod.empty:
                         # [날짜 표준화]
                         df_prod['날짜_dt'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
-                        # month_start는 date 객체여야 함
-                        m_start = metrics['month_start'].date()
+                        
+                        # [수정] 이미 date 객체이므로 .date() 호출 제거
+                        m_start = metrics['month_start']
                         t_date = metrics['today_dt']
                         
                         df_month_prod = df_prod[(df_prod['날짜_dt'] >= m_start) & (df_prod['날짜_dt'] <= t_date)]
@@ -915,13 +917,15 @@ def run_app():
                                         elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
                                         elif cat == "배전": return "배전"
                                         elif cat == "후공정": return "후공정"
+                                        elif cat == "샘플": return "샘플" # Added Sample
                                         return None 
 
                                     df_filtered['Group'] = df_filtered['구분'].apply(map_category)
                                     df_grouped = df_filtered.dropna(subset=['Group']).groupby('Group')['수량'].sum().reset_index()
                                     
                                     if not df_grouped.empty:
-                                        sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정"]
+                                        # 순서 정렬 (PC, PLC, 배전, 후공정, 샘플 순)
+                                        sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정", "샘플"]
                                         df_grouped['Group'] = pd.Categorical(df_grouped['Group'], categories=sort_order, ordered=True)
                                         df_grouped = df_grouped.sort_values('Group')
                                         
