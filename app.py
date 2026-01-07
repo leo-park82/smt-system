@@ -768,7 +768,7 @@ def run_app():
                                 c_qty = st.session_state.prod_qty
                                 
                                 if c_name:
-                                    # [수정] 입력시간 간략화: YYYY-MM-DD HH:MM
+                                    # [수정] 입력시간 간략화: YYYY-MM-DD HH:MM (저장 시점)
                                     rec = {"날짜":str(date), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":get_now().strftime("%Y-%m-%d %H:%M"), "작성자": st.session_state.user_info['id']}
                                     if append_data(rec, SHEET_RECORDS):
                                         if cat == "배전":
@@ -788,10 +788,30 @@ def run_app():
                     st.markdown("#### 📋 최근 등록 내역")
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
                     if not df.empty:
+                        # [NEW] 입력시간을 datetime 객체로 변환하여 포맷팅 준비
+                        df['입력시간'] = pd.to_datetime(df['입력시간'], errors='coerce')
+                        
                         if st.session_state.user_info['role'] == 'admin':
                             df_display = df.sort_values("입력시간", ascending=False).head(50)
                             df_display.insert(0, "삭제", False)
-                            edited_df = st.data_editor(df_display, hide_index=True, use_container_width=True, column_config={"삭제": st.column_config.CheckboxColumn(required=True)}, disabled=COLS_RECORDS, key="recent_records_editor")
+                            
+                            # [NEW] column_config로 표시 포맷 지정 (YYYY-MM-DD HH:mm)
+                            edited_df = st.data_editor(
+                                df_display, 
+                                hide_index=True, 
+                                use_container_width=True, 
+                                column_config={
+                                    "삭제": st.column_config.CheckboxColumn(required=True),
+                                    "입력시간": st.column_config.DatetimeColumn(
+                                        "입력시간",
+                                        format="YYYY-MM-DD HH:mm",
+                                        disabled=True
+                                    )
+                                }, 
+                                disabled=COLS_RECORDS, 
+                                key="recent_records_editor"
+                            )
+                            
                             if st.button("선택 항목 삭제", type="secondary"):
                                 to_delete = edited_df[edited_df["삭제"] == True]
                                 if not to_delete.empty:
@@ -799,11 +819,20 @@ def run_app():
                                         ws = get_worksheet(SHEET_RECORDS)
                                         all_records = get_as_dataframe(ws)
                                         all_records = all_records.dropna(how='all')
-                                        all_records['입력시간'] = all_records['입력시간'].astype(str)
                                         
+                                        # [NEW] 삭제 시 비교를 위해 원본 데이터도 datetime 변환하여 매칭
+                                        all_records['입력시간_dt'] = pd.to_datetime(all_records['입력시간'], errors='coerce')
+                                        
+                                        # to_delete['입력시간']은 이미 Timestamp 객체임
                                         for t in to_delete['입력시간']:
-                                            idx_to_drop = all_records[all_records['입력시간'] == str(t)].index
+                                            if pd.isnull(t): continue
+                                            # Timestamp끼리 비교하여 정확히 일치하는 행 찾기
+                                            idx_to_drop = all_records[all_records['입력시간_dt'] == t].index
                                             all_records = all_records.drop(idx_to_drop)
+                                        
+                                        # 임시 컬럼 제거 후 저장
+                                        if '입력시간_dt' in all_records.columns:
+                                            all_records = all_records.drop(columns=['입력시간_dt'])
                                         
                                         save_data(all_records, SHEET_RECORDS)
                                         st.success("삭제 완료")
@@ -813,7 +842,19 @@ def run_app():
                                         st.session_state.main_tab = 1
                                         st.rerun()
                                     except Exception as e: st.error(f"삭제 실패: {e}")
-                        else: st.dataframe(df.sort_values("입력시간", ascending=False).head(50), hide_index=True, use_container_width=True)
+                        else: 
+                            # [NEW] 일반 사용자 뷰에서도 포맷 적용
+                            st.dataframe(
+                                df.sort_values("입력시간", ascending=False).head(50), 
+                                hide_index=True, 
+                                use_container_width=True,
+                                column_config={
+                                    "입력시간": st.column_config.DatetimeColumn(
+                                        "입력시간",
+                                        format="YYYY-MM-DD HH:mm"
+                                    )
+                                }
+                            )
 
             with t2:
                 df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
