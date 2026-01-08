@@ -853,7 +853,8 @@ def run_app():
                                 column_config={
                                     "삭제": st.column_config.CheckboxColumn(required=True),
                                     "입력시간_표시": st.column_config.TextColumn("입력시간", disabled=True),
-                                    "입력시간": None # 원본 입력시간 컬럼 숨김 (삭제 로직용 필수)
+                                    "입력시간": None, # 원본 입력시간 컬럼 숨김 (삭제 로직용 필수)
+                                    "수량": st.column_config.NumberColumn("수량", format="%d") # [수정] 수량 정수 표시
                                 },
                                 disabled=['날짜', '구분', '품목코드', '제품명', '수량', '작성자', '입력시간_표시'],
                                 key="recent_records_editor"
@@ -906,7 +907,8 @@ def run_app():
                                     "입력시간": st.column_config.DatetimeColumn(
                                         "입력시간",
                                         format="YYYY-MM-DD HH:mm"
-                                    )
+                                    ),
+                                    "수량": st.column_config.NumberColumn("수량", format="%d") # [수정] 수량 정수 표시
                                 }
                             )
 
