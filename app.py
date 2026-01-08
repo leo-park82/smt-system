@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 # [수정] timezone 추가
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 # [추가] 월 계산을 위한 라이브러리
 from dateutil.relativedelta import relativedelta
 import time
@@ -627,12 +627,19 @@ def check_password():
 # ------------------------------------------------------------------
 # [신규] 자연어 처리 엔진 (규칙 기반)
 # ------------------------------------------------------------------
+# [추가] 이번주 날짜 범위 계산 함수
+def get_this_week_range():
+    today = date.today()
+    start = today - timedelta(days=today.weekday())  # 월요일 (0: 월요일 ~ 6: 일요일)
+    end = start + timedelta(days=6)                  # 일요일
+    return start, end
+
 def process_natural_language_query(query, df):
     """
     사용자의 자연어 질문을 분석하여 데이터프레임을 필터링하고 결과를 반환하는 함수
     """
     if df.empty:
-        return "데이터가 없습니다."
+        return "⚠️ 데이터가 없습니다."
 
     query = query.lower()
     
@@ -650,6 +657,9 @@ def process_natural_language_query(query, df):
         start_date = today - timedelta(days=1)
         end_date = today - timedelta(days=1)
         date_str = "어제"
+    elif "이번주" in query:
+        start_date, end_date = get_this_week_range()
+        date_str = "이번주"
     elif "지난달" in query:
         first_day_this_month = today.replace(day=1)
         last_day_last_month = first_day_this_month - timedelta(days=1)
@@ -669,6 +679,8 @@ def process_natural_language_query(query, df):
         df_filtered = df_filtered[(df_filtered['날짜_dt'] >= start_date) & (df_filtered['날짜_dt'] <= end_date)]
     else:
         date_str = "전체 기간" # 날짜 언급 없으면 전체
+        # 전체 기간이라도 기본적인 정렬을 위해 dt 변환은 해줌
+        df_filtered['날짜_dt'] = pd.to_datetime(df_filtered['날짜'], errors='coerce').dt.date
 
     # 2. 공정/품목 필터링 로직
     # 주요 키워드 리스트
@@ -678,35 +690,34 @@ def process_natural_language_query(query, df):
     for kw in keywords:
         if kw in query:
             target_keyword = kw
-            # '후공정' 검색 시 '후공정 외주'가 걸리지 않도록 주의 (단순 포함 관계라 순서 중요하지만 여기선 간단히)
-            # 여기서는 query에 정확히 해당 단어가 있는지 확인
+            # '후공정' 검색 시 '후공정 외주'가 걸리지 않도록 주의
             if kw == "후공정" and "후공정 외주" in query:
                 target_keyword = "후공정 외주"
             break
             
     if target_keyword:
         # 구분 컬럼에서 검색 (대소문자 무시를 위해 둘 다 소문자로)
-        # 실제 데이터의 '구분' 컬럼 값들이 정확해야 함. 여기서는 부분 일치로 처리
         df_filtered = df_filtered[df_filtered['구분'].astype(str).str.lower().str.contains(target_keyword)]
     
-    # 3. 결과 집계
+    # 3. 결과 집계 및 검증
     if df_filtered.empty:
-        return f"🔍 분석 결과: {date_str} {target_keyword if target_keyword else ''} 데이터가 없습니다."
+        return f"⚠️ **분석 결과 ({date_str}, {start_date} ~ {end_date if end_date else ''})**\n\n해당 기간 조건에 맞는 데이터가 없습니다."
     
     # 수량 합계 계산
-    # 수량 컬럼이 숫자형인지 확인 필요
     df_filtered['수량'] = pd.to_numeric(df_filtered['수량'], errors='coerce').fillna(0)
     total_qty = df_filtered['수량'].sum()
     
-    # 품목별 상위 3개 요약
+    # 품목별 상위 3개 요약 (필터링된 데이터프레임 기준)
     top_items = df_filtered.groupby('제품명')['수량'].sum().sort_values(ascending=False).head(3)
     top_items_str = ""
     if not top_items.empty:
-        top_items_list = [f"{idx}({int(val):,}개)" for idx, val in top_items.items()]
-        top_items_str = ", ".join(top_items_list)
+        top_items_list = [f"- {idx}: {int(val):,}개" for idx, val in top_items.items()]
+        top_items_str = "\n".join(top_items_list)
 
-    # 4. 답변 생성
-    response = f"📊 **분석 결과 ({date_str})**\n\n"
+    # 4. 답변 생성 (기간 명시)
+    date_range_str = f"{start_date} ~ {end_date}" if start_date and end_date else "전체 기간"
+    
+    response = f"📊 **분석 결과 ({date_range_str}, {date_str} 기준)**\n\n"
     if target_keyword:
         response += f"🔹 **'{target_keyword.upper()}'** 공정 생산 실적입니다.\n"
     
