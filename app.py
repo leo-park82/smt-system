@@ -749,15 +749,16 @@ def run_app():
                         chart_data = df_prod[df_prod['날짜_dt'] >= last_7_days].copy()
                         
                         if not chart_data.empty:
-                            # [수정] 날짜 중복 이슈 해결: 문자열 변환 후 Temporal Axis 사용
+                            # [수정] 날짜 중복 이슈 해결: 문자열 변환 후 Ordinal 사용 (:T -> :O)
+                            # 이렇게 하면 시간 해석 없이 문자열 그대로 축에 표시되므로 중복이 사라짐
                             chart_data['날짜_str'] = chart_data['날짜_dt'].astype(str)
                             chart_agg = chart_data.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                             
                             chart = alt.Chart(chart_agg).mark_line(point=True).encode(
-                                x=alt.X('날짜_str:T', axis=alt.Axis(format="%m-%d", title="날짜")),
+                                x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")), # :O 사용
                                 y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                 color=alt.Color('구분', legend=alt.Legend(title="공정 구분")),
-                                tooltip=[alt.Tooltip('날짜_str:T', title='일자', format='%Y-%m-%d'), '구분', '수량']
+                                tooltip=[alt.Tooltip('날짜_str', title='일자'), '구분', '수량']
                             ).properties(height=300)
                             st.altair_chart(chart, use_container_width=True)
                         else: st.info("최근 데이터가 없습니다.")
