@@ -808,20 +808,33 @@ def run_app():
                         # [NEW] 1. 별도 copy를 생성하여 처리
                         recent_df = df[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간', '작성자']].copy()
 
-                        # [NEW] 2. 한국어/포맷 혼합 정규화
-                        recent_df['입력시간_norm'] = recent_df['입력시간'].apply(normalize_korean_datetime)
+                        # [NEW] 2. 날짜 정규화 (Date 타입으로)
+                        recent_df['날짜_dt'] = pd.to_datetime(recent_df['날짜'], errors='coerce').dt.date
 
-                        # [NEW] 3. datetime 컬럼 생성 (정렬용)
+                        # [NEW] 3. 구분 커스텀 정렬 설정
+                        cat_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"]
+                        # 데이터에 없는 카테고리가 있을 수 있으므로 기존 데이터의 유니크값도 고려해야 하나,
+                        # 요청사항이 강제 정렬이므로 set_categories 사용
+                        recent_df['구분'] = pd.Categorical(
+                            recent_df['구분'],
+                            categories=cat_order,
+                            ordered=True
+                        )
+
+                        # [NEW] 4. 입력시간 정규화 (표시용 및 보조 정렬용)
+                        recent_df['입력시간_norm'] = recent_df['입력시간'].apply(normalize_korean_datetime)
                         recent_df['입력시간_dt'] = pd.to_datetime(
                             recent_df['입력시간_norm'], 
                             errors='coerce' # infer_datetime_format=True (deprecated in new pandas but safe to omit or use format if needed, but errors=coerce is key)
                         )
-                        
-                        # [NEW] 4. 정렬 (최신이 위로)
-                        recent_df = recent_df.sort_values(by='입력시간_dt', ascending=False)
-                        
-                        # [NEW] 5. 표시용 컬럼 생성 (포맷팅 + None 처리)
                         recent_df['입력시간_표시'] = recent_df['입력시간_dt'].dt.strftime('%Y-%m-%d %H:%M').fillna("-")
+                        
+                        # [NEW] 5. 정렬 (날짜 내림차순 -> 구분 오름차순 -> 입력시간 내림차순(보조))
+                        # 입력시간은 보조 정렬로 사용하여 같은 날짜, 같은 구분이 있을 경우 최신순으로 정렬
+                        recent_df = recent_df.sort_values(
+                            by=['날짜_dt', '구분', '입력시간_dt'],
+                            ascending=[False, True, False]
+                        )
                         
                         if st.session_state.user_info['role'] == 'admin':
                             df_display = recent_df.head(50).copy() 
@@ -876,10 +889,25 @@ def run_app():
                             df_user = recent_df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
                             df_user = df_user.rename(columns={'입력시간_표시': '입력시간'})
                             
+                            # [추가] 오늘 날짜 강조 함수
+                            def highlight_today(row):
+                                try:
+                                    d = pd.to_datetime(row['날짜'], errors='coerce').date()
+                                    if d == get_now().date():
+                                        return ['background-color: #fef3c7; color: #92400e; font-weight: bold'] * len(row)
+                                except: pass
+                                return [''] * len(row)
+
                             st.dataframe(
-                                df_user,
+                                df_user.style.apply(highlight_today, axis=1),
                                 hide_index=True, 
-                                use_container_width=True
+                                use_container_width=True,
+                                column_config={
+                                    "입력시간": st.column_config.DatetimeColumn(
+                                        "입력시간",
+                                        format="YYYY-MM-DD HH:mm"
+                                    )
+                                }
                             )
 
             with t2:
