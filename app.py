@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 # [수정] timezone 추가
 from datetime import datetime, timedelta, timezone
+# [추가] 월 계산을 위한 라이브러리
+from dateutil.relativedelta import relativedelta
 import time
 import hashlib
 import json
@@ -623,6 +625,99 @@ def check_password():
     return False
 
 # ------------------------------------------------------------------
+# [신규] 자연어 처리 엔진 (규칙 기반)
+# ------------------------------------------------------------------
+def process_natural_language_query(query, df):
+    """
+    사용자의 자연어 질문을 분석하여 데이터프레임을 필터링하고 결과를 반환하는 함수
+    """
+    if df.empty:
+        return "데이터가 없습니다."
+
+    query = query.lower()
+    
+    # 1. 날짜 필터링 로직
+    today = get_now().date()
+    start_date = None
+    end_date = None
+    date_str = ""
+
+    if "오늘" in query:
+        start_date = today
+        end_date = today
+        date_str = "오늘"
+    elif "어제" in query:
+        start_date = today - timedelta(days=1)
+        end_date = today - timedelta(days=1)
+        date_str = "어제"
+    elif "지난달" in query:
+        first_day_this_month = today.replace(day=1)
+        last_day_last_month = first_day_this_month - timedelta(days=1)
+        start_date = last_day_last_month.replace(day=1)
+        end_date = last_day_last_month
+        date_str = "지난달"
+    elif "이번달" in query:
+        start_date = today.replace(day=1)
+        end_date = today
+        date_str = "이번달"
+    
+    # 날짜 필터 적용
+    df_filtered = df.copy()
+    if start_date and end_date:
+        # 날짜 컬럼을 date 타입으로 변환 (안전하게)
+        df_filtered['날짜_dt'] = pd.to_datetime(df_filtered['날짜'], errors='coerce').dt.date
+        df_filtered = df_filtered[(df_filtered['날짜_dt'] >= start_date) & (df_filtered['날짜_dt'] <= end_date)]
+    else:
+        date_str = "전체 기간" # 날짜 언급 없으면 전체
+
+    # 2. 공정/품목 필터링 로직
+    # 주요 키워드 리스트
+    keywords = ["pc", "cm1", "cm3", "배전", "샘플", "후공정", "후공정 외주"]
+    target_keyword = None
+    
+    for kw in keywords:
+        if kw in query:
+            target_keyword = kw
+            # '후공정' 검색 시 '후공정 외주'가 걸리지 않도록 주의 (단순 포함 관계라 순서 중요하지만 여기선 간단히)
+            # 여기서는 query에 정확히 해당 단어가 있는지 확인
+            if kw == "후공정" and "후공정 외주" in query:
+                target_keyword = "후공정 외주"
+            break
+            
+    if target_keyword:
+        # 구분 컬럼에서 검색 (대소문자 무시를 위해 둘 다 소문자로)
+        # 실제 데이터의 '구분' 컬럼 값들이 정확해야 함. 여기서는 부분 일치로 처리
+        df_filtered = df_filtered[df_filtered['구분'].astype(str).str.lower().str.contains(target_keyword)]
+    
+    # 3. 결과 집계
+    if df_filtered.empty:
+        return f"🔍 분석 결과: {date_str} {target_keyword if target_keyword else ''} 데이터가 없습니다."
+    
+    # 수량 합계 계산
+    # 수량 컬럼이 숫자형인지 확인 필요
+    df_filtered['수량'] = pd.to_numeric(df_filtered['수량'], errors='coerce').fillna(0)
+    total_qty = df_filtered['수량'].sum()
+    
+    # 품목별 상위 3개 요약
+    top_items = df_filtered.groupby('제품명')['수량'].sum().sort_values(ascending=False).head(3)
+    top_items_str = ""
+    if not top_items.empty:
+        top_items_list = [f"{idx}({int(val):,}개)" for idx, val in top_items.items()]
+        top_items_str = ", ".join(top_items_list)
+
+    # 4. 답변 생성
+    response = f"📊 **분석 결과 ({date_str})**\n\n"
+    if target_keyword:
+        response += f"🔹 **'{target_keyword.upper()}'** 공정 생산 실적입니다.\n"
+    
+    response += f"👉 총 생산량: **{int(total_qty):,} EA**\n"
+    
+    if top_items_str:
+        response += f"\n🏆 **주요 생산 모델 (TOP 3)**\n{top_items_str}"
+        
+    return response
+
+# ------------------------------------------------------------------
 # 5. 메인 앱 실행 함수 (run_app)
 # ------------------------------------------------------------------
 def run_app():
@@ -644,10 +739,8 @@ def run_app():
             except: pass
             st.rerun()
 
-    # [수정] TypeError 해결 및 탭 상태 유지를 위해 st.radio로 네비게이션 대체
-    # st.tabs는 index 파라미터를 지원하지 않으므로 상태 제어가 불가능함
-    
-    tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"]
+    # [수정] 탭 추가: '🤖 AI 비서'
+    tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보", "🤖 AI 비서"]
     
     # 세션 상태와 라디오 버튼 동기화 함수
     def update_tab_state():
@@ -1406,6 +1499,36 @@ def run_app():
                         st.rerun()
             except Exception as e: st.error(f"기준정보 관리 로딩 오류: {e}")
         else: st.error("🚫 접근 권한이 없습니다. (관리자 전용)")
+
+    # --- [추가] AI 비서 탭 ---
+    elif selected_tab == tab_names[5]:
+        st.markdown("#### 🤖 AI 비서 (데이터 조회)")
+        
+        # 채팅 히스토리 초기화
+        if "messages" not in st.session_state:
+            st.session_state.messages = [
+                {"role": "assistant", "content": "안녕하세요! 생산 실적에 대해 궁금한 점을 물어보세요.\n예) '지난달 PC 생산량 알려줘', '오늘 배전 실적은?'"}
+            ]
+
+        # 이전 메시지 표시
+        for msg in st.session_state.messages:
+            st.chat_message(msg["role"]).write(msg["content"])
+
+        # 사용자 입력 처리
+        if prompt := st.chat_input("질문을 입력하세요"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.chat_message("user").write(prompt)
+            
+            # NLP 엔진 호출
+            with st.spinner("데이터 조회 중..."):
+                try:
+                    df = load_data(SHEET_RECORDS, COLS_RECORDS)
+                    response = process_natural_language_query(prompt, df)
+                except Exception as e:
+                    response = f"죄송합니다. 오류가 발생했습니다: {e}"
+
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.chat_message("assistant").write(response)
 
 # ------------------------------------------------------------------
 # 메인 실행
