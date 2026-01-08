@@ -746,15 +746,18 @@ def run_app():
                         # [날짜 표준화] datetime.date 객체로 변환하여 비교
                         df_prod['날짜_dt'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
                         last_7_days = metrics['today_dt'] - timedelta(days=7)
-                        chart_data = df_prod[df_prod['날짜_dt'] >= last_7_days]
+                        chart_data = df_prod[df_prod['날짜_dt'] >= last_7_days].copy()
                         
                         if not chart_data.empty:
-                            chart_agg = chart_data.groupby(['날짜', '구분'])['수량'].sum().reset_index()
+                            # [수정] 날짜 중복 이슈 해결: 문자열 변환 후 Temporal Axis 사용
+                            chart_data['날짜_str'] = chart_data['날짜_dt'].astype(str)
+                            chart_agg = chart_data.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
+                            
                             chart = alt.Chart(chart_agg).mark_line(point=True).encode(
-                                x=alt.X('날짜:T', axis=alt.Axis(format="%m-%d", labelAngle=0, title="날짜")),
+                                x=alt.X('날짜_str:T', axis=alt.Axis(format="%m-%d", title="날짜")),
                                 y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                 color=alt.Color('구분', legend=alt.Legend(title="공정 구분")),
-                                tooltip=['날짜', '구분', '수량']
+                                tooltip=[alt.Tooltip('날짜_str:T', title='일자', format='%Y-%m-%d'), '구분', '수량']
                             ).properties(height=300)
                             st.altair_chart(chart, use_container_width=True)
                         else: st.info("최근 데이터가 없습니다.")
