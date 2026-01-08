@@ -625,13 +625,11 @@ def check_password():
     return False
 
 # ------------------------------------------------------------------
-# [신규] 자연어 처리 및 데이터 조회 아키텍처
+# [신규] 자연어 처리 및 데이터 조회 아키텍처 (업그레이드)
 # ------------------------------------------------------------------
-# 1. 날짜 범위 계산 (Python Logic)
+
+# 1. 날짜 범위 계산
 def get_date_range(period_str):
-    """
-    추상적인 기간 표현(this_week, last_month 등)을 정확한 date 객체 범위로 변환
-    """
     today = date.today()
     start_date = None
     end_date = None
@@ -658,31 +656,36 @@ def get_date_range(period_str):
     
     return start_date, end_date
 
-# 2. 의도 파악 (Intent Parser - Rule Based Simulation for LLM)
+# 2. 의도 파악 (Intent Parser - Rule Based Update)
 def parse_intent_rule_based(query):
-    """
-    사용자 입력을 분석하여 정형화된 의도(JSON 형태)를 추출
-    실제 LLM이 있다면 이 부분을 OpenAI API 호출로 대체하면 됨.
-    """
     query = query.lower()
     intent = {
-        "query_type": "production", # 기본값은 생산 실적 조회
+        "query_type": "production", # production | inventory | mixed
         "period": None,
         "category": "전체",
-        "metric": "생산량" 
+        "group_by": "none",         # none | model | category
+        "view": "detail",           # detail | summary | topN
+        "top_n": None
     }
     
-    # [수정] 질문 유형(query_type) 판별 로직 추가
-    if any(keyword in query for keyword in ["재고", "현황", "남은", "보유", "수량", "몇개"]):
-        # '생산'이라는 단어가 없으면 재고 조회로 간주 (단, "생산량" 질문은 제외)
-        if "생산" not in query:
-             intent["query_type"] = "inventory"
-             intent["metric"] = "재고수량"
-        elif "재고" in query: # "생산 재고" 처럼 둘 다 있으면 재고 우선
-             intent["query_type"] = "inventory"
-             intent["metric"] = "재고수량"
+    # 1) Query Type 판별
+    has_prod = any(x in query for x in ["생산", "실적", "만든", "작업"])
+    has_inv = any(x in query for x in ["재고", "남은", "보유", "창고"])
+    
+    if has_prod and has_inv:
+        intent["query_type"] = "mixed"
+    elif has_inv:
+        intent["query_type"] = "inventory"
+    else:
+        intent["query_type"] = "production" # 기본값
 
-    # 기간 키워드 매핑
+    # 2) Group By 판별
+    if any(x in query for x in ["모델", "제품", "품목"]):
+        intent["group_by"] = "model"
+    elif any(x in query for x in ["공정", "구분", "라인"]):
+        intent["group_by"] = "category"
+    
+    # 3) Period 판별 (기존 로직 활용)
     if "오늘" in query: intent["period"] = "today"
     elif "어제" in query: intent["period"] = "yesterday"
     elif "이번주" in query: intent["period"] = "this_week"
@@ -690,7 +693,7 @@ def parse_intent_rule_based(query):
     elif "이번달" in query: intent["period"] = "this_month"
     elif "저번달" in query or "지난달" in query: intent["period"] = "last_month"
     
-    # 카테고리 매핑
+    # 4) Category 필터링 판별 (기존 로직 활용)
     keywords = ["pc", "cm1", "cm3", "배전", "샘플", "후공정", "후공정 외주"]
     for kw in keywords:
         if kw in query:
@@ -700,119 +703,190 @@ def parse_intent_rule_based(query):
                 intent["category"] = kw
             break
             
+    # 5) View & Top N 판별
+    if "top" in query or "상위" in query:
+        intent["view"] = "topN"
+        # 숫자 추출 (예: top 5, 상위 3개)
+        numbers = re.findall(r'\d+', query)
+        if numbers:
+            intent["top_n"] = int(numbers[0])
+        else:
+            intent["top_n"] = 3 # 기본값
+    elif "요약" in query or "합계" in query or "총" in query:
+        intent["view"] = "summary"
+        
     return intent
 
-# 3. 데이터 조회 및 필터링 (Execution Engine)
-def run_query(intent):
+# 3. 데이터 조회 및 분석 엔진 (Execution Engine - Major Update)
+def run_analytics_query(intent):
     """
-    파악된 의도(intent)를 바탕으로 실제 데이터프레임 필터링 및 집계 수행
+    Intent에 따라 생산/재고 데이터를 로드하고 병합/집계하여 결과를 반환
+    Returns: (summary_text, dataframe)
     """
+    # 데이터 로드
+    df_prod = load_data(SHEET_RECORDS, COLS_RECORDS)
+    df_inv = load_data(SHEET_INVENTORY, COLS_INVENTORY)
+    
+    # 전처리: 수량/재고 숫자 변환
+    if not df_prod.empty:
+        df_prod['작업일자'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
+        df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
+    
+    if not df_inv.empty:
+        df_inv['현재고'] = pd.to_numeric(df_inv['현재고'], errors='coerce').fillna(0)
+    
+    # 날짜 필터링 (생산 데이터에만 적용)
     date_range_text = "전체 기간"
-    filtered_df = pd.DataFrame()
-
-    # 3-1. 재고 조회 (Inventory)
-    if intent["query_type"] == "inventory":
-        df = load_data(SHEET_INVENTORY, COLS_INVENTORY)
-        if df.empty: return None, "데이터 없음"
-        
-        df['현재고'] = pd.to_numeric(df['현재고'], errors='coerce').fillna(0)
-        filtered_df = df[df['현재고'] != 0].copy()
-        date_range_text = "현재 기준" # 재고는 기간 개념이 없음
-        
-        # 카테고리 필터링 (품목명 기준)
-        target_cat = intent.get("category", "전체")
-        if target_cat != "전체":
-            # 제품명이나 품목코드에 키워드가 포함된 경우 검색
-            filtered_df = filtered_df[
-                filtered_df['제품명'].astype(str).str.lower().str.contains(target_cat.lower()) |
-                filtered_df['품목코드'].astype(str).str.lower().str.contains(target_cat.lower())
+    if intent["period"] and not df_prod.empty:
+        start, end = get_date_range(intent["period"])
+        if start and end:
+            df_prod = df_prod[(df_prod['작업일자'] >= start) & (df_prod['작업일자'] <= end)]
+            date_range_text = f"{start} ~ {end}"
+    
+    # 카테고리 필터링
+    target_cat = intent.get("category", "전체")
+    if target_cat != "전체":
+        if not df_prod.empty:
+            df_prod = df_prod[df_prod['구분'].astype(str).str.lower().str.contains(target_cat.lower())]
+        if not df_inv.empty:
+            df_inv = df_inv[
+                df_inv['제품명'].astype(str).str.lower().str.contains(target_cat.lower()) |
+                df_inv['품목코드'].astype(str).str.lower().str.contains(target_cat.lower())
             ]
-            
-    # 3-2. 생산 실적 조회 (Production) - 기본
-    else:
-        df = load_data(SHEET_RECORDS, COLS_RECORDS)
-        if df.empty: return None, "데이터 없음"
 
-        # 날짜 컬럼 표준화
-        df['작업일자'] = pd.to_datetime(df['날짜'], errors='coerce').dt.date
-        df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-        
-        filtered_df = df.copy()
-        
-        # 기간 필터링
-        if intent["period"]:
-            start, end = get_date_range(intent["period"])
-            if start and end:
-                filtered_df = filtered_df[
-                    (filtered_df['작업일자'] >= start) & 
-                    (filtered_df['작업일자'] <= end)
-                ]
-                date_range_text = f"{start} ~ {end}"
-        
-        # 카테고리 필터링
-        target_cat = intent.get("category", "전체")
-        if target_cat != "전체":
-            filtered_df = filtered_df[filtered_df['구분'].astype(str).str.lower().str.contains(target_cat.lower())]
+    # --- 집계 로직 시작 ---
+    if df_prod.empty and df_inv.empty:
+        return f"⚠️ **분석 결과 ({date_range_text})**\n\n해당 조건에 맞는 데이터가 없습니다.", None
 
-    return filtered_df, date_range_text
-
-# 4. 결과 포맷팅 (Response Generator)
-def render_answer(df_result, intent, date_range_text):
-    if df_result is None or df_result.empty:
-        return f"⚠️ **분석 결과 ({date_range_text})**\n\n해당 조건에 맞는 데이터가 없습니다."
+    final_df = pd.DataFrame()
     
-    cat_text = intent.get("category", "전체").upper()
-    
-    # 4-1. 재고 조회 결과
-    if intent["query_type"] == "inventory":
-        total_qty = df_result['현재고'].sum()
-        # 재고 많은 순 TOP 5
-        top_items = df_result.sort_values(by='현재고', ascending=False).head(5)
-        
-        top_items_str = ""
-        if not top_items.empty:
-            top_list = [f"- {row['제품명']}: **{int(row['현재고']):,}** EA" for _, row in top_items.iterrows()]
-            top_items_str = "\n".join(top_list)
+    # 1) 생산 집계
+    prod_agg = pd.DataFrame()
+    if not df_prod.empty:
+        if intent["group_by"] == "category":
+            prod_agg = df_prod.groupby("구분")['수량'].sum().reset_index()
+            prod_agg.columns = ["항목", "생산량"]
+        else: # model or none
+            prod_agg = df_prod.groupby("제품명")['수량'].sum().reset_index()
+            prod_agg.columns = ["항목", "생산량"]
             
-        response = f"""
-📦 **재고 현황 ({date_range_text})**
-- **대상**: {cat_text if cat_text != '전체' else '전체 품목'}
+    # 2) 재고 집계
+    inv_agg = pd.DataFrame()
+    if not df_inv.empty:
+        # 재고는 group_by=category 일 때 집계가 모호하므로 일단 제외하거나 스킵
+        if intent["group_by"] != "category":
+            inv_agg = df_inv.groupby("제품명")['현재고'].sum().reset_index()
+            inv_agg.columns = ["항목", "재고량"]
 
-👉 총 재고량: **{int(total_qty):,} EA**
-
-🏆 **주요 보유 품목 (TOP 5)**
-{top_items_str}
-        """
-        return response
-
-    # 4-2. 생산 실적 조회 결과
+    # 3) 병합
+    if not prod_agg.empty and not inv_agg.empty:
+        final_df = pd.merge(prod_agg, inv_agg, on="항목", how="outer").fillna(0)
+    elif not prod_agg.empty:
+        final_df = prod_agg
+        final_df["재고량"] = 0
+    elif not inv_agg.empty:
+        final_df = inv_agg
+        final_df["생산량"] = 0
     else:
-        total_qty = df_result['수량'].sum()
+        return "데이터가 없습니다.", None
         
-        # 상위 모델 추출
-        top_models = (
-            df_result.groupby('제품명')['수량']
-            .sum()
-            .sort_values(ascending=False)
-            .head(3)
-        )
+    # 컬럼 정리
+    if "생산량" not in final_df.columns: final_df["생산량"] = 0
+    if "재고량" not in final_df.columns: final_df["재고량"] = 0
+    
+    # 쿼리 타입 필터링
+    if intent["query_type"] == "production":
+        final_df = final_df[["항목", "생산량"]]
+        final_df = final_df[final_df["생산량"] > 0]
+    elif intent["query_type"] == "inventory":
+        final_df = final_df[["항목", "재고량"]]
+        final_df = final_df[final_df["재고량"] != 0]
+    else: # mixed
+        final_df["재고차이"] = final_df["재고량"] - final_df["생산량"]
         
-        top_models_str = ""
-        if not top_models.empty:
-            top_str_list = [f"- {model}: {int(qty):,} EA" for model, qty in top_models.items()]
-            top_models_str = "\n".join(top_str_list)
-            
-        response = f"""
-📊 **생산 실적 분석**
-- **기간**: {date_range_text} ({intent.get('period', '기간 미지정')})
-- **대상**: {cat_text} 공정
+    # 정렬
+    sort_col = "생산량" if "생산량" in final_df.columns else "재고량"
+    final_df = final_df.sort_values(by=sort_col, ascending=False)
+    
+    # Top N
+    is_top_view = (intent["view"] == "topN")
+    if is_top_view and intent["top_n"]:
+        final_df = final_df.head(intent["top_n"])
+        
+    # 텍스트 요약
+    summary = f"📊 **분석 리포트**\n"
+    summary += f"- 기간: {date_range_text} ({intent.get('period', '기간 미지정')})\n"
+    summary += f"- 구분: {intent['group_by']} ({target_cat})\n\n"
+    
+    if "생산량" in final_df.columns:
+        total_prod = final_df["생산량"].sum()
+        summary += f"🏭 총 생산: **{int(total_prod):,} EA**\n"
+        
+    if "재고량" in final_df.columns:
+        total_inv = final_df["재고량"].sum()
+        summary += f"📦 총 재고: **{int(total_inv):,} EA**\n"
+        
+    if is_top_view:
+        summary += f"\n🏆 **상위 {intent['top_n']} 항목**"
+    else:
+        summary += f"\n📋 **세부 현황**"
 
-👉 **총 생산량**: **{int(total_qty):,} EA**
+    return summary, final_df
 
-🏆 **주요 생산 모델 (TOP 3)**
-{top_models_str}
-        """
-        return response
+# [추가] 생산량 급감 감지 함수 (로직 수정됨)
+def detect_drop(df_filtered):
+    if df_filtered.empty: return {"is_drop": False}
+    
+    # [수정] 날짜 형식을 datetime으로 통일하여 빈 날짜 채우기 준비
+    df_temp = df_filtered.copy()
+    df_temp['날짜'] = pd.to_datetime(df_temp['날짜'])
+    
+    # 일별 합계 구하기
+    daily_sum = df_temp.groupby('날짜')['수량'].sum().reset_index()
+    
+    # 데이터가 2일 미만이면 분석 불가
+    if len(daily_sum) < 2: 
+        return {"is_drop": False}
+
+    # [핵심 수정] 빈 날짜를 0으로 채워서 '진짜' 기간 평균 구하기
+    min_date = daily_sum['날짜'].min()
+    max_date = daily_sum['날짜'].max()
+    
+    # 분석 기간이 너무 짧으면 패스 (최소 7일 이상 데이터 권장이나, 여기선 데이터 기간 기준으로)
+    days_diff = (max_date - min_date).days
+    if days_diff < 7:
+        # 데이터가 7일치도 안 쌓인 구간이면 단순 평균 비교
+        return {"is_drop": False}
+
+    # 전체 날짜 인덱스 생성 (빈 날짜 0 채우기)
+    full_idx = pd.date_range(start=min_date, end=max_date, freq='D')
+    daily_sum = daily_sum.set_index('날짜').reindex(full_idx, fill_value=0)
+    
+    # 최근 7일 (데이터상 가장 최근 7일)
+    recent_series = daily_sum.iloc[-7:]['수량']
+    recent_avg = recent_series.mean()
+    
+    # 그 전 7일 (최근 7일 바로 앞 7일)
+    # 데이터가 충분하면 -14 ~ -7, 부족하면 처음부터 -7까지
+    if len(daily_sum) >= 14:
+        prev_series = daily_sum.iloc[-14:-7]['수량']
+    else:
+        prev_series = daily_sum.iloc[:-7]['수량']
+        
+    prev_avg = prev_series.mean() if not prev_series.empty else 0
+        
+    if prev_avg == 0:
+        return {"is_drop": False}
+
+    drop_rate = (prev_avg - recent_avg) / prev_avg
+    
+    # 30% 이상 감소 시 경고
+    return {
+        "is_drop": drop_rate > 0.3,
+        "rate": round(drop_rate * 100, 1),
+        "recent": round(recent_avg, 1),
+        "prev": round(prev_avg, 1)
+    }
 
 # ------------------------------------------------------------------
 # 5. 메인 앱 실행 함수 (run_app)
@@ -1153,24 +1227,8 @@ def run_app():
                         if df.empty:
                             st.info("데이터 없음")
                         else:
-                            # 1. 시스템 알림 (7일 추이)
-                            # 날짜는 date 객체이므로 timedelta와 바로 연산 가능
-                            recent_start = max_date_val - timedelta(days=6)
-                            recent = df[df['날짜'] >= recent_start]
-                            
-                            prev_start = recent_start - timedelta(days=7)
-                            prev_end = recent_start - timedelta(days=1)
-                            prev = df[(df['날짜'] >= prev_start) & (df['날짜'] <= prev_end)]
-
-                            recent_avg = recent['수량'].mean()
-                            prev_avg = prev['수량'].mean() if not prev.empty else 0
-
-                            if prev_avg > 0:
-                                diff_rate = (recent_avg - prev_avg) / prev_avg * 100
-                                if diff_rate < -10:
-                                    st.error(f"⚠️ 최근 생산량이 전주 대비 {abs(diff_rate):.1f}% 감소했습니다. (최근 7일 평균: {recent_avg:.1f} vs 전주: {prev_avg:.1f})")
-                                elif diff_rate > 10:
-                                    st.success(f"📈 최근 생산량이 전주 대비 {diff_rate:.1f}% 증가했습니다. (최근 7일 평균: {recent_avg:.1f} vs 전주: {prev_avg:.1f})")
+                            # 1. 시스템 알림 (7일 추이) -> 삭제하고 아래쪽으로 이동
+                            pass
 
                             # 2. 기간별 상세 분석
                             if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -1179,13 +1237,6 @@ def run_app():
                                 if not df_filtered.empty:
                                     # 날짜 문자열 변환 (YYYY-MM-DD)
                                     df_filtered['날짜_str'] = df_filtered['날짜'].astype(str)
-                                    
-                                    # [삭제] 총 생산, 일 평균 메트릭 표시 부분 삭제 요청
-                                    # total = df_filtered['수량'].sum()
-                                    # avg = total / len(df_filtered['날짜_str'].unique())
-                                    # m1, m2 = st.columns(2)
-                                    # m1.metric("총 생산", f"{total:,.0f}")
-                                    # m2.metric("일 평균", f"{avg:,.0f}")
                                     
                                     # 일별 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
@@ -1252,6 +1303,21 @@ def run_app():
                                             st.altair_chart(smt_chart, use_container_width=True)
                                     else:
                                         st.info("선택된 기간에 SMT 생산(PC, PLC, 배전) 데이터가 없습니다.")
+                                    
+                                    # [이동] 3. 이상 감지 분석 (제일 하단으로)
+                                    st.markdown("---")
+                                    st.subheader("💡 분석 인사이트")
+                                    drop_info = detect_drop(df_filtered)
+                                    if drop_info["is_drop"]:
+                                        st.warning(
+                                            f"⚠️ **생산량 급감 경고**\n\n"
+                                            f"최근 7일 생산량이 그 전주 대비 **{drop_info['rate']}% 감소**했습니다.\n"
+                                            f"- 최근 7일 평균: {drop_info['recent']:.1f} EA\n"
+                                            f"- 전주 7일 평균: {drop_info['prev']:.1f} EA"
+                                        )
+                                    else:
+                                        st.success("✅ 특이사항 없음: 생산량이 안정적으로 유지되고 있습니다.")
+
                                 else: st.info("선택된 기간에 데이터가 없습니다.")
                 else: st.info("생산 데이터가 없습니다.")
 
@@ -1604,38 +1670,42 @@ def run_app():
         # 채팅 히스토리 초기화
         if "messages" not in st.session_state:
             st.session_state.messages = [
-                {"role": "assistant", "content": "안녕하세요! 생산 실적에 대해 궁금한 점을 물어보세요.\n예) '지난달 PC 생산량 알려줘', '오늘 배전 실적은?'"}
+                {"role": "assistant", "content": "안녕하세요! 생산 실적 및 재고에 대해 궁금한 점을 물어보세요.\n예) '지난달 PC 생산량 알려줘', '오늘 배전 실적은?', '전체 재고 현황'"}
             ]
 
         # 이전 메시지 표시
         for msg in st.session_state.messages:
             st.chat_message(msg["role"]).write(msg["content"])
+            # 데이터프레임이 메시지와 함께 저장되어 있다면 표시 (세션 스테이트 구조 확장 필요)
+            # 현재 구조상 복잡해지므로, 가장 최근 답변에 대해서만 아래에서 표시하거나
+            # 메시지 컨텐츠에 DF를 HTML이나 Markdown 표로 변환해 넣는 방법이 있음.
+            # 여기서는 간단히 텍스트만 유지하고, 즉시 응답 시에만 DF 출력.
 
         # 사용자 입력 처리
         if prompt := st.chat_input("질문을 입력하세요"):
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.chat_message("user").write(prompt)
             
-            # NLP 엔진 호출 (LLM 시뮬레이션: 파서 + 실행 엔진 분리)
+            # NLP 엔진 호출
             with st.spinner("데이터 조회 중..."):
                 try:
-                    df = load_data(SHEET_RECORDS, COLS_RECORDS)
-                    
-                    # 1. 의도 파악 (Intent Parser) - 현재는 Rule-based로 구현됨
-                    # (OpenAI 사용 시 이 함수 내부만 API 호출로 변경하면 됨)
+                    # 1. 의도 파악
                     intent = parse_intent_rule_based(prompt)
                     
-                    # 2. 실행 엔진 (Execution Engine) - Python이 담당
-                    filtered_df, date_range_text = run_query(intent)
+                    # 2. 데이터 분석 및 조회
+                    summary_text, result_df = run_analytics_query(intent)
                     
-                    # 3. 답변 생성 (Response Generator)
-                    response = render_answer(filtered_df, intent, date_range_text)
-                    
-                except Exception as e:
-                    response = f"죄송합니다. 오류가 발생했습니다: {e}"
+                    # 3. 답변 출력
+                    st.session_state.messages.append({"role": "assistant", "content": summary_text})
+                    with st.chat_message("assistant"):
+                        st.write(summary_text)
+                        if result_df is not None and not result_df.empty:
+                            st.dataframe(result_df, hide_index=True)
 
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.chat_message("assistant").write(response)
+                except Exception as e:
+                    err_msg = f"죄송합니다. 오류가 발생했습니다: {e}"
+                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
+                    st.chat_message("assistant").write(err_msg)
 
 # ------------------------------------------------------------------
 # 메인 실행
