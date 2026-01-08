@@ -625,107 +625,136 @@ def check_password():
     return False
 
 # ------------------------------------------------------------------
-# [신규] 자연어 처리 엔진 (규칙 기반)
+# [신규] 자연어 처리 및 데이터 조회 아키텍처
 # ------------------------------------------------------------------
-# [추가] 이번주 날짜 범위 계산 함수
-def get_this_week_range():
+# 1. 날짜 범위 계산 (Python Logic)
+def get_date_range(period_str):
+    """
+    추상적인 기간 표현(this_week, last_month 등)을 정확한 date 객체 범위로 변환
+    """
     today = date.today()
-    start = today - timedelta(days=today.weekday())  # 월요일 (0: 월요일 ~ 6: 일요일)
-    end = start + timedelta(days=6)                  # 일요일
-    return start, end
-
-def process_natural_language_query(query, df):
-    """
-    사용자의 자연어 질문을 분석하여 데이터프레임을 필터링하고 결과를 반환하는 함수
-    """
-    if df.empty:
-        return "⚠️ 데이터가 없습니다."
-
-    query = query.lower()
-    
-    # 1. 날짜 필터링 로직
-    today = get_now().date()
     start_date = None
     end_date = None
-    date_str = ""
-
-    if "오늘" in query:
+    
+    if period_str == "today":
         start_date = today
         end_date = today
-        date_str = "오늘"
-    elif "어제" in query:
+    elif period_str == "yesterday":
         start_date = today - timedelta(days=1)
         end_date = today - timedelta(days=1)
-        date_str = "어제"
-    elif "이번주" in query:
-        start_date, end_date = get_this_week_range()
-        date_str = "이번주"
-    elif "지난달" in query:
-        first_day_this_month = today.replace(day=1)
-        last_day_last_month = first_day_this_month - timedelta(days=1)
-        start_date = last_day_last_month.replace(day=1)
-        end_date = last_day_last_month
-        date_str = "지난달"
-    elif "이번달" in query:
+    elif period_str == "this_week":
+        start_date = today - timedelta(days=today.weekday())
+        end_date = start_date + timedelta(days=6)
+    elif period_str == "last_week":
+        end_date = today - timedelta(days=today.weekday() + 1)
+        start_date = end_date - timedelta(days=6)
+    elif period_str == "this_month":
         start_date = today.replace(day=1)
         end_date = today
-        date_str = "이번달"
+    elif period_str == "last_month":
+        last_month_end = today.replace(day=1) - timedelta(days=1)
+        start_date = last_month_end.replace(day=1)
+        end_date = last_month_end
     
-    # 날짜 필터 적용
-    df_filtered = df.copy()
-    if start_date and end_date:
-        # 날짜 컬럼을 date 타입으로 변환 (안전하게)
-        df_filtered['날짜_dt'] = pd.to_datetime(df_filtered['날짜'], errors='coerce').dt.date
-        df_filtered = df_filtered[(df_filtered['날짜_dt'] >= start_date) & (df_filtered['날짜_dt'] <= end_date)]
-    else:
-        date_str = "전체 기간" # 날짜 언급 없으면 전체
-        # 전체 기간이라도 기본적인 정렬을 위해 dt 변환은 해줌
-        df_filtered['날짜_dt'] = pd.to_datetime(df_filtered['날짜'], errors='coerce').dt.date
+    return start_date, end_date
 
-    # 2. 공정/품목 필터링 로직
-    # 주요 키워드 리스트
-    keywords = ["pc", "cm1", "cm3", "배전", "샘플", "후공정", "후공정 외주"]
-    target_keyword = None
+# 2. 의도 파악 (Intent Parser - Rule Based Simulation for LLM)
+def parse_intent_rule_based(query):
+    """
+    사용자 입력을 분석하여 정형화된 의도(JSON 형태)를 추출
+    실제 LLM이 있다면 이 부분을 OpenAI API 호출로 대체하면 됨.
+    """
+    query = query.lower()
+    intent = {
+        "period": None,
+        "category": "전체",
+        "metric": "생산량" # 기본값
+    }
     
+    # 기간 키워드 매핑
+    if "오늘" in query: intent["period"] = "today"
+    elif "어제" in query: intent["period"] = "yesterday"
+    elif "이번주" in query: intent["period"] = "this_week"
+    elif "저번주" in query or "지난주" in query: intent["period"] = "last_week"
+    elif "이번달" in query: intent["period"] = "this_month"
+    elif "저번달" in query or "지난달" in query: intent["period"] = "last_month"
+    
+    # 카테고리 매핑
+    keywords = ["pc", "cm1", "cm3", "배전", "샘플", "후공정", "후공정 외주"]
     for kw in keywords:
         if kw in query:
-            target_keyword = kw
-            # '후공정' 검색 시 '후공정 외주'가 걸리지 않도록 주의
             if kw == "후공정" and "후공정 외주" in query:
-                target_keyword = "후공정 외주"
+                intent["category"] = "후공정 외주"
+            else:
+                intent["category"] = kw
             break
             
-    if target_keyword:
-        # 구분 컬럼에서 검색 (대소문자 무시를 위해 둘 다 소문자로)
-        df_filtered = df_filtered[df_filtered['구분'].astype(str).str.lower().str.contains(target_keyword)]
-    
-    # 3. 결과 집계 및 검증
-    if df_filtered.empty:
-        return f"⚠️ **분석 결과 ({date_str}, {start_date} ~ {end_date if end_date else ''})**\n\n해당 기간 조건에 맞는 데이터가 없습니다."
-    
-    # 수량 합계 계산
-    df_filtered['수량'] = pd.to_numeric(df_filtered['수량'], errors='coerce').fillna(0)
-    total_qty = df_filtered['수량'].sum()
-    
-    # 품목별 상위 3개 요약 (필터링된 데이터프레임 기준)
-    top_items = df_filtered.groupby('제품명')['수량'].sum().sort_values(ascending=False).head(3)
-    top_items_str = ""
-    if not top_items.empty:
-        top_items_list = [f"- {idx}: {int(val):,}개" for idx, val in top_items.items()]
-        top_items_str = "\n".join(top_items_list)
+    return intent
 
-    # 4. 답변 생성 (기간 명시)
-    date_range_str = f"{start_date} ~ {end_date}" if start_date and end_date else "전체 기간"
+# 3. 데이터 조회 및 필터링 (Execution Engine)
+def run_query(df, intent):
+    """
+    파악된 의도(intent)를 바탕으로 실제 데이터프레임 필터링 및 집계 수행
+    """
+    if df.empty: return None, "데이터 없음"
+
+    # 날짜 컬럼 표준화
+    df['작업일자'] = pd.to_datetime(df['날짜'], errors='coerce').dt.date
+    df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
     
-    response = f"📊 **분석 결과 ({date_range_str}, {date_str} 기준)**\n\n"
-    if target_keyword:
-        response += f"🔹 **'{target_keyword.upper()}'** 공정 생산 실적입니다.\n"
+    filtered_df = df.copy()
+    date_range_text = "전체 기간"
     
-    response += f"👉 총 생산량: **{int(total_qty):,} EA**\n"
+    # 1. 기간 필터링
+    if intent["period"]:
+        start, end = get_date_range(intent["period"])
+        if start and end:
+            filtered_df = filtered_df[
+                (filtered_df['작업일자'] >= start) & 
+                (filtered_df['작업일자'] <= end)
+            ]
+            date_range_text = f"{start} ~ {end}"
     
-    if top_items_str:
-        response += f"\n🏆 **주요 생산 모델 (TOP 3)**\n{top_items_str}"
+    # 2. 카테고리 필터링
+    target_cat = intent.get("category", "전체")
+    if target_cat != "전체":
+        # 대소문자 무시 검색
+        filtered_df = filtered_df[filtered_df['구분'].astype(str).str.lower().str.contains(target_cat.lower())]
+
+    return filtered_df, date_range_text
+
+# 4. 결과 포맷팅 (Response Generator)
+def render_answer(df_result, intent, date_range_text):
+    if df_result is None or df_result.empty:
+        return f"⚠️ **분석 결과 ({date_range_text})**\n\n해당 조건에 맞는 생산 데이터가 없습니다."
+    
+    total_qty = df_result['수량'].sum()
+    
+    # 상위 모델 추출
+    top_models = (
+        df_result.groupby('제품명')['수량']
+        .sum()
+        .sort_values(ascending=False)
+        .head(3)
+    )
+    
+    top_models_str = ""
+    if not top_models.empty:
+        top_str_list = [f"- {model}: {int(qty):,} EA" for model, qty in top_models.items()]
+        top_models_str = "\n".join(top_str_list)
         
+    cat_text = intent.get("category", "전체").upper()
+    
+    response = f"""
+📊 **분석 결과**
+- **기간**: {date_range_text} ({intent.get('period', '기간 미지정')})
+- **대상**: {cat_text} 공정
+
+👉 **총 생산량**: **{int(total_qty):,} EA**
+
+🏆 **주요 생산 모델 (TOP 3)**
+{top_models_str}
+    """
     return response
 
 # ------------------------------------------------------------------
@@ -1530,11 +1559,21 @@ def run_app():
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.chat_message("user").write(prompt)
             
-            # NLP 엔진 호출
+            # NLP 엔진 호출 (LLM 시뮬레이션: 파서 + 실행 엔진 분리)
             with st.spinner("데이터 조회 중..."):
                 try:
                     df = load_data(SHEET_RECORDS, COLS_RECORDS)
-                    response = process_natural_language_query(prompt, df)
+                    
+                    # 1. 의도 파악 (Intent Parser) - 현재는 Rule-based로 구현됨
+                    # (OpenAI 사용 시 이 함수 내부만 API 호출로 변경하면 됨)
+                    intent = parse_intent_rule_based(prompt)
+                    
+                    # 2. 실행 엔진 (Execution Engine) - Python이 담당
+                    filtered_df, date_range_text = run_query(df, intent)
+                    
+                    # 3. 답변 생성 (Response Generator)
+                    response = render_answer(filtered_df, intent, date_range_text)
+                    
                 except Exception as e:
                     response = f"죄송합니다. 오류가 발생했습니다: {e}"
 
