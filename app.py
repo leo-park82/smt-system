@@ -1015,7 +1015,7 @@ def run_app():
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
                     
                     # 분석 탭 분리
-                    anal_tab1, anal_tab2 = st.tabs(["📅 기간별 추이 (년/월/주)", "🔍 상세 분석 (일자 지정)"])
+                    anal_tab1, anal_tab2 = st.tabs(["📊 기간별 추이 분석", "🔍 상세 분석 (일자 지정)"])
                     
                     with anal_tab1:
                         st.subheader("📈 기간별 생산 추이")
@@ -1025,41 +1025,53 @@ def run_app():
                         df['YearMonth'] = df['날짜'].dt.strftime('%Y-%m')
                         df['YearWeek'] = df['날짜'].dt.strftime('%Y-%U') 
                         
-                        c_y, c_m = st.columns(2)
+                        # 1. 주별 생산량 (최근 12주) - 맨 위로 이동
+                        st.markdown("##### 📅 주별 생산량 (최근 12주)")
+                        last_12_weeks = df['YearWeek'].drop_duplicates().sort_values().tail(12)
+                        weekly_df = df[df['YearWeek'].isin(last_12_weeks)].groupby('YearWeek')['수량'].sum().reset_index()
                         
-                        # 1. 연도별 생산량
+                        chart_w = alt.Chart(weekly_df).mark_bar(color='#10b981').encode(
+                            x=alt.X('YearWeek:O', title='주차 (Year-Week)', axis=alt.Axis(labelAngle=0)), # [수정] 각도 0도
+                            y=alt.Y('수량:Q', title='생산량'),
+                            tooltip=['YearWeek', alt.Tooltip('수량', format=',')]
+                        ).properties(height=300)
+                        st.altair_chart(chart_w, use_container_width=True)
+
+                        c_m, c_y = st.columns(2) # [수정] 월별 먼저, 그 다음 연도별
+                        
+                        # 2. 월별 생산량
+                        with c_m:
+                            st.markdown("##### 📅 월별 생산량")
+                            monthly_df = df.groupby('YearMonth')['수량'].sum().reset_index()
+                            chart_m = alt.Chart(monthly_df).mark_line(point=True).encode(
+                                x=alt.X('YearMonth:O', title='월', axis=alt.Axis(labelAngle=0)), # [수정] 각도 0도
+                                y=alt.Y('수량:Q', title='생산량'),
+                                tooltip=['YearMonth', alt.Tooltip('수량', format=',')]
+                            ).properties(height=300)
+                            st.altair_chart(chart_m, use_container_width=True)
+
+                        # 3. 연도별 생산량
                         with c_y:
-                            st.markdown("##### 🗓 연도별 생산량")
+                            st.markdown("##### 📅 연도별 생산량")
                             yearly_df = df.groupby('Year')['수량'].sum().reset_index()
                             chart_y = alt.Chart(yearly_df).mark_bar(color='#3b82f6').encode(
-                                x=alt.X('Year:O', title='연도'),
+                                x=alt.X('Year:O', title='연도', axis=alt.Axis(labelAngle=0)), # [수정] 각도 0도
                                 y=alt.Y('수량:Q', title='생산량'),
                                 tooltip=['Year', alt.Tooltip('수량', format=',')]
                             ).properties(height=300)
                             st.altair_chart(chart_y, use_container_width=True)
                             
-                        # 2. 월별 생산량
-                        with c_m:
-                            st.markdown("##### 🗓 월별 생산량")
-                            monthly_df = df.groupby('YearMonth')['수량'].sum().reset_index()
-                            chart_m = alt.Chart(monthly_df).mark_line(point=True).encode(
-                                x=alt.X('YearMonth:O', title='월'),
-                                y=alt.Y('수량:Q', title='생산량'),
-                                tooltip=['YearMonth', alt.Tooltip('수량', format=',')]
-                            ).properties(height=300)
-                            st.altair_chart(chart_m, use_container_width=True)
-                            
-                        # 3. 주별 생산량 (최근 12주)
-                        st.markdown("##### 🗓 주별 생산량 (최근 12주)")
-                        last_12_weeks = df['YearWeek'].drop_duplicates().sort_values().tail(12)
-                        weekly_df = df[df['YearWeek'].isin(last_12_weeks)].groupby('YearWeek')['수량'].sum().reset_index()
+                        # 4. 모델별 생산 추이 (상위 10개) - 맨 아래로 이동
+                        st.markdown("##### 📅 모델별 생산량 (TOP 10)")
+                        model_df = df.groupby('제품명')['수량'].sum().reset_index().sort_values('수량', ascending=False).head(10)
                         
-                        chart_w = alt.Chart(weekly_df).mark_bar(color='#10b981').encode(
-                            x=alt.X('YearWeek:O', title='주차 (Year-Week)'),
+                        chart_model = alt.Chart(model_df).mark_bar().encode(
+                            x=alt.X('제품명:O', sort='-y', title='모델명', axis=alt.Axis(labelAngle=0)), # [수정] 각도 0도
                             y=alt.Y('수량:Q', title='생산량'),
-                            tooltip=['YearWeek', alt.Tooltip('수량', format=',')]
-                        ).properties(height=300)
-                        st.altair_chart(chart_w, use_container_width=True)
+                            color=alt.value("#f59e0b"),
+                            tooltip=['제품명', alt.Tooltip('수량', format=',')]
+                        ).properties(height=350)
+                        st.altair_chart(chart_model, use_container_width=True)
 
                     with anal_tab2:
                         st.subheader("🔍 상세 기간 분석")
@@ -1085,7 +1097,7 @@ def run_app():
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                                     
                                     bar = alt.Chart(chart_data).mark_bar().encode(
-                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
+                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")), # [수정] 각도 0도
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleFontWeight="bold")),
                                         color='구분', 
                                         tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
