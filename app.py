@@ -1005,46 +1005,90 @@ def run_app():
                 else: st.info("재고 데이터가 없습니다.")
 
             with t3:
-                st.markdown("#### 📊 생산분석")
+                st.markdown("#### 📊 생산량 분석")
                 df = load_data(SHEET_RECORDS, COLS_RECORDS)
+                
                 if not df.empty:
-                    # [중요] 날짜 표준화 (시간 제거)
-                    df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce').dt.date
+                    # [중요] 날짜 표준화
+                    df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
+                    df = df.dropna(subset=['날짜'])
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
-                    df = df.dropna(subset=['날짜']) 
                     
-                    min_date = df['날짜'].min()
-                    max_date_val = df['날짜'].max()
+                    # 분석 탭 분리
+                    anal_tab1, anal_tab2 = st.tabs(["📅 기간별 추이 (년/월/주)", "🔍 상세 분석 (일자 지정)"])
                     
-                    c1, c2 = st.columns([1, 1])
-                    with c1:
-                        default_start = max_date_val - timedelta(days=29)
-                        if default_start < min_date: default_start = min_date
-                        date_range = st.date_input("기간 선택", value=(default_start, max_date_val), min_value=min_date, max_value=max_date_val)
-                    
-                    if st.button("분석 실행"):
-                        if df.empty:
-                            st.info("데이터 없음")
-                        else:
-                            # 1. 시스템 알림 (7일 추이) -> 삭제하고 아래쪽으로 이동
-                            pass
+                    with anal_tab1:
+                        st.subheader("📈 기간별 생산 추이")
+                        
+                        # 날짜 파생 컬럼 생성
+                        df['Year'] = df['날짜'].dt.strftime('%Y')
+                        df['YearMonth'] = df['날짜'].dt.strftime('%Y-%m')
+                        df['YearWeek'] = df['날짜'].dt.strftime('%Y-%U') 
+                        
+                        c_y, c_m = st.columns(2)
+                        
+                        # 1. 연도별 생산량
+                        with c_y:
+                            st.markdown("##### 🗓 연도별 생산량")
+                            yearly_df = df.groupby('Year')['수량'].sum().reset_index()
+                            chart_y = alt.Chart(yearly_df).mark_bar(color='#3b82f6').encode(
+                                x=alt.X('Year:O', title='연도'),
+                                y=alt.Y('수량:Q', title='생산량'),
+                                tooltip=['Year', alt.Tooltip('수량', format=',')]
+                            ).properties(height=300)
+                            st.altair_chart(chart_y, use_container_width=True)
+                            
+                        # 2. 월별 생산량
+                        with c_m:
+                            st.markdown("##### 🗓 월별 생산량")
+                            monthly_df = df.groupby('YearMonth')['수량'].sum().reset_index()
+                            chart_m = alt.Chart(monthly_df).mark_line(point=True).encode(
+                                x=alt.X('YearMonth:O', title='월'),
+                                y=alt.Y('수량:Q', title='생산량'),
+                                tooltip=['YearMonth', alt.Tooltip('수량', format=',')]
+                            ).properties(height=300)
+                            st.altair_chart(chart_m, use_container_width=True)
+                            
+                        # 3. 주별 생산량 (최근 12주)
+                        st.markdown("##### 🗓 주별 생산량 (최근 12주)")
+                        last_12_weeks = df['YearWeek'].drop_duplicates().sort_values().tail(12)
+                        weekly_df = df[df['YearWeek'].isin(last_12_weeks)].groupby('YearWeek')['수량'].sum().reset_index()
+                        
+                        chart_w = alt.Chart(weekly_df).mark_bar(color='#10b981').encode(
+                            x=alt.X('YearWeek:O', title='주차 (Year-Week)'),
+                            y=alt.Y('수량:Q', title='생산량'),
+                            tooltip=['YearWeek', alt.Tooltip('수량', format=',')]
+                        ).properties(height=300)
+                        st.altair_chart(chart_w, use_container_width=True)
 
-                            # 2. 기간별 상세 분석
+                    with anal_tab2:
+                        st.subheader("🔍 상세 기간 분석")
+                        min_date = df['날짜'].min().date()
+                        max_date_val = df['날짜'].max().date()
+                        
+                        c1, c2 = st.columns([1, 1])
+                        with c1:
+                            default_start = max_date_val - timedelta(days=29)
+                            if default_start < min_date: default_start = min_date
+                            date_range = st.date_input("기간 선택", value=(default_start, max_date_val), min_value=min_date, max_value=max_date_val)
+                        
+                        if st.button("분석 실행"):
                             if isinstance(date_range, tuple) and len(date_range) == 2:
-                                mask = (df['날짜'] >= date_range[0]) & (df['날짜'] <= date_range[1])
+                                mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
                                 df_filtered = df[mask].copy()
+                                
                                 if not df_filtered.empty:
-                                    # 날짜 문자열 변환 (YYYY-MM-DD)
-                                    df_filtered['날짜_str'] = df_filtered['날짜'].astype(str)
+                                    # 날짜 문자열 변환
+                                    df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
                                     
-                                    # 일별 차트
+                                    # 일별 생산량 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                                     
-                                    # [중요] x축 Ordinal(:O)
                                     bar = alt.Chart(chart_data).mark_bar().encode(
                                         x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
-                                        y=alt.Y('수량:Q', axis=alt.Axis(title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
-                                        color='구분', tooltip=['날짜_str', '구분', '수량']
+                                        y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleFontWeight="bold")),
+                                        color='구분', 
+                                        tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
                                     ).properties(height=350)
                                     st.altair_chart(bar, use_container_width=True)
 
@@ -1063,7 +1107,6 @@ def run_app():
                                     df_grouped = df_filtered.dropna(subset=['Group']).groupby('Group')['수량'].sum().reset_index()
                                     
                                     if not df_grouped.empty:
-                                        # 순서 정렬 (PC, PLC, 배전, 후공정, 샘플 순)
                                         sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정", "샘플"]
                                         df_grouped['Group'] = pd.Categorical(df_grouped['Group'], categories=sort_order, ordered=True)
                                         df_grouped = df_grouped.sort_values('Group')
@@ -1076,7 +1119,7 @@ def run_app():
                                         st.info("해당 기간에 집계할 주요 공정 데이터가 없습니다.")
 
                                     st.markdown("---")
-                                    st.subheader("🔎 SMT 생산 모델별 분석 (PC/PLC/배전 합산)")
+                                    st.subheader("🔎 SMT 생산 모델별 분석")
                                     
                                     smt_cats = ["PC", "CM1", "CM3", "배전"]
                                     df_smt = df_filtered[df_filtered['구분'].isin(smt_cats)]
@@ -1103,7 +1146,6 @@ def run_app():
                                     else:
                                         st.info("선택된 기간에 SMT 생산(PC, PLC, 배전) 데이터가 없습니다.")
                                     
-                                    # [이동] 3. 이상 감지 분석 (제일 하단으로)
                                     st.markdown("---")
                                     st.subheader("💡 분석 인사이트")
                                     drop_info = detect_drop(df_filtered)
