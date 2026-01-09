@@ -1038,8 +1038,9 @@ def run_app():
                             
                             chart_w = alt.Chart(weekly_df).mark_bar().encode(
                                 x=alt.X('YearWeek:O', title='주차 (Year-Week)', axis=alt.Axis(labelAngle=0)),
-                                y=alt.Y('수량:Q', title='생산량'),
-                                color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), # 색상 구분
+                                # [수정] Y축 제목 가로로 변경 및 위치 조정
+                                y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
                                 tooltip=['YearWeek', '구분', alt.Tooltip('수량', format=',')]
                             ).properties(height=300)
                             st.altair_chart(chart_w, use_container_width=True)
@@ -1052,8 +1053,9 @@ def run_app():
                                 monthly_df = df_trend.groupby(['YearMonth', '구분'])['수량'].sum().reset_index()
                                 chart_m = alt.Chart(monthly_df).mark_line(point=True).encode(
                                     x=alt.X('YearMonth:O', title='월', axis=alt.Axis(labelAngle=0)),
-                                    y=alt.Y('수량:Q', title='생산량'),
-                                    color=alt.Color('구분', title='공정'), # 색상 구분
+                                    # [수정] Y축 제목 가로로 변경
+                                    y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                    color=alt.Color('구분', title='공정'), 
                                     tooltip=['YearMonth', '구분', alt.Tooltip('수량', format=',')]
                                 ).properties(height=300)
                                 st.altair_chart(chart_m, use_container_width=True)
@@ -1064,8 +1066,9 @@ def run_app():
                                 yearly_df = df_trend.groupby(['Year', '구분'])['수량'].sum().reset_index()
                                 chart_y = alt.Chart(yearly_df).mark_bar().encode(
                                     x=alt.X('Year:O', title='연도', axis=alt.Axis(labelAngle=0)),
-                                    y=alt.Y('수량:Q', title='생산량'),
-                                    color=alt.Color('구분', title='공정'), # 색상 구분
+                                    # [수정] Y축 제목 가로로 변경
+                                    y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                    color=alt.Color('구분', title='공정'), 
                                     tooltip=['Year', '구분', alt.Tooltip('수량', format=',')]
                                 ).properties(height=300)
                                 st.altair_chart(chart_y, use_container_width=True)
@@ -1078,8 +1081,9 @@ def run_app():
                             
                             chart_model = alt.Chart(model_df).mark_bar().encode(
                                 x=alt.X('제품명:O', sort='-y', title='모델명', axis=alt.Axis(labelAngle=0)),
-                                y=alt.Y('수량:Q', title='생산량'),
-                                color=alt.Color('구분', title='공정'), # 색상 구분
+                                # [수정] Y축 제목 가로로 변경
+                                y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                color=alt.Color('구분', title='공정'), 
                                 tooltip=['제품명', '구분', alt.Tooltip('수량', format=',')]
                             ).properties(height=350)
                             st.altair_chart(chart_model, use_container_width=True)
