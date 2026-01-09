@@ -596,8 +596,8 @@ def check_password():
 
     if st.session_state.logged_in: return True
     
-    # [수정] 로그인 창 크기 및 로고 크기 조절 (컬럼 비율 변경 5:2:5 -> 4:3:4)
-    col1, col2, col3 = st.columns([4, 3, 4])
+    # [수정] 로그인 창 크기 및 로고 크기 조절 (컬럼 비율 변경 3:4:3)
+    col1, col2, col3 = st.columns([3, 4, 3])
     with col2:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
@@ -740,13 +740,15 @@ def run_app():
                 col_g1, col_g2 = st.columns([2, 1])
 
                 with col_g1:
-                    st.subheader("📈 주간 생산 추이 & 유형")
+                    # [수정] 30일로 확장 및 인터랙티브 줌/팬 적용
+                    st.subheader("📈 최근 30일 생산 추이 & 유형")
                     df_prod = metrics['df_prod']
                     if not df_prod.empty and HAS_ALTAIR:
                         # [날짜 표준화] datetime.date 객체로 변환하여 비교
                         df_prod['날짜_dt'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
-                        last_7_days = metrics['today_dt'] - timedelta(days=7)
-                        chart_data = df_prod[df_prod['날짜_dt'] >= last_7_days].copy()
+                        # [수정] 7일 -> 30일
+                        last_30_days = metrics['today_dt'] - timedelta(days=30)
+                        chart_data = df_prod[df_prod['날짜_dt'] >= last_30_days].copy()
                         
                         if not chart_data.empty:
                             # [수정] 날짜 중복 이슈 해결: 문자열 변환 후 Ordinal 사용 (:T -> :O)
@@ -759,7 +761,7 @@ def run_app():
                                 y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
                                 color=alt.Color('구분', legend=alt.Legend(title="공정 구분")),
                                 tooltip=[alt.Tooltip('날짜_str', title='일자'), '구분', '수량']
-                            ).properties(height=300)
+                            ).properties(height=300).interactive() # [수정] interactive 추가
                             st.altair_chart(chart, use_container_width=True)
                         else: st.info("최근 데이터가 없습니다.")
                     else: st.info("생산 데이터가 없습니다.")
@@ -1110,17 +1112,23 @@ def run_app():
                                     # 날짜 문자열 변환
                                     df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
                                     
+                                    # [New] Slider for chart width
+                                    chart_width = st.slider("↔️ 차트 너비 조절", min_value=600, max_value=3000, value=1200, step=100)
+
                                     # 일별 생산량 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                                     
-                                    # [수정] 차트 짤림 방지를 위해 interactive() 추가
+                                    # [수정] 차트 짤림 방지를 위해 interactive() 제거 후 직접 너비 지정
                                     bar = alt.Chart(chart_data).mark_bar().encode(
                                         x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
                                         color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
                                         tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
-                                    ).properties(height=350).interactive() # 줌/팬 가능하게 설정
-                                    st.altair_chart(bar, use_container_width=True)
+                                    ).properties(
+                                        height=350,
+                                        width=chart_width # [수정] 동적 너비 적용
+                                    ) 
+                                    st.altair_chart(bar, use_container_width=False) # [수정] 스크롤 가능하도록 False 설정
 
                                     st.markdown("---")
                                     st.subheader("🧩 공정별 통합 생산 수량")
