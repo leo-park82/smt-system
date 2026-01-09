@@ -1113,12 +1113,13 @@ def run_app():
                                     # 일별 생산량 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                                     
+                                    # [수정] 차트 짤림 방지를 위해 interactive() 추가
                                     bar = alt.Chart(chart_data).mark_bar().encode(
-                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")), # [수정] 각도 0도
-                                        y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleFontWeight="bold")),
-                                        color='구분', 
+                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
+                                        y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                        color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
                                         tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
-                                    ).properties(height=350)
+                                    ).properties(height=350).interactive() # 줌/팬 가능하게 설정
                                     st.altair_chart(bar, use_container_width=True)
 
                                     st.markdown("---")
@@ -1129,7 +1130,7 @@ def run_app():
                                         elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
                                         elif cat == "배전": return "배전"
                                         elif cat == "후공정": return "후공정"
-                                        elif cat == "샘플": return "샘플" # Added Sample
+                                        elif cat == "샘플": return "샘플"
                                         return None 
 
                                     df_filtered['Group'] = df_filtered['구분'].apply(map_category)
@@ -1163,14 +1164,16 @@ def run_app():
                                             st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=400)
                                         
                                         with c_s2:
-                                            top_n = st.slider("차트 표시 개수 (상위 N개)", min_value=5, max_value=50, value=15, key="smt_chart_limit")
-                                            chart_data_smt = smt_agg.head(top_n)
+                                            # [수정] 슬라이더 삭제 및 상위 20개 고정 표시
+                                            # top_n = st.slider(...) 삭제됨
+                                            chart_data_smt = smt_agg.head(20) # Top 20 고정
+                                            
                                             smt_chart = alt.Chart(chart_data_smt).mark_bar().encode(
                                                 x=alt.X('제품명', sort='-y', axis=alt.Axis(labelAngle=-45, title="모델명")),
-                                                y=alt.Y('수량', axis=alt.Axis(title="생산 수량")),
+                                                y=alt.Y('수량', axis=alt.Axis(title="생산 수량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
                                                 color=alt.value("#3b82f6"),
                                                 tooltip=['제품명', alt.Tooltip('수량', format=',')]
-                                            ).properties(title=f"SMT 생산 상위 {top_n}개 모델")
+                                            ).properties(title="SMT 생산 상위 20개 모델")
                                             st.altair_chart(smt_chart, use_container_width=True)
                                     else:
                                         st.info("선택된 기간에 SMT 생산(PC, PLC, 배전) 데이터가 없습니다.")
