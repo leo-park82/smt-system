@@ -22,14 +22,6 @@ try:
 except ImportError:
     HAS_CANVAS = False
 
-# [추가] Matplotlib 라이브러리 (Pandas 스타일링용)
-try:
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
-
 # 구글 시트 연동 라이브러리
 import gspread
 from google.oauth2.service_account import Credentials
@@ -278,6 +270,11 @@ def get_dashboard_stats():
     daily_avg = 0
     top_category = "-"
     top_model = "-"
+    
+    # [수정] 분석 대상 공정 필터링 (KPI 계산에도 후공정 제외 여부 적용 - 요청에 따라 일관성 유지)
+    # 다만 대시보드 KPI는 '전체'를 보는 것이 맞을 수 있으나, 심층 분석과 맞추려면 필터링 필요.
+    # 여기서는 '전체'를 보여주되, 심층 분석 탭에서 상세를 보도록 유도하는 것이 일반적.
+    # 사용자 요청이 '기간별 심층 분석' 탭에서의 제외였으므로 대시보드는 전체 유지.
     
     if not df_prod.empty:
         df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
@@ -918,6 +915,54 @@ def run_app():
                                     f"**일 평균:** {daily_avg:.1f} EA"
                                 )
                                 st.markdown("---")
+                                
+                                # [STEP 1.5] 핵심 인사이트 (룰 기반 요약)
+                                st.markdown("##### 📌 분석 요약")
+                                insight_msgs = []
+                                
+                                # (1) 전체 방향성
+                                direction = "증가" if total_diff >= 0 else "감소"
+                                insight_msgs.append(f"전체 생산량은 전기간 대비 **{abs(delta_pct):.1f}% {direction}**했습니다. ({int(delta_val):+,} EA)")
+                                
+                                # (2) 모델별 기여도
+                                model_curr = df_curr.groupby('제품명')['수량'].sum()
+                                model_prev = df_prev.groupby('제품명')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
+                                model_diff = model_curr.sub(model_prev, fill_value=0).sort_values(key=abs, ascending=False)
+                                
+                                top_model_name = model_diff.index[0]
+                                top_model_val = model_diff.iloc[0]
+                                if delta_val != 0:
+                                    contrib_rate = (top_model_val / delta_val) * 100
+                                    # 방향이 같을 때만 기여도 언급
+                                    if contrib_rate > 0:
+                                        insight_msgs.append(f"전체 {direction}의 **{contrib_rate:.0f}%**는 **[{top_model_name}]** 모델의 변동({int(top_model_val):+,} EA)이 주도했습니다.")
+                                    else:
+                                        insight_msgs.append(f"전체적으로 {direction}했으나, **[{top_model_name}]** 모델은 반대로 {int(top_model_val):+,} EA 변동했습니다.")
+                                
+                                # (3) 공정별 기여도
+                                cat_curr = df_curr.groupby('구분')['수량'].sum()
+                                cat_prev = df_prev.groupby('구분')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
+                                cat_diff = cat_curr.sub(cat_prev, fill_value=0).sort_values(key=abs, ascending=False)
+                                
+                                top_cat_name = cat_diff.index[0]
+                                top_cat_val = cat_diff.iloc[0]
+                                if delta_val != 0 and (top_cat_val / delta_val) > 0.5:
+                                     insight_msgs.append(f"공정별로는 **[{top_cat_name}]** 공정의 변동폭({int(top_cat_val):+,} EA)이 가장 큽니다.")
+
+                                # (4) 이상 징후 (생산 공백일)
+                                daily_sums = df_curr.groupby('날짜')['수량'].sum()
+                                zero_days = duration - len(daily_sums) 
+                                if zero_days > 0:
+                                    insight_msgs.append(f"⚠️ 기간 중 **{zero_days}일간의 생산 공백**이 존재합니다. (휴무일/설비 점검 확인 필요)")
+
+                                # 메시지 출력
+                                for msg in insight_msgs:
+                                    if "⚠️" in msg:
+                                        st.warning(msg)
+                                    else:
+                                        st.info(msg)
+
+                                st.markdown("---")
 
                                 # [STEP 2] 전체 추이 (Context) - Line + Bar
                                 st.subheader("📈 전체 생산 추이 (일별 + 7일 이동평균)")
@@ -943,33 +988,44 @@ def run_app():
                                 
                                 # 3-1. 모델별 기여도
                                 with c1:
-                                    st.markdown("##### 🧩 모델별 증감 기여도 (TOP 5)")
-                                    model_curr = df_curr.groupby('제품명')['수량'].sum()
-                                    model_prev = df_prev.groupby('제품명')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
-                                    model_diff = model_curr.sub(model_prev, fill_value=0).reset_index()
-                                    model_diff.columns = ['모델명', '증감량']
-                                    model_diff['abs_diff'] = model_diff['증감량'].abs()
-                                    top_contributors = model_diff.sort_values('abs_diff', ascending=False).head(5).drop(columns=['abs_diff'])
+                                    st.markdown("##### 🧩 모델별 증감 기여도 (Top 5)")
+                                    # 데이터프레임 생성
+                                    contrib_df = model_diff.head(5).reset_index()
+                                    contrib_df.columns = ['모델명', '변동량']
                                     
-                                    # [수정] Pandas Style 적용 (Matplotlib 의존성 제거)
-                                    # Streamlit dataframe은 기본적으로 스타일을 지원하지만 background_gradient는 matplotlib 필요
-                                    # 여기서는 단순 데이터프레임으로 표시하되, 증감량에 따라 화살표 추가 등 텍스트 포맷팅으로 대체
+                                    # 화살표 포맷팅 및 상태 표시
                                     def format_arrow(val):
                                         return f"⬆ {val:,.0f}" if val > 0 else f"⬇ {abs(val):,.0f}" if val < 0 else "-"
 
-                                    top_contributors['증감량'] = top_contributors['증감량'].apply(format_arrow)
-                                    st.dataframe(top_contributors, hide_index=True, use_container_width=True)
+                                    def get_status(val, model_name):
+                                        if val == 0: return "-"
+                                        # 모델의 현재 생산량이 0인지 확인 (단종/계획없음 추정)
+                                        is_zero_prod = False
+                                        if val < 0: # 감소한 경우
+                                            curr_vol = model_curr.get(model_name, 0)
+                                            if curr_vol == 0: is_zero_prod = True
+                                        
+                                        return "계획 제외/중단?" if is_zero_prod else "물량 변동"
+
+                                    contrib_df['변동'] = contrib_df['변동량'].apply(format_arrow)
+                                    contrib_df['상태 추정'] = contrib_df.apply(lambda x: get_status(x['변동량'], x['모델명']) if x['변동량'] < 0 else "생산 증가", axis=1)
+                                    
+                                    # 변동량 컬럼 숨기고 변동(화살표) 컬럼 보여주기
+                                    st.dataframe(
+                                        contrib_df[['모델명', '변동', '상태 추정']],
+                                        hide_index=True, 
+                                        use_container_width=True
+                                    )
 
 
-                                # 3-2. 공정별 기여도
+                                # 3-2. 공정별 기여도 (Chart)
                                 with c2:
                                     st.markdown("##### 🏭 공정별 증감 기여도")
-                                    cat_curr = df_curr.groupby('구분')['수량'].sum()
-                                    cat_prev = df_prev.groupby('구분')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
-                                    cat_diff = cat_curr.sub(cat_prev, fill_value=0).reset_index()
-                                    cat_diff.columns = ['구분', '증감량']
+                                    # cat_diff는 이미 위에서 계산됨 (Series -> DataFrame 변환)
+                                    cat_diff_df = cat_diff.reset_index()
+                                    cat_diff_df.columns = ['구분', '증감량']
                                     
-                                    chart_cat = alt.Chart(cat_diff).mark_bar().encode(
+                                    chart_cat = alt.Chart(cat_diff_df).mark_bar().encode(
                                         x=alt.X('구분:O', axis=alt.Axis(labelAngle=0)),
                                         y=alt.Y('증감량:Q', axis=alt.Axis(title="증감량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
                                         color=alt.condition(alt.datum.증감량 > 0, alt.value("steelblue"), alt.value("orange")),
@@ -977,17 +1033,36 @@ def run_app():
                                     ).properties(height=250)
                                     st.altair_chart(chart_cat, use_container_width=True)
 
-                                # [STEP 4] 이상 감지
-                                period_mean = daily_trend['수량'].mean()
-                                anomalies = daily_trend[daily_trend['수량'] < (period_mean * 0.5)]
-                                if not anomalies.empty:
-                                    st.markdown("---")
-                                    st.subheader("⚠️ 이상 감지 (생산 급감일)")
-                                    st.warning(f"총 {len(anomalies)}일의 생산량이 기간 평균({int(period_mean):,} EA)의 50% 미만입니다.")
-                                    cols = st.columns(len(anomalies)) if len(anomalies) <= 4 else st.columns(4)
-                                    for idx, row in enumerate(anomalies.itertuples()):
-                                        with cols[idx % 4]:
-                                            st.metric(label=row.날짜_str, value=f"{int(row.수량):,} EA", delta=f"{int(row.수량 - period_mean):,} (평균대비)", delta_color="inverse")
+                                # --- [4] 조치 가이드 (Action) ---
+                                st.markdown("---")
+                                st.subheader("📢 관리자 조치 제안")
+                                
+                                action_cols = st.columns(2)
+                                with action_cols[0]:
+                                    if delta_val < 0:
+                                        st.error("📉 **생산량 감소 대응**")
+                                        st.markdown(f"""
+                                        - **주요 감소 모델({top_model_name})**의 출하 계획을 확인하세요.
+                                        - 만약 계획된 감소라면 **인력 재배치**를 고려하세요.
+                                        - 계획되지 않은 감소라면 **자재 결품**이나 **설비 고장** 여부를 즉시 파악해야 합니다.
+                                        """)
+                                    else:
+                                        st.success("📈 **생산량 증가 대응**")
+                                        st.markdown(f"""
+                                        - 생산량이 증가 추세입니다. **후공정/포장 자재 재고**를 미리 확보하세요.
+                                        - **[{top_model_name}]** 모델의 불량률 추이를 함께 모니터링하여 품질 이슈를 예방하세요.
+                                        """)
+                                
+                                with action_cols[1]:
+                                    if zero_days > 0:
+                                        st.warning("⚠️ **가동률 점검 필요**")
+                                        st.markdown(f"""
+                                        - **{zero_days}일간의 생산 실적 없음**이 감지되었습니다.
+                                        - 계획된 비가동(휴일)이 아니라면 **설비 가동 데이터**와 대조하여 누락 여부를 확인하세요.
+                                        """)
+                                    else:
+                                        st.info("✅ **가동 안정성**")
+                                        st.markdown("생산 공백 없이 꾸준히 가동되고 있습니다.")
                             else:
                                 st.info("선택된 기간에 데이터가 없습니다.")
 
