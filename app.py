@@ -861,243 +861,224 @@ def run_app():
                     df = df.dropna(subset=['날짜'])
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
                     
-                    # 분석 탭 분리
-                    anal_tab1, anal_tab2 = st.tabs(["📊 기간별 추이 분석", "🔍 상세 기간 분석 (리포트)"])
+                    # [탭 이름 수정]
+                    anal_tab1, anal_tab2 = st.tabs(["📊 기간별 심층 분석 (리포트)", "🔍 상세 기간 조회 (일자별)"])
                     
+                    # --- Tab 1: 심층 분석 (스토리형 리포트) ---
                     with anal_tab1:
-                        # [수정] 제목 변경
-                        st.subheader("📈 SMT 기간별 생산 추이 (PC, PLC, 배전)")
+                        st.subheader("📈 기간별 생산 추이 심층 분석 (PC, PLC, 배전)")
                         
-                        # [필터링 추가] 지정된 공정(PC, CM1, CM3, 배전)만 필터링
-                        target_cats = ["PC", "CM1", "CM3", "배전"]
-                        df_trend = df[df['구분'].isin(target_cats)].copy()
+                        # 기간 선택 (기본값: 최근 30일)
+                        min_date = df['날짜'].min().date()
+                        max_date_val = df['날짜'].max().date()
+                        default_start = max_date_val - timedelta(days=29)
+                        if default_start < min_date: default_start = min_date
                         
-                        if not df_trend.empty:
-                            # 날짜 파생 컬럼 생성
-                            df_trend['Year'] = df_trend['날짜'].dt.strftime('%Y')
-                            df_trend['YearMonth'] = df_trend['날짜'].dt.strftime('%Y-%m')
-                            df_trend['YearWeek'] = df_trend['날짜'].dt.strftime('%Y-%U') 
+                        c_d1, c_d2 = st.columns([1, 1])
+                        with c_d1:
+                            date_range_report = st.date_input("분석 기간 선택", value=(default_start, max_date_val), min_value=min_date, max_value=max_date_val, key="date_report")
+                        
+                        if isinstance(date_range_report, tuple) and len(date_range_report) == 2:
+                            start_date, end_date = date_range_report[0], date_range_report[1]
+                            duration = (end_date - start_date).days + 1
                             
-                            # 1. 주별 생산량 (최근 12주) - Stacked Bar
-                            st.markdown("##### 📅 주별 생산량 (최근 12주)")
-                            last_12_weeks = df_trend['YearWeek'].drop_duplicates().sort_values().tail(12)
-                            weekly_df = df_trend[df_trend['YearWeek'].isin(last_12_weeks)].groupby(['YearWeek', '구분'])['수량'].sum().reset_index()
+                            # 1. Current Period Data
+                            mask_curr = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
+                            df_curr = df[mask_curr].copy()
                             
-                            chart_w = alt.Chart(weekly_df).mark_bar().encode(
-                                x=alt.X('YearWeek:O', title='주차 (Year-Week)', axis=alt.Axis(labelAngle=0)),
-                                # [수정] Y축 제목 가로로 변경 및 위치 조정
-                                y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
-                                tooltip=['YearWeek', '구분', alt.Tooltip('수량', format=',')]
-                            ).properties(height=300)
-                            st.altair_chart(chart_w, use_container_width=True)
-
-                            c_m, c_y = st.columns(2) 
+                            # 2. Previous Period Data (직전 동기간)
+                            prev_end = start_date - timedelta(days=1)
+                            prev_start = prev_end - timedelta(days=duration - 1)
+                            mask_prev = (df['날짜'].dt.date >= prev_start) & (df['날짜'].dt.date <= prev_end)
+                            df_prev = df[mask_prev].copy()
                             
-                            # 2. 월별 생산량 - Line Chart with Color
-                            with c_m:
-                                st.markdown("##### 📅 월별 생산량")
-                                monthly_df = df_trend.groupby(['YearMonth', '구분'])['수량'].sum().reset_index()
-                                chart_m = alt.Chart(monthly_df).mark_line(point=True).encode(
-                                    x=alt.X('YearMonth:O', title='월', axis=alt.Axis(labelAngle=0)),
-                                    # [수정] Y축 제목 가로로 변경
-                                    y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                    color=alt.Color('구분', title='공정'), 
-                                    tooltip=['YearMonth', '구분', alt.Tooltip('수량', format=',')]
-                                ).properties(height=300)
-                                st.altair_chart(chart_m, use_container_width=True)
-
-                            # 3. 연도별 생산량 - Stacked Bar
-                            with c_y:
-                                st.markdown("##### 📅 연도별 생산량")
-                                yearly_df = df_trend.groupby(['Year', '구분'])['수량'].sum().reset_index()
-                                chart_y = alt.Chart(yearly_df).mark_bar().encode(
-                                    x=alt.X('Year:O', title='연도', axis=alt.Axis(labelAngle=0)),
-                                    # [수정] Y축 제목 가로로 변경
-                                    y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                    color=alt.Color('구분', title='공정'), 
-                                    tooltip=['Year', '구분', alt.Tooltip('수량', format=',')]
-                                ).properties(height=300)
-                                st.altair_chart(chart_y, use_container_width=True)
+                            if not df_curr.empty:
+                                # [STEP 1] 요약 (Fact Zone)
+                                total_curr = df_curr['수량'].sum()
+                                total_prev = df_prev['수량'].sum() if not df_prev.empty else 0
+                                delta_val = total_curr - total_prev
+                                delta_pct = (delta_val / total_prev * 100) if total_prev > 0 else 0
+                                daily_avg = total_curr / duration
                                 
-                            # 4. 모델별 생산 추이 (상위 10개) - Stacked Bar (필터링된 데이터 기준)
-                            st.markdown("##### 📅 모델별 생산량 (TOP 10)")
-                            # 모델별 총 생산량 상위 10개 선정
-                            top_models = df_trend.groupby('제품명')['수량'].sum().sort_values(ascending=False).head(10).index
-                            model_df = df_trend[df_trend['제품명'].isin(top_models)].groupby(['제품명', '구분'])['수량'].sum().reset_index()
-                            
-                            chart_model = alt.Chart(model_df).mark_bar().encode(
-                                x=alt.X('제품명:O', sort='-y', title='모델명', axis=alt.Axis(labelAngle=0)),
-                                # [수정] Y축 제목 가로로 변경
-                                y=alt.Y('수량:Q', title='생산량', axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                color=alt.Color('구분', title='공정'), 
-                                tooltip=['제품명', '구분', alt.Tooltip('수량', format=',')]
-                            ).properties(height=350)
-                            st.altair_chart(chart_model, use_container_width=True)
-                        else:
-                            st.info("해당 공정(PC, CM1, CM3, 배전)의 생산 데이터가 없습니다.")
+                                st.info(
+                                    f"**분석 기간:** {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} ({duration}일간)  |  "
+                                    f"**총 생산량:** {int(total_curr):,} EA  |  "
+                                    f"**전기간 대비:** {delta_pct:+.1f}% ({int(delta_val):+,} EA)  |  "
+                                    f"**일 평균:** {daily_avg:.1f} EA"
+                                )
+                                st.markdown("---")
 
+                                # [STEP 2] 전체 추이 (Context) - Line + Bar
+                                st.subheader("📈 전체 생산 추이 (일별 + 7일 이동평균)")
+                                daily_trend = df_curr.groupby('날짜')['수량'].sum().reset_index()
+                                daily_trend['7일 평균'] = daily_trend['수량'].rolling(window=7, min_periods=1).mean()
+                                daily_trend['날짜_str'] = daily_trend['날짜'].dt.strftime('%Y-%m-%d')
+                                
+                                base = alt.Chart(daily_trend).encode(x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")))
+                                bar = base.mark_bar(color='#3b82f6', opacity=0.5).encode(
+                                    y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                    tooltip=['날짜_str', alt.Tooltip('수량', format=',')]
+                                )
+                                line = base.mark_line(color='#ef4444', strokeWidth=3).encode(
+                                    y='7일 평균:Q',
+                                    tooltip=['날짜_str', alt.Tooltip('7일 평균', format=',.1f')]
+                                )
+                                st.altair_chart((bar + line).properties(height=300), use_container_width=True)
+                                st.markdown("---")
+
+                                # [STEP 3] 변화 원인 분석 (Core)
+                                st.subheader("📉 변화 원인 분석 (전기간 대비 증감 기여도)")
+                                c1, c2 = st.columns(2)
+                                
+                                # 3-1. 모델별 기여도
+                                with c1:
+                                    st.markdown("##### 🧩 모델별 증감 기여도 (TOP 5)")
+                                    model_curr = df_curr.groupby('제품명')['수량'].sum()
+                                    model_prev = df_prev.groupby('제품명')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
+                                    model_diff = model_curr.sub(model_prev, fill_value=0).reset_index()
+                                    model_diff.columns = ['모델명', '증감량']
+                                    model_diff['abs_diff'] = model_diff['증감량'].abs()
+                                    top_contributors = model_diff.sort_values('abs_diff', ascending=False).head(5).drop(columns=['abs_diff'])
+                                    
+                                    st.dataframe(
+                                        top_contributors.style.format({'증감량': '{:+,.0f}'})
+                                        .background_gradient(cmap='RdBu', subset=['증감량'], vmin=-max(abs(top_contributors['증감량'])), vmax=max(abs(top_contributors['증감량']))),
+                                        hide_index=True, use_container_width=True
+                                    )
+
+                                # 3-2. 공정별 기여도
+                                with c2:
+                                    st.markdown("##### 🏭 공정별 증감 기여도")
+                                    cat_curr = df_curr.groupby('구분')['수량'].sum()
+                                    cat_prev = df_prev.groupby('구분')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
+                                    cat_diff = cat_curr.sub(cat_prev, fill_value=0).reset_index()
+                                    cat_diff.columns = ['구분', '증감량']
+                                    
+                                    chart_cat = alt.Chart(cat_diff).mark_bar().encode(
+                                        x=alt.X('구분:O', axis=alt.Axis(labelAngle=0)),
+                                        y=alt.Y('증감량:Q', axis=alt.Axis(title="증감량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                        color=alt.condition(alt.datum.증감량 > 0, alt.value("steelblue"), alt.value("orange")),
+                                        tooltip=['구분', alt.Tooltip('증감량', format='+,')]
+                                    ).properties(height=250)
+                                    st.altair_chart(chart_cat, use_container_width=True)
+
+                                # [STEP 4] 이상 감지
+                                period_mean = daily_trend['수량'].mean()
+                                anomalies = daily_trend[daily_trend['수량'] < (period_mean * 0.5)]
+                                if not anomalies.empty:
+                                    st.markdown("---")
+                                    st.subheader("⚠️ 이상 감지 (생산 급감일)")
+                                    st.warning(f"총 {len(anomalies)}일의 생산량이 기간 평균({int(period_mean):,} EA)의 50% 미만입니다.")
+                                    cols = st.columns(len(anomalies)) if len(anomalies) <= 4 else st.columns(4)
+                                    for idx, row in enumerate(anomalies.itertuples()):
+                                        with cols[idx % 4]:
+                                            st.metric(label=row.날짜_str, value=f"{int(row.수량):,} EA", delta=f"{int(row.수량 - period_mean):,} (평균대비)", delta_color="inverse")
+                            else:
+                                st.info("선택된 기간에 데이터가 없습니다.")
+
+                    # --- Tab 2: 상세 조회 (기존 기능 복구) ---
                     with anal_tab2:
-                        st.subheader("🔍 상세 기간 분석 (리포트)")
+                        st.subheader("🔍 상세 기간 조회 (일자별)")
+                        
                         min_date = df['날짜'].min().date()
                         max_date_val = df['날짜'].max().date()
                         
                         c1, c2 = st.columns([1, 1])
                         with c1:
+                            # 기본값 설정 유지
                             default_start = max_date_val - timedelta(days=29)
                             if default_start < min_date: default_start = min_date
-                            date_range = st.date_input("기간 선택", value=(default_start, max_date_val), min_value=min_date, max_value=max_date_val)
+                            date_range = st.date_input("조회 기간 선택", value=(default_start, max_date_val), min_value=min_date, max_value=max_date_val, key="date_detail")
                         
-                        if st.button("분석 실행"):
+                        if st.button("조회 실행"):
                             if isinstance(date_range, tuple) and len(date_range) == 2:
-                                start_date, end_date = date_range[0], date_range[1]
-                                duration = (end_date - start_date).days + 1
+                                mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
+                                df_filtered = df[mask].copy()
                                 
-                                # 1. Current Period Data
-                                mask_curr = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
-                                df_curr = df[mask_curr].copy()
-                                
-                                # 2. Previous Period Data (Same duration immediately before)
-                                prev_end = start_date - timedelta(days=1)
-                                prev_start = prev_end - timedelta(days=duration - 1)
-                                mask_prev = (df['날짜'].dt.date >= prev_start) & (df['날짜'].dt.date <= prev_end)
-                                df_prev = df[mask_prev].copy()
-                                
-                                if not df_curr.empty:
-                                    # --- Step 1: Period Summary (Fact Zone) ---
-                                    total_curr = df_curr['수량'].sum()
-                                    total_prev = df_prev['수량'].sum() if not df_prev.empty else 0
+                                if not df_filtered.empty:
+                                    # 날짜 문자열 변환
+                                    df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
                                     
-                                    delta_val = total_curr - total_prev
-                                    delta_pct = (delta_val / total_prev * 100) if total_prev > 0 else 0
+                                    st.markdown(f"##### 📉 일별 생산 현황 ({date_range[0].strftime('%Y-%m-%d')} ~ {date_range[1].strftime('%Y-%m-%d')})")
                                     
-                                    daily_avg = total_curr / duration
+                                    # 일별 생산량 차트 (데이터 있는 날만)
+                                    chart_data = df_filtered.groupby(['날짜', '날짜_str', '구분'])['수량'].sum().reset_index().sort_values('날짜')
                                     
-                                    st.info(
-                                        f"**분석 기간:** {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} ({duration}일간)  |  "
-                                        f"**총 생산량:** {int(total_curr):,} EA  |  "
-                                        f"**전기간 대비:** {delta_pct:+.1f}% ({int(delta_val):+,} EA)  |  "
-                                        f"**일 평균:** {daily_avg:.1f} EA"
-                                    )
-                                    
-                                    st.markdown("---")
-
-                                    # --- Step 2: Overall Trend (Context) ---
-                                    st.subheader("📈 전체 생산 추이 (일별 + 7일 이동평균)")
-                                    
-                                    # Daily Aggregation
-                                    daily_trend = df_curr.groupby('날짜')['수량'].sum().reset_index()
-                                    daily_trend['7일 평균'] = daily_trend['수량'].rolling(window=7, min_periods=1).mean()
-                                    daily_trend['날짜_str'] = daily_trend['날짜'].dt.strftime('%Y-%m-%d')
-                                    
-                                    # Layered Chart: Bar + Line
-                                    base = alt.Chart(daily_trend).encode(x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")))
-                                    
-                                    bar = base.mark_bar(color='#3b82f6', opacity=0.5).encode(
+                                    bar = alt.Chart(chart_data).mark_bar().encode(
+                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                        tooltip=['날짜_str', alt.Tooltip('수량', format=',')]
-                                    )
-                                    
-                                    line = base.mark_line(color='#ef4444', strokeWidth=3).encode(
-                                        y='7일 평균:Q',
-                                        tooltip=['날짜_str', alt.Tooltip('7일 평균', format=',.1f')]
-                                    )
-                                    
-                                    st.altair_chart((bar + line).properties(height=300), use_container_width=True)
+                                        color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
+                                        tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
+                                    ).properties(height=350)
+                                    st.altair_chart(bar, use_container_width=True)
 
                                     st.markdown("---")
+                                    st.subheader("🧩 공정별 통합 생산 수량")
+                                    
+                                    def map_category(cat):
+                                        if cat == "PC": return "PC"
+                                        elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
+                                        elif cat == "배전": return "배전"
+                                        elif cat == "후공정": return "후공정"
+                                        elif cat == "샘플": return "샘플"
+                                        return None 
 
-                                    # --- Step 3: Cause Analysis (Contribution) ---
-                                    st.subheader("📉 변화 원인 분석 (전기간 대비 증감 기여도)")
+                                    df_filtered['Group'] = df_filtered['구분'].apply(map_category)
+                                    df_grouped = df_filtered.dropna(subset=['Group']).groupby('Group')['수량'].sum().reset_index()
                                     
-                                    c1, c2 = st.columns(2)
+                                    if not df_grouped.empty:
+                                        sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정", "샘플"]
+                                        df_grouped['Group'] = pd.Categorical(df_grouped['Group'], categories=sort_order, ordered=True)
+                                        df_grouped = df_grouped.sort_values('Group')
+                                        
+                                        cols = st.columns(len(df_grouped))
+                                        for idx, row in enumerate(df_grouped.itertuples()):
+                                            with cols[idx]:
+                                                st.metric(row.Group, f"{row.수량:,.0f} EA")
+                                    else:
+                                        st.info("해당 기간에 집계할 주요 공정 데이터가 없습니다.")
+
+                                    st.markdown("---")
+                                    st.subheader("🔎 SMT 생산 모델별 분석 (상위 20개)")
                                     
-                                    # 3-1. Model Contribution
-                                    with c1:
-                                        st.markdown("##### 🧩 모델별 증감 기여도 (TOP 5)")
-                                        model_curr = df_curr.groupby('제품명')['수량'].sum()
-                                        model_prev = df_prev.groupby('제품명')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
+                                    smt_cats = ["PC", "CM1", "CM3", "배전"]
+                                    df_smt = df_filtered[df_filtered['구분'].isin(smt_cats)]
+                                    
+                                    if not df_smt.empty:
+                                        smt_agg = df_smt.groupby('제품명')['수량'].sum().reset_index().sort_values('수량', ascending=False)
+                                        smt_total = smt_agg['수량'].sum()
                                         
-                                        model_diff = model_curr.sub(model_prev, fill_value=0).reset_index()
-                                        model_diff.columns = ['모델명', '증감량']
-                                        # Sort by absolute change to see impact
-                                        model_diff['abs_diff'] = model_diff['증감량'].abs()
-                                        top_contributors = model_diff.sort_values('abs_diff', ascending=False).head(5).drop(columns=['abs_diff'])
+                                        c_s1, c_s2 = st.columns([1, 2])
+                                        with c_s1:
+                                            st.metric("SMT 총 생산량", f"{smt_total:,.0f} EA", help="PC, PLC(CM1, CM3), 배전 공정 합계")
+                                            st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=400)
                                         
-                                        st.dataframe(
-                                            top_contributors.style.format({'증감량': '{:+,.0f}'})
-                                            .background_gradient(cmap='RdBu', subset=['증감량'], vmin=-max(abs(top_contributors['증감량'])), vmax=max(abs(top_contributors['증감량']))),
-                                            hide_index=True, 
-                                            use_container_width=True
+                                        with c_s2:
+                                            chart_data_smt = smt_agg.head(20) # Top 20 고정
+                                            
+                                            smt_chart = alt.Chart(chart_data_smt).mark_bar().encode(
+                                                x=alt.X('제품명', sort='-y', axis=alt.Axis(labelAngle=-45, title="모델명")),
+                                                y=alt.Y('수량', axis=alt.Axis(title="생산 수량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
+                                                color=alt.value("#3b82f6"),
+                                                tooltip=['제품명', alt.Tooltip('수량', format=',')]
+                                            ).properties(title="SMT 생산 상위 20개 모델")
+                                            st.altair_chart(smt_chart, use_container_width=True)
+                                    else:
+                                        st.info("선택된 기간에 SMT 생산(PC, PLC, 배전) 데이터가 없습니다.")
+                                    
+                                    st.markdown("---")
+                                    st.subheader("💡 분석 인사이트 (급감 감지)")
+                                    drop_info = detect_drop(df_filtered)
+                                    if drop_info["is_drop"]:
+                                        st.warning(
+                                            f"⚠️ **생산량 급감 경고**\n\n"
+                                            f"최근 7일 생산량이 그 전주 대비 **{drop_info['rate']}% 감소**했습니다.\n"
+                                            f"- 최근 7일 평균: {drop_info['recent']:.1f} EA\n"
+                                            f"- 전주 7일 평균: {drop_info['prev']:.1f} EA"
                                         )
+                                    else:
+                                        st.success("✅ 특이사항 없음: 생산량이 안정적으로 유지되고 있습니다.")
 
-                                    # 3-2. Category Contribution (Chart)
-                                    with c2:
-                                        st.markdown("##### 🏭 공정별 증감 기여도")
-                                        cat_curr = df_curr.groupby('구분')['수량'].sum()
-                                        cat_prev = df_prev.groupby('구분')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
-                                        
-                                        cat_diff = cat_curr.sub(cat_prev, fill_value=0).reset_index()
-                                        cat_diff.columns = ['구분', '증감량']
-                                        
-                                        chart_cat = alt.Chart(cat_diff).mark_bar().encode(
-                                            x=alt.X('구분:O', axis=alt.Axis(labelAngle=0)),
-                                            y=alt.Y('증감량:Q'),
-                                            color=alt.condition(
-                                                alt.datum.증감량 > 0,
-                                                alt.value("steelblue"),  # The positive color
-                                                alt.value("orange")  # The negative color
-                                            ),
-                                            tooltip=['구분', alt.Tooltip('증감량', format='+,')]
-                                        ).properties(height=250)
-                                        st.altair_chart(chart_cat, use_container_width=True)
-
-                                    # --- Step 4: Anomalies (Optional) ---
-                                    # 이상 감지: 평균의 50% 미만인 날
-                                    period_mean = daily_trend['수량'].mean()
-                                    anomalies = daily_trend[daily_trend['수량'] < (period_mean * 0.5)]
-                                    
-                                    if not anomalies.empty:
-                                        st.markdown("---")
-                                        st.subheader("⚠️ 이상 감지 (생산 급감일)")
-                                        st.warning(f"총 {len(anomalies)}일의 생산량이 기간 평균({int(period_mean):,} EA)의 50% 미만입니다.")
-                                        
-                                        # Show as simple metrics or list
-                                        cols = st.columns(len(anomalies)) if len(anomalies) <= 4 else st.columns(4)
-                                        for idx, row in enumerate(anomalies.itertuples()):
-                                            col_idx = idx % 4
-                                            with cols[col_idx]:
-                                                st.metric(
-                                                    label=row.날짜_str, 
-                                                    value=f"{int(row.수량):,} EA", 
-                                                    delta=f"{int(row.수량 - period_mean):,} (평균대비)",
-                                                    delta_color="inverse"
-                                                )
-
-                                    # --- Step 5: Summary Sentence ---
-                                    st.markdown("---")
-                                    
-                                    # Identify primary driver
-                                    if not top_contributors.empty:
-                                        top_row = top_contributors.iloc[0]
-                                        impact_model = top_row['모델명']
-                                        impact_val = top_row['증감량']
-                                        
-                                        impact_pct = 0
-                                        if delta_val != 0:
-                                            impact_pct = (abs(impact_val) / abs(delta_val)) * 100
-                                        
-                                        direction_str = "감소" if delta_val < 0 else "증가"
-                                        model_dir_str = "감소" if impact_val < 0 else "증가"
-                                        
-                                        if (delta_val < 0 and impact_val < 0) or (delta_val > 0 and impact_val > 0):
-                                            # Contribution to the main trend
-                                            msg = f"이번 기간 생산량 **{direction_str}**의 약 **{impact_pct:.0f}%**는 **'{impact_model}'** 모델의 {model_dir_str}에서 기인했습니다."
-                                            st.success(f"💡 **AI 인사이트:** {msg}")
-                                        else:
-                                            # Counter-trend or mixed
-                                            st.info(f"💡 **AI 인사이트:** 전체적으로는 {direction_str}했으나, **'{impact_model}'** 모델은 {int(impact_val):+,} EA 변동하며 큰 영향을 주었습니다.")
-                                    
                                 else: st.info("선택된 기간에 데이터가 없습니다.")
                 else: st.info("생산 데이터가 없습니다.")
 
