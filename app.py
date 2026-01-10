@@ -257,62 +257,55 @@ def get_dashboard_stats():
     df_check = load_data(SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
     df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
     
-    # [수정] 한국 시간 적용 후 Naive 변환 (비교 오류 방지)
-    # today 변수는 이제 datetime.date 타입입니다.
     today = get_now().replace(tzinfo=None).date() 
-    today_str = today.strftime("%Y-%m-%d")
-    yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-    this_month_start = today.replace(day=1)
     
-    prod_today_val = 0
-    prod_yesterday_val = 0
+    # --- KPI 계산을 위한 데이터 가공 ---
+    this_month_start = today.replace(day=1)
+    last_month_end = this_month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    
+    # 1. 생산량 (금월 vs 전월)
+    prod_this_month = 0
+    prod_last_month = 0
+    daily_avg = 0
+    top_category = "-"
+    top_model = "-"
     
     if not df_prod.empty:
-        # [중요] 날짜 처리 표준화: to_datetime -> dt.date -> string comparison or date comparison
         df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
         df_prod['수량'] = pd.to_numeric(df_prod['수량'], errors='coerce').fillna(0)
         
-        prod_today_val = df_prod[df_prod['날짜'] == today]['수량'].sum()
-        prod_yesterday_val = df_prod[df_prod['날짜'] == (today - timedelta(days=1))]['수량'].sum()
-    
-    delta_prod = prod_today_val - prod_yesterday_val
-    
-    check_today_cnt = 0
-    ng_today_cnt = 0
-    ng_rate = 0.0
-    
-    df_today_unique = pd.DataFrame()
-    if not df_check.empty:
-        df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
-        df_check['timestamp'] = pd.to_datetime(df_check['timestamp'], errors='coerce')
+        # 금월 데이터
+        df_this = df_prod[(df_prod['날짜'] >= this_month_start) & (df_prod['날짜'] <= today)]
+        prod_this_month = df_this['수량'].sum()
         
-        df_today_chk = df_check[df_check['date_only'] == today_str]
-        if not df_today_chk.empty:
-            df_today_unique = df_today_chk.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
-            check_today_cnt = len(df_today_unique)
-            ng_today_cnt = len(df_today_unique[df_today_unique['ox'] == 'NG'])
-            if check_today_cnt > 0:
-                ng_rate = (ng_today_cnt / check_today_cnt) * 100
-
-    maint_today_cnt = 0
-    if not df_maint.empty:
-        # 정비 날짜도 표준화
-        df_maint['날짜_dt'] = pd.to_datetime(df_maint['날짜'], errors='coerce').dt.date
-        maint_today_cnt = len(df_maint[df_maint['날짜_dt'] == today])
+        # 전월 데이터 (전체)
+        df_last = df_prod[(df_prod['날짜'] >= last_month_start) & (df_prod['날짜'] <= last_month_end)]
+        prod_last_month = df_last['수량'].sum()
+        
+        # 일 평균 (금월 경과일 기준, 오늘 포함)
+        days_passed = (today - this_month_start).days + 1
+        if days_passed > 0:
+            daily_avg = prod_this_month / days_passed
+            
+        # 최대 기여 공정/모델
+        if not df_this.empty:
+            top_category = df_this.groupby('구분')['수량'].sum().idxmax()
+            top_model = df_this.groupby('제품명')['수량'].sum().idxmax()
+            
+    # 전월 대비 증감률 (전월 데이터가 0이면 표시 안함)
+    delta_ratio = 0
+    if prod_last_month > 0:
+        delta_ratio = ((prod_this_month - prod_last_month) / prod_last_month) * 100
 
     return {
-        "prod_today": prod_today_val,
-        "delta_prod": delta_prod,
-        "check_cnt": check_today_cnt,
-        "ng_cnt": ng_today_cnt,
-        "ng_rate": ng_rate,
-        "maint_cnt": maint_today_cnt,
-        "df_prod": df_prod,
-        "df_check_unique": df_today_unique,
-        "df_maint": df_maint,
-        "today_str": today_str,
-        "month_start": this_month_start, # datetime.date 객체
-        "today_dt": today # datetime.date 객체
+        "prod_this_month": prod_this_month,
+        "prod_last_month": prod_last_month, # 참고용
+        "delta_ratio": delta_ratio,
+        "daily_avg": daily_avg,
+        "top_category": top_category,
+        "top_model": top_model,
+        "df_prod": df_prod # 분석용 원본 전달
     }
 
 def get_daily_check_master_data():
@@ -458,112 +451,6 @@ def generate_all_daily_check_pdf(date_str):
         return pdf_bytes
     except Exception as e:
         return None
-
-def generate_production_report_pdf(df_prod, df_inv, date_str):
-    try:
-        font_filename = 'NanumGothic.ttf'
-        if not os.path.exists(font_filename):
-            try:
-                url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
-                urllib.request.urlretrieve(url, font_filename)
-            except: pass
-
-        pdf = FPDF()
-        font_name = 'Arial'
-        try:
-            pdf.add_font('Korean', '', font_filename, uni=True)
-            font_name = 'Korean'
-        except: pass
-        
-        pdf.add_page()
-        pdf.set_fill_color(50, 50, 50) 
-        pdf.rect(0, 0, 210, 25, 'F')
-        pdf.set_font(font_name, '', 20)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(10, 5)
-        # [수정] 한글 제목 변경
-        pdf.cell(0, 15, "생산 일일 보고서", 0, 0, 'L')
-        pdf.set_font(font_name, '', 10)
-        pdf.set_xy(10, 5)
-        # [수정] 한글 제목 변경
-        pdf.cell(0, 15, f"일자: {date_str}", 0, 0, 'R')
-        pdf.ln(25)
-        
-        # 1. 생산 실적
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font(font_name, '', 14)
-        # [수정] 한글 제목 변경
-        pdf.cell(0, 10, "1. 일일 생산 실적", 0, 1, 'L')
-        
-        pdf.set_fill_color(240, 240, 240)
-        pdf.set_font(font_name, '', 10)
-        headers = ["구분", "품목코드", "제품명", "수량", "작성자"]
-        widths = [25, 35, 80, 25, 25]
-        for i, h in enumerate(headers): pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
-        pdf.ln()
-        
-        fill = False
-        pdf.set_fill_color(250, 250, 250)
-        total_qty = 0
-        if not df_prod.empty:
-            for _, row in df_prod.iterrows():
-                pdf.cell(widths[0], 8, str(row['구분']), 1, 0, 'C', fill)
-                pdf.cell(widths[1], 8, str(row['품목코드']), 1, 0, 'C', fill)
-                p_name = str(row['제품명'])
-                if len(p_name) > 25: p_name = p_name[:24] + ".."
-                pdf.cell(widths[2], 8, p_name, 1, 0, 'L', fill)
-                qty = int(float(str(row['수량']).replace(',','')))
-                total_qty += qty
-                pdf.cell(widths[3], 8, f"{qty:,}", 1, 0, 'R', fill)
-                pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
-                fill = not fill
-        else:
-            # [수정] 한글 제목 변경
-            pdf.cell(sum(widths), 10, "생산 실적 없음", 1, 1, 'C', fill)
-            
-        pdf.ln(2)
-        pdf.set_font(font_name, '', 12)
-        # [수정] 한글 제목 변경
-        pdf.cell(0, 10, f"총 생산량: {total_qty:,} EA", 0, 1, 'R')
-        
-        # 2. 재고 현황
-        if df_inv is not None and not df_inv.empty:
-            pdf.ln(10)
-            pdf.set_font(font_name, '', 14)
-            # [수정] 한글 제목 변경
-            pdf.cell(0, 10, "2. 현재 재고 현황", 0, 1, 'L')
-            
-            pdf.set_font(font_name, '', 10)
-            pdf.set_fill_color(240, 240, 240)
-            
-            inv_headers = ["품목코드", "제품명", "현재고"]
-            inv_widths = [40, 100, 50]
-            
-            for i, h in enumerate(inv_headers):
-                pdf.cell(inv_widths[i], 10, h, 1, 0, 'C', 1)
-            pdf.ln()
-            
-            fill = False
-            pdf.set_fill_color(250, 250, 250)
-            
-            for _, row in df_inv.iterrows():
-                pdf.cell(inv_widths[0], 8, str(row['품목코드']), 1, 0, 'C', fill)
-                
-                p_name = str(row['제품명'])
-                if len(p_name) > 35: p_name = p_name[:34] + ".."
-                pdf.cell(inv_widths[1], 8, p_name, 1, 0, 'L', fill)
-                
-                curr_stock = int(float(str(row['현재고']).replace(',', '')))
-                pdf.cell(inv_widths[2], 8, f"{curr_stock:,}", 1, 1, 'R', fill)
-                
-                fill = not fill
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            pdf.output(tmp_file.name)
-            with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
-        os.unlink(tmp_file.name)
-        return pdf_bytes
-    except: return None
 
 # ------------------------------------------------------------------
 # 4. 사용자 인증
@@ -726,93 +613,51 @@ def run_app():
 
     # --- 1. 대시보드 탭 ---
     if selected_tab == tab_names[0]:
-        with st.spinner("대시보드 분석 중..."):
+        with st.spinner("공장 현황 진단 중..."):
             try:
                 metrics = get_dashboard_stats()
+                df_prod = metrics['df_prod']
                 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("오늘 생산량", f"{metrics['prod_today']:,.0f} EA", f"{metrics['delta_prod']:,.0f} (전일비)")
-                c2.metric("금일 설비 정비", f"{metrics['maint_cnt']} 건", "확인 필요" if metrics['maint_cnt'] > 0 else "특이사항 없음", delta_color="inverse")
-                c3.metric("일일점검 (완료/NG)", f"{metrics['check_cnt']} 건 / {metrics['ng_cnt']} 건", f"불량률: {metrics['ng_rate']:.1f}%", delta_color="inverse")
-
-                st.markdown("---")
-
-                col_g1, col_g2 = st.columns([2, 1])
-
-                with col_g1:
-                    # [수정] 30일로 확장 및 인터랙티브 줌/팬 적용
-                    st.subheader("📈 최근 30일 생산 추이 & 유형")
-                    df_prod = metrics['df_prod']
-                    if not df_prod.empty and HAS_ALTAIR:
-                        # [날짜 표준화] datetime.date 객체로 변환하여 비교
-                        df_prod['날짜_dt'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
-                        # [수정] 7일 -> 30일
-                        last_30_days = metrics['today_dt'] - timedelta(days=30)
-                        chart_data = df_prod[df_prod['날짜_dt'] >= last_30_days].copy()
-                        
-                        if not chart_data.empty:
-                            # [수정] 날짜 중복 이슈 해결: 문자열 변환 후 Ordinal 사용 (:T -> :O)
-                            # 이렇게 하면 시간 해석 없이 문자열 그대로 축에 표시되므로 중복이 사라짐
-                            chart_data['날짜_str'] = chart_data['날짜_dt'].astype(str)
-                            chart_agg = chart_data.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
-                            
-                            chart = alt.Chart(chart_agg).mark_line(point=True).encode(
-                                x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")), # :O 사용
-                                y=alt.Y('수량:Q', axis=alt.Axis(labelAngle=0, title="생\n산\n량", titleAngle=0, titlePadding=20, titleFontWeight="bold", titleFontSize=14)),
-                                color=alt.Color('구분', legend=alt.Legend(title="공정 구분")),
-                                tooltip=[alt.Tooltip('날짜_str', title='일자'), '구분', '수량']
-                            ).properties(height=300).interactive() # [수정] interactive 추가
-                            st.altair_chart(chart, use_container_width=True)
-                        else: st.info("최근 데이터가 없습니다.")
-                    else: st.info("생산 데이터가 없습니다.")
-
-                with col_g2:
-                    st.subheader("🏭 월간 생산 품목 비율")
-                    if not df_prod.empty:
-                        # [날짜 표준화]
-                        df_prod['날짜_dt'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
-                        
-                        # [수정] 이미 date 객체이므로 .date() 호출 제거
-                        m_start = metrics['month_start']
-                        t_date = metrics['today_dt']
-                        
-                        df_month_prod = df_prod[(df_prod['날짜_dt'] >= m_start) & (df_prod['날짜_dt'] <= t_date)]
-                        if not df_month_prod.empty:
-                            pie_data = df_month_prod.groupby('구분')['수량'].sum().reset_index()
-                            total_q = pie_data['수량'].sum()
-                            pie_data['비율'] = (pie_data['수량'] / total_q * 100).round(1)
-                            pie_data['Label'] = pie_data['수량'].astype(str) + " (" + pie_data['비율'].astype(str) + "%)"
-                            pie_data['DisplayLabel'] = pie_data.apply(lambda x: x['Label'] if x['비율'] > 3 else "", axis=1)
-
-                            base = alt.Chart(pie_data).encode(theta=alt.Theta("수량", stack=True), color=alt.Color("구분", legend=alt.Legend(title="공정", orient="bottom")))
-                            pie = base.mark_arc(outerRadius=120, innerRadius=60).encode(tooltip=["구분", "수량", "비율"])
-                            text = base.mark_text(radius=140).encode(text="DisplayLabel", order=alt.Order("구분"), color=alt.value("black"))
-                            st.altair_chart((pie + text).properties(height=400), use_container_width=True)
-                        else: st.info("이번 달 실적 없음")
-                    else: st.info("데이터 없음")
-
+                # 1. KPI 카드 (4개 고정)
+                k1, k2, k3, k4 = st.columns(4)
+                
+                # KPI 1: 금월 총 생산량 (vs 전월 대비 증감 표시)
+                # 전월 총량이 0이면 델타 없음, 있으면 표시
+                delta_str = f"{metrics['delta_ratio']:+.1f}%" if metrics['prod_last_month'] > 0 else None
+                k1.metric("금월 총 생산량", f"{int(metrics['prod_this_month']):,} EA", delta_str)
+                
+                # KPI 2: 일 평균 생산량 (현재 시점)
+                k2.metric("일 평균 (금월)", f"{metrics['daily_avg']:.1f} EA")
+                
+                # KPI 3: 최대 생산 공정 (리딩 공정)
+                k3.metric("최대 생산 공정", metrics['top_category'])
+                
+                # KPI 4: 최대 생산 모델 (리딩 모델)
+                # 모델명이 길 경우를 대비해 살짝 줄임 표시 가능하나 일단 표시
+                display_model = metrics['top_model']
+                if len(display_model) > 10: display_model = display_model[:9] + ".."
+                k4.metric("최대 생산 모델", display_model)
+                
+                # 2. 긴급 상황 경고 (조건부 표시)
                 st.markdown("---")
                 
-                c3, c4 = st.columns(2)
-                with c3:
-                    st.subheader("🚨 실시간 NG 현황 (Today)")
-                    df_ng = metrics['df_check_unique']
-                    if not df_ng.empty and metrics['ng_cnt'] > 0:
-                        ng_display = df_ng[df_ng['ox'] == 'NG'][['line', 'equip_id', 'item_name', 'value', 'checker', '비고']]
-                        st.dataframe(ng_display, hide_index=True, use_container_width=True)
-                    elif metrics['ng_cnt'] == 0:
-                        st.success("🎉 현재까지 발견된 NG 항목이 없습니다.")
+                if not df_prod.empty:
+                    # 전체 데이터 기준 최근 추세 급락 감지
+                    drop_status = detect_drop(df_prod)
+                    if drop_status["is_drop"]:
+                        st.error(
+                            f"🚨 **생산량 급감 경고**\n\n"
+                            f"최근 7일 평균 생산량이 직전 주 대비 **{drop_status['rate']}% 감소**했습니다. (현재: {drop_status['recent']:.1f} EA vs 전주: {drop_status['prev']:.1f} EA)\n"
+                            "👉 '생산관리 > 생산분석' 탭에서 상세 원인을 확인하세요."
+                        )
                     else:
-                        st.info("점검 데이터가 없습니다.")
-
-                with c4:
-                    st.subheader("🛠 최근 설비 정비 이력 (Last 5)")
-                    df_m = metrics['df_maint']
-                    if not df_m.empty:
-                        recent_maint = df_m.sort_values("날짜", ascending=False).head(5)[['날짜', '설비명', '작업구분', '작업내용']]
-                        st.dataframe(recent_maint, hide_index=True, use_container_width=True)
-                    else:
-                        st.info("정비 이력이 없습니다.")
+                        st.markdown("""
+                        <div style="background-color:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:15px; color:#166534; font-weight:600; text-align:center;">
+                            ✅ 현재 공장 운영 상태가 안정적입니다. (특이사항 없음)
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("데이터가 충분하지 않아 상태를 진단할 수 없습니다.")
 
             except Exception as e:
                 st.error(f"대시보드 로딩 오류: {e}")
@@ -1017,7 +862,7 @@ def run_app():
                     df['수량'] = pd.to_numeric(df['수량'], errors='coerce').fillna(0)
                     
                     # 분석 탭 분리
-                    anal_tab1, anal_tab2 = st.tabs(["📊 기간별 추이 분석", "🔍 상세 분석 (일자 지정)"])
+                    anal_tab1, anal_tab2 = st.tabs(["📊 기간별 추이 분석", "🔍 상세 기간 분석 (리포트)"])
                     
                     with anal_tab1:
                         # [수정] 제목 변경
@@ -1093,7 +938,7 @@ def run_app():
                             st.info("해당 공정(PC, CM1, CM3, 배전)의 생산 데이터가 없습니다.")
 
                     with anal_tab2:
-                        st.subheader("🔍 상세 기간 분석")
+                        st.subheader("🔍 상세 기간 분석 (리포트)")
                         min_date = df['날짜'].min().date()
                         max_date_val = df['날짜'].max().date()
                         
@@ -1105,126 +950,154 @@ def run_app():
                         
                         if st.button("분석 실행"):
                             if isinstance(date_range, tuple) and len(date_range) == 2:
-                                mask = (df['날짜'].dt.date >= date_range[0]) & (df['날짜'].dt.date <= date_range[1])
-                                df_filtered = df[mask].copy()
+                                start_date, end_date = date_range[0], date_range[1]
+                                duration = (end_date - start_date).days + 1
                                 
-                                if not df_filtered.empty:
-                                    # 날짜 문자열 변환 및 정렬
-                                    df_filtered = df_filtered.sort_values('날짜')
-                                    df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
+                                # 1. Current Period Data
+                                mask_curr = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
+                                df_curr = df[mask_curr].copy()
+                                
+                                # 2. Previous Period Data (Same duration immediately before)
+                                prev_end = start_date - timedelta(days=1)
+                                prev_start = prev_end - timedelta(days=duration - 1)
+                                mask_prev = (df['날짜'].dt.date >= prev_start) & (df['날짜'].dt.date <= prev_end)
+                                df_prev = df[mask_prev].copy()
+                                
+                                if not df_curr.empty:
+                                    # --- Step 1: Period Summary (Fact Zone) ---
+                                    total_curr = df_curr['수량'].sum()
+                                    total_prev = df_prev['수량'].sum() if not df_prev.empty else 0
                                     
-                                    # --- 1. 데이터 가공 (이동평균, 이상치 탐지) ---
-                                    # 일별 전체 합계 계산
-                                    daily_total = df_filtered.groupby(['날짜', '날짜_str'])['수량'].sum().reset_index()
+                                    delta_val = total_curr - total_prev
+                                    delta_pct = (delta_val / total_prev * 100) if total_prev > 0 else 0
                                     
-                                    # 7일 이동평균 (데이터가 있는 날 기준)
-                                    daily_total['MA7'] = daily_total['수량'].rolling(window=7, min_periods=1).mean()
+                                    daily_avg = total_curr / duration
                                     
-                                    # 이상치 탐지 (평균의 50% 미만인 날)
-                                    period_mean = daily_total['수량'].mean()
-                                    daily_total['Anomaly'] = daily_total['수량'] < (period_mean * 0.5)
-                                    
-                                    # 공정별 데이터 (막대 그래프용)
-                                    daily_cat = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
-
-                                    # --- 2. 상단 핵심 지표 (KPI) ---
-                                    st.markdown(f"##### 🗓 분석 기간: {date_range[0].strftime('%Y.%m.%d')} ~ {date_range[1].strftime('%Y.%m.%d')}")
-                                    
-                                    kpi1, kpi2, kpi3 = st.columns(3)
-                                    curr_avg = daily_total['수량'].mean()
-                                    max_day = daily_total.loc[daily_total['수량'].idxmax()]
-                                    min_day = daily_total.loc[daily_total['수량'].idxmin()]
-                                    
-                                    kpi1.metric("기간 평균 생산량", f"{int(curr_avg):,} EA")
-                                    kpi2.metric("최고 생산일", f"{max_day['날짜_str']}", f"{int(max_day['수량']):,} EA")
-                                    kpi3.metric("최저 생산일", f"{min_day['날짜_str']}", f"{int(min_day['수량']):,} EA", delta_color="inverse")
+                                    st.info(
+                                        f"**분석 기간:** {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} ({duration}일간)  |  "
+                                        f"**총 생산량:** {int(total_curr):,} EA  |  "
+                                        f"**전기간 대비:** {delta_pct:+.1f}% ({int(delta_val):+,} EA)  |  "
+                                        f"**일 평균:** {daily_avg:.1f} EA"
+                                    )
                                     
                                     st.markdown("---")
 
-                                    # --- 3. 복합 차트 시각화 (Bar + Line + Points) ---
-                                    st.subheader("📈 일별 생산 추이 및 변동 요인")
+                                    # --- Step 2: Overall Trend (Context) ---
+                                    st.subheader("📈 전체 생산 추이 (일별 + 7일 이동평균)")
                                     
-                                    # (1) 막대 그래프: 공정별 분해 (Decomposition)
-                                    bar = alt.Chart(daily_cat).mark_bar().encode(
-                                        x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
+                                    # Daily Aggregation
+                                    daily_trend = df_curr.groupby('날짜')['수량'].sum().reset_index()
+                                    daily_trend['7일 평균'] = daily_trend['수량'].rolling(window=7, min_periods=1).mean()
+                                    daily_trend['날짜_str'] = daily_trend['날짜'].dt.strftime('%Y-%m-%d')
+                                    
+                                    # Layered Chart: Bar + Line
+                                    base = alt.Chart(daily_trend).encode(x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")))
+                                    
+                                    bar = base.mark_bar(color='#3b82f6', opacity=0.5).encode(
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                        color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
-                                        tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
+                                        tooltip=['날짜_str', alt.Tooltip('수량', format=',')]
                                     )
                                     
-                                    # (2) 라인 그래프: 7일 이동평균 (Trend)
-                                    line = alt.Chart(daily_total).mark_line(color='#ef4444', strokeWidth=3).encode(
-                                        x='날짜_str:O',
-                                        y='MA7:Q',
-                                        tooltip=[alt.Tooltip('날짜_str', title='날짜'), alt.Tooltip('MA7', title='7일 이동평균', format=',.0f')]
+                                    line = base.mark_line(color='#ef4444', strokeWidth=3).encode(
+                                        y='7일 평균:Q',
+                                        tooltip=['날짜_str', alt.Tooltip('7일 평균', format=',.1f')]
                                     )
                                     
-                                    # (3) 포인트: 이상 급감 지점 강조 (Anomaly)
-                                    points = alt.Chart(daily_total[daily_total['Anomaly']]).mark_circle(color='red', size=100, opacity=1).encode(
-                                        x='날짜_str:O',
-                                        y='수량:Q',
-                                        tooltip=['날짜_str', alt.Tooltip('수량', title='급감 수량', format=',')]
-                                    )
-
-                                    # 차트 결합
-                                    combo_chart = (bar + line + points).resolve_scale(y='shared').properties(height=400)
-                                    st.altair_chart(combo_chart, use_container_width=True)
-
-                                    # --- 4. 자동 인사이트 ---
-                                    st.subheader("💡 분석 인사이트")
-                                    
-                                    # 급감일 안내
-                                    anomalies = daily_total[daily_total['Anomaly']]
-                                    if not anomalies.empty:
-                                        st.warning(f"⚠️ **생산 급감 감지 ({len(anomalies)}일)**: 평균({int(period_mean):,} EA) 대비 50% 미만 생산된 날이 있습니다.")
-                                        for _, row in anomalies.iterrows():
-                                            st.markdown(f"- **{row['날짜_str']}**: {int(row['수량']):,} EA (원인 파악 필요)")
-                                    else:
-                                        st.success("✅ 특이사항 없음: 생산량이 안정적으로 유지되고 있습니다.")
+                                    st.altair_chart((bar + line).properties(height=300), use_container_width=True)
 
                                     st.markdown("---")
-                                    st.subheader("🔎 SMT 생산 모델별 분석")
+
+                                    # --- Step 3: Cause Analysis (Contribution) ---
+                                    st.subheader("📉 변화 원인 분석 (전기간 대비 증감 기여도)")
                                     
-                                    smt_cats = ["PC", "CM1", "CM3", "배전"]
-                                    df_smt = df_filtered[df_filtered['구분'].isin(smt_cats)]
+                                    c1, c2 = st.columns(2)
                                     
-                                    if not df_smt.empty:
-                                        smt_agg = df_smt.groupby('제품명')['수량'].sum().reset_index().sort_values('수량', ascending=False)
-                                        smt_total = smt_agg['수량'].sum()
+                                    # 3-1. Model Contribution
+                                    with c1:
+                                        st.markdown("##### 🧩 모델별 증감 기여도 (TOP 5)")
+                                        model_curr = df_curr.groupby('제품명')['수량'].sum()
+                                        model_prev = df_prev.groupby('제품명')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
                                         
-                                        c_s1, c_s2 = st.columns([1, 2])
-                                        with c_s1:
-                                            st.metric("SMT 총 생산량", f"{smt_total:,.0f} EA", help="PC, PLC(CM1, CM3), 배전 공정 합계")
-                                            st.dataframe(smt_agg, hide_index=True, use_container_width=True, height=400)
+                                        model_diff = model_curr.sub(model_prev, fill_value=0).reset_index()
+                                        model_diff.columns = ['모델명', '증감량']
+                                        # Sort by absolute change to see impact
+                                        model_diff['abs_diff'] = model_diff['증감량'].abs()
+                                        top_contributors = model_diff.sort_values('abs_diff', ascending=False).head(5).drop(columns=['abs_diff'])
                                         
-                                        with c_s2:
-                                            # [수정] 슬라이더 삭제 및 상위 20개 고정 표시
-                                            # top_n = st.slider(...) 삭제됨
-                                            chart_data_smt = smt_agg.head(20) # Top 20 고정
-                                            
-                                            smt_chart = alt.Chart(chart_data_smt).mark_bar().encode(
-                                                x=alt.X('제품명', sort='-y', axis=alt.Axis(labelAngle=-45, title="모델명")),
-                                                y=alt.Y('수량', axis=alt.Axis(title="생산 수량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
-                                                color=alt.value("#3b82f6"),
-                                                tooltip=['제품명', alt.Tooltip('수량', format=',')]
-                                            ).properties(title="SMT 생산 상위 20개 모델")
-                                            st.altair_chart(smt_chart, use_container_width=True)
-                                    else:
-                                        st.info("선택된 기간에 SMT 생산(PC, PLC, 배전) 데이터가 없습니다.")
-                                    
-                                    st.markdown("---")
-                                    st.subheader("💡 분석 인사이트")
-                                    drop_info = detect_drop(df_filtered)
-                                    if drop_info["is_drop"]:
-                                        st.warning(
-                                            f"⚠️ **생산량 급감 경고**\n\n"
-                                            f"최근 7일 생산량이 그 전주 대비 **{drop_info['rate']}% 감소**했습니다.\n"
-                                            f"- 최근 7일 평균: {drop_info['recent']:.1f} EA\n"
-                                            f"- 전주 7일 평균: {drop_info['prev']:.1f} EA"
+                                        st.dataframe(
+                                            top_contributors.style.format({'증감량': '{:+,.0f}'})
+                                            .background_gradient(cmap='RdBu', subset=['증감량'], vmin=-max(abs(top_contributors['증감량'])), vmax=max(abs(top_contributors['증감량']))),
+                                            hide_index=True, 
+                                            use_container_width=True
                                         )
-                                    else:
-                                        st.success("✅ 특이사항 없음: 생산량이 안정적으로 유지되고 있습니다.")
 
+                                    # 3-2. Category Contribution (Chart)
+                                    with c2:
+                                        st.markdown("##### 🏭 공정별 증감 기여도")
+                                        cat_curr = df_curr.groupby('구분')['수량'].sum()
+                                        cat_prev = df_prev.groupby('구분')['수량'].sum() if not df_prev.empty else pd.Series(dtype=float)
+                                        
+                                        cat_diff = cat_curr.sub(cat_prev, fill_value=0).reset_index()
+                                        cat_diff.columns = ['구분', '증감량']
+                                        
+                                        chart_cat = alt.Chart(cat_diff).mark_bar().encode(
+                                            x=alt.X('구분:O', axis=alt.Axis(labelAngle=0)),
+                                            y=alt.Y('증감량:Q'),
+                                            color=alt.condition(
+                                                alt.datum.증감량 > 0,
+                                                alt.value("steelblue"),  # The positive color
+                                                alt.value("orange")  # The negative color
+                                            ),
+                                            tooltip=['구분', alt.Tooltip('증감량', format='+,')]
+                                        ).properties(height=250)
+                                        st.altair_chart(chart_cat, use_container_width=True)
+
+                                    # --- Step 4: Anomalies (Optional) ---
+                                    # 이상 감지: 평균의 50% 미만인 날
+                                    period_mean = daily_trend['수량'].mean()
+                                    anomalies = daily_trend[daily_trend['수량'] < (period_mean * 0.5)]
+                                    
+                                    if not anomalies.empty:
+                                        st.markdown("---")
+                                        st.subheader("⚠️ 이상 감지 (생산 급감일)")
+                                        st.warning(f"총 {len(anomalies)}일의 생산량이 기간 평균({int(period_mean):,} EA)의 50% 미만입니다.")
+                                        
+                                        # Show as simple metrics or list
+                                        cols = st.columns(len(anomalies)) if len(anomalies) <= 4 else st.columns(4)
+                                        for idx, row in enumerate(anomalies.itertuples()):
+                                            col_idx = idx % 4
+                                            with cols[col_idx]:
+                                                st.metric(
+                                                    label=row.날짜_str, 
+                                                    value=f"{int(row.수량):,} EA", 
+                                                    delta=f"{int(row.수량 - period_mean):,} (평균대비)",
+                                                    delta_color="inverse"
+                                                )
+
+                                    # --- Step 5: Summary Sentence ---
+                                    st.markdown("---")
+                                    
+                                    # Identify primary driver
+                                    if not top_contributors.empty:
+                                        top_row = top_contributors.iloc[0]
+                                        impact_model = top_row['모델명']
+                                        impact_val = top_row['증감량']
+                                        
+                                        impact_pct = 0
+                                        if delta_val != 0:
+                                            impact_pct = (abs(impact_val) / abs(delta_val)) * 100
+                                        
+                                        direction_str = "감소" if delta_val < 0 else "증가"
+                                        model_dir_str = "감소" if impact_val < 0 else "증가"
+                                        
+                                        if (delta_val < 0 and impact_val < 0) or (delta_val > 0 and impact_val > 0):
+                                            # Contribution to the main trend
+                                            msg = f"이번 기간 생산량 **{direction_str}**의 약 **{impact_pct:.0f}%**는 **'{impact_model}'** 모델의 {model_dir_str}에서 기인했습니다."
+                                            st.success(f"💡 **AI 인사이트:** {msg}")
+                                        else:
+                                            # Counter-trend or mixed
+                                            st.info(f"💡 **AI 인사이트:** 전체적으로는 {direction_str}했으나, **'{impact_model}'** 모델은 {int(impact_val):+,} EA 변동하며 큰 영향을 주었습니다.")
+                                    
                                 else: st.info("선택된 기간에 데이터가 없습니다.")
                 else: st.info("생산 데이터가 없습니다.")
 
