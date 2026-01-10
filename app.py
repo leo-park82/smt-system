@@ -1115,28 +1115,10 @@ def run_app():
                                     # [UX Improvement] Display date range explicitly
                                     st.markdown(f"##### 📉 일별 생산 추이 ({date_range[0].strftime('%Y-%m-%d')} ~ {date_range[1].strftime('%Y-%m-%d')})")
                                     
-                                    # [Fix] Fill missing dates
-                                    # 1. Full date range
-                                    full_date_range = pd.date_range(start=date_range[0], end=date_range[1])
-                                    
-                                    # 2. Group by date and category
-                                    chart_data = df_filtered.groupby(['날짜', '구분'])['수량'].sum().reset_index()
-                                    
-                                    # 3. Add missing dates (append rows with 0 quantity)
-                                    existing_dates = chart_data['날짜'].unique()
-                                    missing_dates = full_date_range.difference(existing_dates)
-                                    
-                                    if not missing_dates.empty:
-                                        missing_df = pd.DataFrame({
-                                            '날짜': missing_dates,
-                                            '구분': ['-'] * len(missing_dates), # Dummy category for visualization
-                                            '수량': [0] * len(missing_dates)
-                                        })
-                                        chart_data = pd.concat([chart_data, missing_df], ignore_index=True)
-                                    
-                                    # 4. Format for chart
+                                    # [Modified] Exclude dates with no production (Remove zero-filling logic)
+                                    # 일별 생산량 차트
+                                    chart_data = df_filtered.groupby(['날짜', '날짜_str', '구분'])['수량'].sum().reset_index()
                                     chart_data = chart_data.sort_values('날짜')
-                                    chart_data['날짜_str'] = chart_data['날짜'].dt.strftime('%Y-%m-%d')
 
                                     # [수정] 슬라이더 제거 및 use_container_width=True
                                     bar = alt.Chart(chart_data).mark_bar().encode(
@@ -1147,7 +1129,7 @@ def run_app():
                                     ).properties(
                                         height=350
                                     ) 
-                                    st.altair_chart(bar, use_container_width=True)
+                                    st.altair_chart(bar, use_container_width=True) # [수정] True 설정
 
                                     st.markdown("---")
                                     st.subheader("🧩 공정별 통합 생산 수량")
