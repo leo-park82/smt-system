@@ -22,6 +22,14 @@ try:
 except ImportError:
     HAS_CANVAS = False
 
+# [추가] Matplotlib 라이브러리 (Pandas 스타일링용)
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 # 구글 시트 연동 라이브러리
 import gspread
 from google.oauth2.service_account import Credentials
@@ -270,11 +278,6 @@ def get_dashboard_stats():
     daily_avg = 0
     top_category = "-"
     top_model = "-"
-    
-    # [수정] 분석 대상 공정 필터링 (KPI 계산에도 후공정 제외 여부 적용 - 요청에 따라 일관성 유지)
-    # 다만 대시보드 KPI는 '전체'를 보는 것이 맞을 수 있으나, 심층 분석과 맞추려면 필터링 필요.
-    # 여기서는 '전체'를 보여주되, 심층 분석 탭에서 상세를 보도록 유도하는 것이 일반적.
-    # 사용자 요청이 '기간별 심층 분석' 탭에서의 제외였으므로 대시보드는 전체 유지.
     
     if not df_prod.empty:
         df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
@@ -921,7 +924,7 @@ def run_app():
                                 insight_msgs = []
                                 
                                 # (1) 전체 방향성
-                                direction = "증가" if total_diff >= 0 else "감소"
+                                direction = "증가" if delta_val >= 0 else "감소"
                                 insight_msgs.append(f"전체 생산량은 전기간 대비 **{abs(delta_pct):.1f}% {direction}**했습니다. ({int(delta_val):+,} EA)")
                                 
                                 # (2) 모델별 기여도
