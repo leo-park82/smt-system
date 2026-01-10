@@ -1109,53 +1109,78 @@ def run_app():
                                 df_filtered = df[mask].copy()
                                 
                                 if not df_filtered.empty:
-                                    # 날짜 문자열 변환
+                                    # 날짜 문자열 변환 및 정렬
+                                    df_filtered = df_filtered.sort_values('날짜')
                                     df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
                                     
-                                    # [UX Improvement] Display date range explicitly
-                                    st.markdown(f"##### 📉 일별 생산 추이 ({date_range[0].strftime('%Y-%m-%d')} ~ {date_range[1].strftime('%Y-%m-%d')})")
+                                    # --- 1. 데이터 가공 (이동평균, 이상치 탐지) ---
+                                    # 일별 전체 합계 계산
+                                    daily_total = df_filtered.groupby(['날짜', '날짜_str'])['수량'].sum().reset_index()
                                     
-                                    # [Modified] Exclude dates with no production (Remove zero-filling logic)
-                                    # 일별 생산량 차트
-                                    chart_data = df_filtered.groupby(['날짜', '날짜_str', '구분'])['수량'].sum().reset_index()
-                                    chart_data = chart_data.sort_values('날짜')
+                                    # 7일 이동평균 (데이터가 있는 날 기준)
+                                    daily_total['MA7'] = daily_total['수량'].rolling(window=7, min_periods=1).mean()
+                                    
+                                    # 이상치 탐지 (평균의 50% 미만인 날)
+                                    period_mean = daily_total['수량'].mean()
+                                    daily_total['Anomaly'] = daily_total['수량'] < (period_mean * 0.5)
+                                    
+                                    # 공정별 데이터 (막대 그래프용)
+                                    daily_cat = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
 
-                                    # [수정] 슬라이더 제거 및 use_container_width=True
-                                    bar = alt.Chart(chart_data).mark_bar().encode(
+                                    # --- 2. 상단 핵심 지표 (KPI) ---
+                                    st.markdown(f"##### 🗓 분석 기간: {date_range[0].strftime('%Y.%m.%d')} ~ {date_range[1].strftime('%Y.%m.%d')}")
+                                    
+                                    kpi1, kpi2, kpi3 = st.columns(3)
+                                    curr_avg = daily_total['수량'].mean()
+                                    max_day = daily_total.loc[daily_total['수량'].idxmax()]
+                                    min_day = daily_total.loc[daily_total['수량'].idxmin()]
+                                    
+                                    kpi1.metric("기간 평균 생산량", f"{int(curr_avg):,} EA")
+                                    kpi2.metric("최고 생산일", f"{max_day['날짜_str']}", f"{int(max_day['수량']):,} EA")
+                                    kpi3.metric("최저 생산일", f"{min_day['날짜_str']}", f"{int(min_day['수량']):,} EA", delta_color="inverse")
+                                    
+                                    st.markdown("---")
+
+                                    # --- 3. 복합 차트 시각화 (Bar + Line + Points) ---
+                                    st.subheader("📈 일별 생산 추이 및 변동 요인")
+                                    
+                                    # (1) 막대 그래프: 공정별 분해 (Decomposition)
+                                    bar = alt.Chart(daily_cat).mark_bar().encode(
                                         x=alt.X('날짜_str:O', axis=alt.Axis(labelAngle=0, title="날짜")),
                                         y=alt.Y('수량:Q', axis=alt.Axis(title="생산량", titleAngle=0, titleAlign="left", titleY=-10, titleX=0)),
                                         color=alt.Color('구분', title='공정', scale=alt.Scale(scheme='category10')), 
                                         tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
-                                    ).properties(
-                                        height=350
-                                    ) 
-                                    st.altair_chart(bar, use_container_width=True) # [수정] True 설정
-
-                                    st.markdown("---")
-                                    st.subheader("🧩 공정별 통합 생산 수량")
+                                    )
                                     
-                                    def map_category(cat):
-                                        if cat == "PC": return "PC"
-                                        elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
-                                        elif cat == "배전": return "배전"
-                                        elif cat == "후공정": return "후공정"
-                                        elif cat == "샘플": return "샘플"
-                                        return None 
-
-                                    df_filtered['Group'] = df_filtered['구분'].apply(map_category)
-                                    df_grouped = df_filtered.dropna(subset=['Group']).groupby('Group')['수량'].sum().reset_index()
+                                    # (2) 라인 그래프: 7일 이동평균 (Trend)
+                                    line = alt.Chart(daily_total).mark_line(color='#ef4444', strokeWidth=3).encode(
+                                        x='날짜_str:O',
+                                        y='MA7:Q',
+                                        tooltip=[alt.Tooltip('날짜_str', title='날짜'), alt.Tooltip('MA7', title='7일 이동평균', format=',.0f')]
+                                    )
                                     
-                                    if not df_grouped.empty:
-                                        sort_order = ["PC", "PLC (CM1+CM3)", "배전", "후공정", "샘플"]
-                                        df_grouped['Group'] = pd.Categorical(df_grouped['Group'], categories=sort_order, ordered=True)
-                                        df_grouped = df_grouped.sort_values('Group')
-                                        
-                                        cols = st.columns(len(df_grouped))
-                                        for idx, row in enumerate(df_grouped.itertuples()):
-                                            with cols[idx]:
-                                                st.metric(row.Group, f"{row.수량:,.0f} EA")
+                                    # (3) 포인트: 이상 급감 지점 강조 (Anomaly)
+                                    points = alt.Chart(daily_total[daily_total['Anomaly']]).mark_circle(color='red', size=100, opacity=1).encode(
+                                        x='날짜_str:O',
+                                        y='수량:Q',
+                                        tooltip=['날짜_str', alt.Tooltip('수량', title='급감 수량', format=',')]
+                                    )
+
+                                    # 차트 결합
+                                    combo_chart = (bar + line + points).resolve_scale(y='shared').properties(height=400)
+                                    st.altair_chart(combo_chart, use_container_width=True)
+
+                                    # --- 4. 자동 인사이트 ---
+                                    st.subheader("💡 분석 인사이트")
+                                    
+                                    # 급감일 안내
+                                    anomalies = daily_total[daily_total['Anomaly']]
+                                    if not anomalies.empty:
+                                        st.warning(f"⚠️ **생산 급감 감지 ({len(anomalies)}일)**: 평균({int(period_mean):,} EA) 대비 50% 미만 생산된 날이 있습니다.")
+                                        for _, row in anomalies.iterrows():
+                                            st.markdown(f"- **{row['날짜_str']}**: {int(row['수량']):,} EA (원인 파악 필요)")
                                     else:
-                                        st.info("해당 기간에 집계할 주요 공정 데이터가 없습니다.")
+                                        st.success("✅ 특이사항 없음: 생산량이 안정적으로 유지되고 있습니다.")
 
                                     st.markdown("---")
                                     st.subheader("🔎 SMT 생산 모델별 분석")
