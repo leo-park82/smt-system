@@ -1112,6 +1112,9 @@ def run_app():
                                     # 날짜 문자열 변환
                                     df_filtered['날짜_str'] = df_filtered['날짜'].dt.strftime('%Y-%m-%d')
                                     
+                                    # [UX Improvement] Display date range explicitly
+                                    st.markdown(f"##### 📉 일별 생산 추이 ({date_range[0].strftime('%Y-%m-%d')} ~ {date_range[1].strftime('%Y-%m-%d')})")
+                                    
                                     # [New] Slider for chart width
                                     chart_width = st.slider("↔️ 차트 너비 조절", min_value=600, max_value=3000, value=1200, step=100)
 
@@ -1545,7 +1548,7 @@ def run_app():
         else: st.error("🚫 접근 권한이 없습니다. (관리자 전용)")
 
 # ------------------------------------------------------------------
-# 메인 실행
+# 1. 메인 실행
 # ------------------------------------------------------------------
 if check_password():
     run_app()
