@@ -890,14 +890,17 @@ def run_app():
                             start_date, end_date = date_range_report[0], date_range_report[1]
                             duration = (end_date - start_date).days + 1
                             
-                            # 1. Current Period Data
-                            mask_curr = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date)
+                            # [수정] 분석 대상 공정 정의 (후공정 제외)
+                            target_cats = ["PC", "CM1", "CM3", "배전"]
+
+                            # 1. Current Period Data (공정 필터링 추가)
+                            mask_curr = (df['날짜'].dt.date >= start_date) & (df['날짜'].dt.date <= end_date) & (df['구분'].isin(target_cats))
                             df_curr = df[mask_curr].copy()
                             
-                            # 2. Previous Period Data (직전 동기간)
+                            # 2. Previous Period Data (직전 동기간, 공정 필터링 추가)
                             prev_end = start_date - timedelta(days=1)
                             prev_start = prev_end - timedelta(days=duration - 1)
-                            mask_prev = (df['날짜'].dt.date >= prev_start) & (df['날짜'].dt.date <= prev_end)
+                            mask_prev = (df['날짜'].dt.date >= prev_start) & (df['날짜'].dt.date <= prev_end) & (df['구분'].isin(target_cats))
                             df_prev = df[mask_prev].copy()
                             
                             if not df_curr.empty:
@@ -910,7 +913,7 @@ def run_app():
                                 
                                 st.info(
                                     f"**분석 기간:** {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} ({duration}일간)  |  "
-                                    f"**총 생산량:** {int(total_curr):,} EA  |  "
+                                    f"**총 생산량:** {int(total_curr):,} EA (후공정 제외)  |  "
                                     f"**전기간 대비:** {delta_pct:+.1f}% ({int(delta_val):+,} EA)  |  "
                                     f"**일 평균:** {daily_avg:.1f} EA"
                                 )
