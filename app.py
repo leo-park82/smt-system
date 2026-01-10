@@ -22,6 +22,14 @@ try:
 except ImportError:
     HAS_CANVAS = False
 
+# [추가] Matplotlib 라이브러리 (Pandas 스타일링용)
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 # 구글 시트 연동 라이브러리
 import gspread
 from google.oauth2.service_account import Credentials
@@ -940,11 +948,15 @@ def run_app():
                                     model_diff['abs_diff'] = model_diff['증감량'].abs()
                                     top_contributors = model_diff.sort_values('abs_diff', ascending=False).head(5).drop(columns=['abs_diff'])
                                     
-                                    st.dataframe(
-                                        top_contributors.style.format({'증감량': '{:+,.0f}'})
-                                        .background_gradient(cmap='RdBu', subset=['증감량'], vmin=-max(abs(top_contributors['증감량'])), vmax=max(abs(top_contributors['증감량']))),
-                                        hide_index=True, use_container_width=True
-                                    )
+                                    # [수정] Pandas Style 적용 (Matplotlib 의존성 제거)
+                                    # Streamlit dataframe은 기본적으로 스타일을 지원하지만 background_gradient는 matplotlib 필요
+                                    # 여기서는 단순 데이터프레임으로 표시하되, 증감량에 따라 화살표 추가 등 텍스트 포맷팅으로 대체
+                                    def format_arrow(val):
+                                        return f"⬆ {val:,.0f}" if val > 0 else f"⬇ {abs(val):,.0f}" if val < 0 else "-"
+
+                                    top_contributors['증감량'] = top_contributors['증감량'].apply(format_arrow)
+                                    st.dataframe(top_contributors, hide_index=True, use_container_width=True)
+
 
                                 # 3-2. 공정별 기여도
                                 with c2:
