@@ -1115,9 +1115,6 @@ def run_app():
                                     # [UX Improvement] Display date range explicitly
                                     st.markdown(f"##### 📉 일별 생산 추이 ({date_range[0].strftime('%Y-%m-%d')} ~ {date_range[1].strftime('%Y-%m-%d')})")
                                     
-                                    # [New] Slider for chart width
-                                    chart_width = st.slider("↔️ 차트 너비 조절", min_value=600, max_value=3000, value=1200, step=100)
-
                                     # 일별 생산량 차트
                                     chart_data = df_filtered.groupby(['날짜_str', '구분'])['수량'].sum().reset_index()
                                     
@@ -1129,9 +1126,9 @@ def run_app():
                                         tooltip=['날짜_str', '구분', alt.Tooltip('수량', format=',')]
                                     ).properties(
                                         height=350,
-                                        width=chart_width # [수정] 동적 너비 적용
+                                        # [수정] 슬라이더 제거 및 use_container_width=True로 변경
                                     ) 
-                                    st.altair_chart(bar, use_container_width=False) # [수정] 스크롤 가능하도록 False 설정
+                                    st.altair_chart(bar, use_container_width=True) # [수정] True 설정
 
                                     st.markdown("---")
                                     st.subheader("🧩 공정별 통합 생산 수량")
