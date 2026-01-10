@@ -266,7 +266,8 @@ def get_dashboard_stats():
     df_maint = load_data(SHEET_MAINTENANCE, COLS_MAINTENANCE)
     
     today = get_now().replace(tzinfo=None).date() 
-    
+    today_str = today.strftime("%Y-%m-%d")
+
     # --- KPI 계산을 위한 데이터 가공 ---
     this_month_start = today.replace(day=1)
     last_month_end = this_month_start - timedelta(days=1)
@@ -276,8 +277,6 @@ def get_dashboard_stats():
     prod_this_month = 0
     prod_last_month = 0
     daily_avg = 0
-    top_category = "-"
-    top_model = "-"
     
     if not df_prod.empty:
         df_prod['날짜'] = pd.to_datetime(df_prod['날짜'], errors='coerce').dt.date
@@ -296,23 +295,41 @@ def get_dashboard_stats():
         if days_passed > 0:
             daily_avg = prod_this_month / days_passed
             
-        # 최대 기여 공정/모델
-        if not df_this.empty:
-            top_category = df_this.groupby('구분')['수량'].sum().idxmax()
-            top_model = df_this.groupby('제품명')['수량'].sum().idxmax()
-            
     # 전월 대비 증감률 (전월 데이터가 0이면 표시 안함)
     delta_ratio = 0
     if prod_last_month > 0:
         delta_ratio = ((prod_this_month - prod_last_month) / prod_last_month) * 100
+
+    # 2. 설비 보전 (오늘)
+    maint_today_cnt = 0
+    if not df_maint.empty:
+        df_maint['날짜_dt'] = pd.to_datetime(df_maint['날짜'], errors='coerce').dt.date
+        maint_today_cnt = len(df_maint[df_maint['날짜_dt'] == today])
+
+    # 3. 일일 점검 (오늘 NG)
+    ng_today_cnt = 0
+    if not df_check.empty:
+        df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
+        # 오늘 날짜 데이터만
+        df_today_chk = df_check[df_check['date_only'] == today_str]
+        if not df_today_chk.empty:
+             # 중복 제거 (설비+항목 기준 최신값)
+             # timestamp가 있으면 sort 후 drop_duplicates
+             if 'timestamp' in df_today_chk.columns:
+                 df_today_chk['timestamp'] = pd.to_datetime(df_today_chk['timestamp'], errors='coerce')
+                 df_uniq = df_today_chk.sort_values('timestamp').drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+             else:
+                 df_uniq = df_today_chk.drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
+             
+             ng_today_cnt = len(df_uniq[df_uniq['ox'] == 'NG'])
 
     return {
         "prod_this_month": prod_this_month,
         "prod_last_month": prod_last_month, # 참고용
         "delta_ratio": delta_ratio,
         "daily_avg": daily_avg,
-        "top_category": top_category,
-        "top_model": top_model,
+        "maint_cnt": maint_today_cnt,
+        "ng_cnt": ng_today_cnt,
         "df_prod": df_prod # 분석용 원본 전달
     }
 
@@ -459,6 +476,112 @@ def generate_all_daily_check_pdf(date_str):
         return pdf_bytes
     except Exception as e:
         return None
+
+def generate_production_report_pdf(df_prod, df_inv, date_str):
+    try:
+        font_filename = 'NanumGothic.ttf'
+        if not os.path.exists(font_filename):
+            try:
+                url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+                urllib.request.urlretrieve(url, font_filename)
+            except: pass
+
+        pdf = FPDF()
+        font_name = 'Arial'
+        try:
+            pdf.add_font('Korean', '', font_filename, uni=True)
+            font_name = 'Korean'
+        except: pass
+        
+        pdf.add_page()
+        pdf.set_fill_color(50, 50, 50) 
+        pdf.rect(0, 0, 210, 25, 'F')
+        pdf.set_font(font_name, '', 20)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(10, 5)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 15, "생산 일일 보고서", 0, 0, 'L')
+        pdf.set_font(font_name, '', 10)
+        pdf.set_xy(10, 5)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 15, f"일자: {date_str}", 0, 0, 'R')
+        pdf.ln(25)
+        
+        # 1. 생산 실적
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(font_name, '', 14)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 10, "1. 일일 생산 실적", 0, 1, 'L')
+        
+        pdf.set_fill_color(240, 240, 240)
+        pdf.set_font(font_name, '', 10)
+        headers = ["구분", "품목코드", "제품명", "수량", "작성자"]
+        widths = [25, 35, 80, 25, 25]
+        for i, h in enumerate(headers): pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
+        pdf.ln()
+        
+        fill = False
+        pdf.set_fill_color(250, 250, 250)
+        total_qty = 0
+        if not df_prod.empty:
+            for _, row in df_prod.iterrows():
+                pdf.cell(widths[0], 8, str(row['구분']), 1, 0, 'C', fill)
+                pdf.cell(widths[1], 8, str(row['품목코드']), 1, 0, 'C', fill)
+                p_name = str(row['제품명'])
+                if len(p_name) > 25: p_name = p_name[:24] + ".."
+                pdf.cell(widths[2], 8, p_name, 1, 0, 'L', fill)
+                qty = int(float(str(row['수량']).replace(',','')))
+                total_qty += qty
+                pdf.cell(widths[3], 8, f"{qty:,}", 1, 0, 'R', fill)
+                pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
+                fill = not fill
+        else:
+            # [수정] 한글 제목 변경
+            pdf.cell(sum(widths), 10, "생산 실적 없음", 1, 1, 'C', fill)
+            
+        pdf.ln(2)
+        pdf.set_font(font_name, '', 12)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 10, f"총 생산량: {total_qty:,} EA", 0, 1, 'R')
+        
+        # 2. 재고 현황
+        if df_inv is not None and not df_inv.empty:
+            pdf.ln(10)
+            pdf.set_font(font_name, '', 14)
+            # [수정] 한글 제목 변경
+            pdf.cell(0, 10, "2. 현재 재고 현황", 0, 1, 'L')
+            
+            pdf.set_font(font_name, '', 10)
+            pdf.set_fill_color(240, 240, 240)
+            
+            inv_headers = ["품목코드", "제품명", "현재고"]
+            inv_widths = [40, 100, 50]
+            
+            for i, h in enumerate(inv_headers):
+                pdf.cell(inv_widths[i], 10, h, 1, 0, 'C', 1)
+            pdf.ln()
+            
+            fill = False
+            pdf.set_fill_color(250, 250, 250)
+            
+            for _, row in df_inv.iterrows():
+                pdf.cell(inv_widths[0], 8, str(row['품목코드']), 1, 0, 'C', fill)
+                
+                p_name = str(row['제품명'])
+                if len(p_name) > 35: p_name = p_name[:34] + ".."
+                pdf.cell(inv_widths[1], 8, p_name, 1, 0, 'L', fill)
+                
+                curr_stock = int(float(str(row['현재고']).replace(',', '')))
+                pdf.cell(inv_widths[2], 8, f"{curr_stock:,}", 1, 1, 'R', fill)
+                
+                fill = not fill
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            pdf.output(tmp_file.name)
+            with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
+        os.unlink(tmp_file.name)
+        return pdf_bytes
+    except: return None
 
 # ------------------------------------------------------------------
 # 4. 사용자 인증
@@ -627,24 +750,23 @@ def run_app():
                 df_prod = metrics['df_prod']
                 
                 # 1. KPI 카드 (4개 고정)
+                # [수정] KPI 구성 변경: 최대생산공정 삭제 -> 설비/점검 내용 포함
                 k1, k2, k3, k4 = st.columns(4)
                 
                 # KPI 1: 금월 총 생산량 (vs 전월 대비 증감 표시)
-                # 전월 총량이 0이면 델타 없음, 있으면 표시
                 delta_str = f"{metrics['delta_ratio']:+.1f}%" if metrics['prod_last_month'] > 0 else None
                 k1.metric("금월 총 생산량", f"{int(metrics['prod_this_month']):,} EA", delta_str)
                 
                 # KPI 2: 일 평균 생산량 (현재 시점)
                 k2.metric("일 평균 (금월)", f"{metrics['daily_avg']:.1f} EA")
                 
-                # KPI 3: 최대 생산 공정 (리딩 공정)
-                k3.metric("최대 생산 공정", metrics['top_category'])
+                # KPI 3: 금일 설비 정비 (New)
+                maint_val = metrics['maint_cnt']
+                k3.metric("금일 설비 정비", f"{maint_val} 건", "작업 등록" if maint_val > 0 else "특이사항 없음", delta_color="off")
                 
-                # KPI 4: 최대 생산 모델 (리딩 모델)
-                # 모델명이 길 경우를 대비해 살짝 줄임 표시 가능하나 일단 표시
-                display_model = metrics['top_model']
-                if len(display_model) > 10: display_model = display_model[:9] + ".."
-                k4.metric("최대 생산 모델", display_model)
+                # KPI 4: 금일 점검 부적합 (New)
+                ng_val = metrics['ng_cnt']
+                k4.metric("금일 점검 부적합", f"{ng_val} 건", "조치 필요" if ng_val > 0 else "정상", delta_color="inverse")
                 
                 # 2. 긴급 상황 경고 (조건부 표시)
                 st.markdown("---")
