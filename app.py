@@ -337,6 +337,113 @@ def get_daily_check_master_data():
     df = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
     return df
 
+# [수정] PDF 생성 함수 정의 (순서 이동 및 정의 확인)
+def generate_production_report_pdf(df_prod, df_inv, date_str):
+    try:
+        font_filename = 'NanumGothic.ttf'
+        if not os.path.exists(font_filename):
+            try:
+                url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+                urllib.request.urlretrieve(url, font_filename)
+            except: pass
+
+        pdf = FPDF()
+        font_name = 'Arial'
+        try:
+            pdf.add_font('Korean', '', font_filename, uni=True)
+            font_name = 'Korean'
+        except: pass
+        
+        pdf.add_page()
+        pdf.set_fill_color(50, 50, 50) 
+        pdf.rect(0, 0, 210, 25, 'F')
+        pdf.set_font(font_name, '', 20)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(10, 5)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 15, "생산 일일 보고서", 0, 0, 'L')
+        pdf.set_font(font_name, '', 10)
+        pdf.set_xy(10, 5)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 15, f"일자: {date_str}", 0, 0, 'R')
+        pdf.ln(25)
+        
+        # 1. 생산 실적
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(font_name, '', 14)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 10, "1. 일일 생산 실적", 0, 1, 'L')
+        
+        pdf.set_fill_color(240, 240, 240)
+        pdf.set_font(font_name, '', 10)
+        headers = ["구분", "품목코드", "제품명", "수량", "작성자"]
+        widths = [25, 35, 80, 25, 25]
+        for i, h in enumerate(headers): pdf.cell(widths[i], 10, h, 1, 0, 'C', 1)
+        pdf.ln()
+        
+        fill = False
+        pdf.set_fill_color(250, 250, 250)
+        total_qty = 0
+        if not df_prod.empty:
+            for _, row in df_prod.iterrows():
+                pdf.cell(widths[0], 8, str(row['구분']), 1, 0, 'C', fill)
+                pdf.cell(widths[1], 8, str(row['품목코드']), 1, 0, 'C', fill)
+                p_name = str(row['제품명'])
+                if len(p_name) > 25: p_name = p_name[:24] + ".."
+                pdf.cell(widths[2], 8, p_name, 1, 0, 'L', fill)
+                qty = int(float(str(row['수량']).replace(',','')))
+                total_qty += qty
+                pdf.cell(widths[3], 8, f"{qty:,}", 1, 0, 'R', fill)
+                pdf.cell(widths[4], 8, str(row['작성자']), 1, 1, 'C', fill)
+                fill = not fill
+        else:
+            # [수정] 한글 제목 변경
+            pdf.cell(sum(widths), 10, "생산 실적 없음", 1, 1, 'C', fill)
+            
+        pdf.ln(2)
+        pdf.set_font(font_name, '', 12)
+        # [수정] 한글 제목 변경
+        pdf.cell(0, 10, f"총 생산량: {total_qty:,} EA", 0, 1, 'R')
+        
+        # 2. 재고 현황
+        if df_inv is not None and not df_inv.empty:
+            pdf.ln(10)
+            pdf.set_font(font_name, '', 14)
+            # [수정] 한글 제목 변경
+            pdf.cell(0, 10, "2. 현재 재고 현황", 0, 1, 'L')
+            
+            pdf.set_font(font_name, '', 10)
+            pdf.set_fill_color(240, 240, 240)
+            
+            inv_headers = ["품목코드", "제품명", "현재고"]
+            inv_widths = [40, 100, 50]
+            
+            for i, h in enumerate(inv_headers):
+                pdf.cell(inv_widths[i], 10, h, 1, 0, 'C', 1)
+            pdf.ln()
+            
+            fill = False
+            pdf.set_fill_color(250, 250, 250)
+            
+            for _, row in df_inv.iterrows():
+                pdf.cell(inv_widths[0], 8, str(row['품목코드']), 1, 0, 'C', fill)
+                
+                p_name = str(row['제품명'])
+                if len(p_name) > 35: p_name = p_name[:34] + ".."
+                pdf.cell(inv_widths[1], 8, p_name, 1, 0, 'L', fill)
+                
+                curr_stock = int(float(str(row['현재고']).replace(',', '')))
+                pdf.cell(inv_widths[2], 8, f"{curr_stock:,}", 1, 1, 'R', fill)
+                
+                fill = not fill
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            pdf.output(tmp_file.name)
+            with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
+        os.unlink(tmp_file.name)
+        return pdf_bytes
+    except: return None
+
 def generate_all_daily_check_pdf(date_str):
     try:
         df_m = load_data(SHEET_CHECK_MASTER, COLS_CHECK_MASTER)
