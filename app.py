@@ -308,6 +308,8 @@ def get_dashboard_stats():
 
     # 3. 일일 점검 (오늘 NG)
     ng_today_cnt = 0
+    check_today_cnt = 0 # [New] 금일 점검 건수 추가
+    
     if not df_check.empty:
         df_check['date_only'] = df_check['date'].astype(str).str.split().str[0]
         # 오늘 날짜 데이터만
@@ -321,6 +323,7 @@ def get_dashboard_stats():
              else:
                  df_uniq = df_today_chk.drop_duplicates(['line', 'equip_id', 'item_name'], keep='last')
              
+             check_today_cnt = len(df_uniq) # 총 점검 항목 수
              ng_today_cnt = len(df_uniq[df_uniq['ox'] == 'NG'])
 
     return {
@@ -330,6 +333,7 @@ def get_dashboard_stats():
         "daily_avg": daily_avg,
         "maint_cnt": maint_today_cnt,
         "ng_cnt": ng_today_cnt,
+        "check_cnt": check_today_cnt, # [New]
         "df_prod": df_prod # 분석용 원본 전달
     }
 
@@ -442,7 +446,8 @@ def generate_production_report_pdf(df_prod, df_inv, date_str):
             with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
         os.unlink(tmp_file.name)
         return pdf_bytes
-    except: return None
+    except Exception as e:
+        return None
 
 def generate_all_daily_check_pdf(date_str):
     try:
@@ -767,7 +772,10 @@ def run_app():
                 
                 # KPI 4: 금일 점검 부적합 (New)
                 ng_val = metrics['ng_cnt']
-                k4.metric("금일 점검 부적합", f"{ng_val} 건", "조치 필요" if ng_val > 0 else "정상", delta_color="inverse")
+                check_val = metrics['check_cnt']
+                # [수정] 점검 현황 상세 표시 (NG / Total)
+                check_display = f"{ng_val} 건 ({ng_val}/{check_val})" if check_val > 0 else f"{ng_val} 건 (0/0)"
+                k4.metric("금일 점검 부적합", check_display, "조치 필요" if ng_val > 0 else "정상", delta_color="inverse")
                 
                 # 2. 긴급 상황 경고 (조건부 표시)
                 st.markdown("---")
