@@ -9,3 +9,4 @@ fpdf
 oauth2client
 gspread-dataframe
 streamlit-drawable-canvas
+matplotlib

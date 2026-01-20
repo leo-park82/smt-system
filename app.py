@@ -12,10 +12,12 @@ import re
 from fpdf import FPDF
 import streamlit.components.v1 as components
 
-# [수정] Matplotlib 백엔드 설정 (서버 충돌 방지)
-import matplotlib
-matplotlib.use('Agg') 
+# [수정] Matplotlib 백엔드 설정 및 라이브러리 로드 (안전하게 감싸기)
+HAS_MATPLOTLIB = False
 try:
+    import matplotlib
+    # 서버 환경(Headless)에서 GUI 창이 뜨지 않도록 설정
+    matplotlib.use('Agg') 
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
     HAS_MATPLOTLIB = True
@@ -51,7 +53,8 @@ st.markdown("""
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
     html, body, [class*="css"] { font-family: 'Pretendard', sans-serif !important; color: #1e293b; }
     .stApp { background-color: #f8fafc; }
-    /* 탭 스타일 등 기존 스타일 유지 */
+    
+    /* 탭(라디오버튼) 스타일 개선 */
     div.row-widget.stRadio > div { 
         flex-direction: row !important; 
         justify-content: flex-start;
@@ -774,9 +777,6 @@ def run_app():
                                                 else: 
                                                     update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                                 
-                                                # 세션값 초기화는 여기서는 하지 않고(위젯 충돌 방지), 다음 리런시 빈값으로 시작하도록 유도하거나 
-                                                # 사용자가 직접 입력하게 둠. 여기서는 성공 메시지 후 리런.
-                                                # 편의상 st.session_state 직접 조작보다 리런 유도
                                                 st.session_state.code_in = "" 
                                                 st.session_state.name_in = ""
                                                 
