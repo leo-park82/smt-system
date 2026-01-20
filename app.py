@@ -43,36 +43,27 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# 0. 초기화 및 세션 관리 (가장 중요 - White Screen 방지)
+# 0. 초기화 및 세션 관리
 # ------------------------------------------------------------------
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
 def init_session():
     """앱 시작 시 필수 세션 상태를 모두 초기화합니다."""
-    # [수정] 초기화 항목을 명확히 정의하여 KeyError 방지
+    # [수정] 복잡한 상태 제어 변수(need_rerun, main_tab) 제거 및 필수값만 유지
     defaults = {
         "logged_in": False,
-        "user_info": {},         # None 대신 빈 딕셔너리로 초기화 (KeyError 방지)
-        "main_tab": 0,           # 메인 탭 인덱스
-        "need_rerun": False,     # 안전한 리런을 위한 플래그 (지연 리런)
-        "prod_qty": 100,         # 생산 수량 기본값
+        "user_info": {},
+        "prod_qty": 100,
         "code_in": "",
         "name_in": "",
-        "maint_parts": []        # 정비 부품 리스트
+        "maint_parts": []
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-# 앱 시작 시 무조건 호출 (최상단)
+# 앱 시작 시 무조건 호출
 init_session()
-
-def safe_rerun():
-    """
-    [핵심] 즉시 st.rerun()을 호출하지 않고 플래그만 설정합니다.
-    앱의 실행 흐름이 끝난 후 마지막에 리런되도록 하여 UI 깨짐을 방지합니다.
-    """
-    st.session_state.need_rerun = True
 
 # ------------------------------------------------------------------
 # 1. 스타일 및 기본 설정
@@ -579,40 +570,38 @@ USERS = {
     "김윤석": {"name": "김윤석", "password_hash": make_hash("1734"), "role": "worker"},
     "김명숙": {"name": "김명숙", "password_hash": make_hash("8943"), "role": "worker"}
 }
+
 def check_password():
-    if st.session_state.logged_in: return True
-    
+    """
+    [수정] 로그인 페이지만 렌더링하고, 로그인 성공 시에만 rerun을 발생시킵니다.
+    메인 앱이 실행되지 않도록 호출부에서 st.stop() 처리할 예정입니다.
+    """
     col1, col2, col3 = st.columns([3, 4, 3])
     with col2:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         st.title("SMT")
         
-        # [수정] 폼 내부 로직 분리 (White Screen 방지)
         with st.form("login_form"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
             submitted = st.form_submit_button("로그인", use_container_width=True)
             
-        # 폼 로직을 밖으로 빼서 처리 (중요)
         if submitted:
             if id in USERS and make_hash(pw) == USERS[id]["password_hash"]:
                 st.session_state.logged_in = True
                 st.session_state.user_info = USERS[id]
                 st.session_state.user_info['id'] = id
                 st.success("로그인 성공!")
-                # [수정] 바로 rerun하지 않고 safe_rerun (지연 리런) 사용
-                safe_rerun()
+                # [핵심] 로그인은 앱의 상태가 완전히 바뀌는 유일한 시점이므로 즉시 rerun 허용
+                st.rerun()
             else:
                 st.error("로그인 실패")
         
         if st.button("👀 게스트(뷰어)로 입장", use_container_width=True):
             st.session_state.logged_in = True
             st.session_state.user_info = {"name": "게스트", "role": "viewer", "id": "guest"}
-            # [수정] 게스트 로그인 시에도 safe_rerun 사용
-            safe_rerun()
-            
-    return False
+            st.rerun()
 
 # ------------------------------------------------------------------
 # [신규] 자연어 처리 및 데이터 조회 아키텍처 (업그레이드)
@@ -665,43 +654,30 @@ def detect_drop(df_filtered):
 # 5. 메인 앱 실행 함수 (run_app)
 # ------------------------------------------------------------------
 def run_app():
-    # [방어 코드] 탭 인덱스 유효성 검사
     tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"]
     
-    current_tab = st.session_state.get("main_tab", 0)
-    if not isinstance(current_tab, int) or current_tab < 0 or current_tab >= len(tab_names):
-        st.session_state.main_tab = 0
+    # [수정] 사이드바는 로그인 상태가 보장된 여기서 실행
+    with st.sidebar:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", width=180)
+        st.title("SMT")
+        u = st.session_state.get('user_info', {})
+        role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
+        st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
+        if st.button("로그아웃", use_container_width=True): 
+            for key in st.session_state.keys():
+                del st.session_state[key]
+            init_session() 
+            st.rerun() # 로그아웃은 즉시 리런
 
-    # [수정] 사이드바 렌더링을 로그인 상태에서만 실행 (KeyError 방지)
-    if st.session_state.get("logged_in"):
-        with st.sidebar:
-            if os.path.exists("logo.png"):
-                st.image("logo.png", width=180)
-            st.title("SMT")
-            u = st.session_state.get('user_info', {})
-            role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
-            st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
-            if st.button("로그아웃", use_container_width=True): 
-                for key in st.session_state.keys():
-                    del st.session_state[key]
-                init_session() # 초기화 후 리런
-                st.rerun()
-
-    def update_tab_state():
-        selection = st.session_state.main_tab_radio
-        try:
-            st.session_state.main_tab = tab_names.index(selection)
-        except ValueError:
-            st.session_state.main_tab = 0
-
+    # [수정] Session State로 탭 인덱스 제어하던 로직(on_change 등) 제거
+    # Streamlit 자체 위젯 State에 맡겨서 안정성 확보
     selected_tab = st.radio(
         "메인 메뉴", 
         tab_names, 
-        index=st.session_state.main_tab, 
         horizontal=True, 
         label_visibility="collapsed",
-        key="main_tab_radio",
-        on_change=update_tab_state
+        key="main_tab_radio"
     )
 
     # --- 1. 대시보드 탭 ---
@@ -783,7 +759,6 @@ def run_app():
                                 submitted = st.form_submit_button("실적 저장", type="primary", use_container_width=True)
                             
                             if submitted:
-                                # 폼 제출 시 session_state에서 안전하게 값 가져오기
                                 c_code = st.session_state.get("code_in", "").upper().strip()
                                 c_name = st.session_state.get("name_in", "")
                                 c_qty = st.session_state.get("prod_qty", 0)
@@ -791,13 +766,12 @@ def run_app():
                                 if not c_code:
                                     st.error("품목 코드를 입력해주세요.")
                                 elif not c_name:
-                                    # 이름이 비어있으면 맵에서 다시 찾아보기 (방어 로직)
                                     if c_code in item_map:
                                         c_name = item_map[c_code]
                                         st.session_state.name_in = c_name
                                     else:
                                         st.error("제품명을 입력해주세요.")
-                                        c_name = None # 저장 방지
+                                        c_name = None 
 
                                 if c_name:
                                     with st.spinner("저장 중입니다..."):
@@ -811,14 +785,10 @@ def run_app():
                                                 else: 
                                                     update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                                 
-                                                # [중요] 값 초기화는 리런 시 반영됨
+                                                # [핵심] 리런 없음! 성공 메시지만 표시하여 멈춤 방지
+                                                st.success("✅ 저장되었습니다!")
                                                 st.session_state.code_in = "" 
                                                 st.session_state.name_in = ""
-                                                
-                                                st.success("✅ 저장되었습니다!")
-                                                st.toast("저장이 완료되었습니다.", icon="💾")
-                                                # [수정] 저장 후 안전하게 리런 트리거
-                                                safe_rerun()
                                             else:
                                                 st.error("저장 실패: 네트워크 오류")
                                         except Exception as e:
@@ -877,9 +847,8 @@ def run_app():
                                                 all_records = all_records.drop(idx_to_drop)
                                             
                                             save_data(all_records, SHEET_RECORDS)
-                                            st.success("삭제 완료")
-                                            # [수정] 삭제 후 리런 트리거
-                                            safe_rerun()
+                                            # [핵심] 리런 없음
+                                            st.success("삭제 완료! (새로고침하면 반영됩니다)")
                                     except Exception as e: st.error(f"삭제 실패: {e}")
                         else: 
                             df_user = recent_df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
@@ -926,8 +895,6 @@ def run_app():
                                         
                                         save_data(all_inv, SHEET_INVENTORY)
                                         st.success("삭제 완료")
-                                        # [수정] 리런 트리거
-                                        safe_rerun()
                                 except Exception as e: st.error(f"오류: {e}")
                     else: st.dataframe(df_inv, use_container_width=True)
                 else: st.info("재고 데이터가 없습니다.")
@@ -1281,8 +1248,7 @@ def run_app():
                                 st.dataframe(pd.DataFrame(st.session_state.maint_parts), use_container_width=True, hide_index=True)
                                 if st.button("목록 초기화", type="secondary"):
                                     st.session_state.maint_parts = []
-                                    # [수정] 리런 트리거
-                                    safe_rerun()
+                                    # [수정] 리런 없이 성공 메시지만
                                     st.success("초기화됨")
 
                             calc_cost = sum([p['금액'] for p in st.session_state.maint_parts])
@@ -1303,9 +1269,6 @@ def run_app():
                                     if append_data(rec, SHEET_MAINTENANCE):
                                         st.session_state.maint_parts = []
                                         st.success("✅ 정비 이력이 저장되었습니다.")
-                                        st.toast("저장 완료!", icon="🔧")
-                                        # [수정] 리런 트리거
-                                        safe_rerun()
                                     else:
                                         st.error("저장 실패")
 
@@ -1335,8 +1298,6 @@ def run_app():
                                                 
                                                 save_data(all_data, SHEET_MAINTENANCE)
                                                 st.success(f"{len(to_delete)}건 삭제 완료")
-                                                # [수정] 리런 트리거
-                                                safe_rerun()
                                         except Exception as e: st.error(f"삭제 중 오류: {e}")
                             
                             with c_btn2:
@@ -1356,8 +1317,6 @@ def run_app():
                                             
                                             save_data(all_data, SHEET_MAINTENANCE)
                                             st.success("수정사항 저장 완료")
-                                            # [수정] 리런 트리거
-                                            safe_rerun()
                                     except Exception as e: st.error(f"저장 중 오류: {e}")
                         else: st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
             
@@ -1516,8 +1475,6 @@ def run_app():
                                 if rows_to_add:
                                     append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                                     st.success("✅ 저장이 완료되었습니다.")
-                                    # [수정] 리런 트리거
-                                    safe_rerun()
                                 else: st.warning("저장할 내용이 없습니다.")
                     else: st.info("🔒 뷰어 모드입니다.")
 
@@ -1549,8 +1506,6 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_ITEMS)
                             st.success("저장 완료")
-                            # [수정] 리런 트리거
-                            safe_rerun()
                 with t2:
                     st.markdown("#### 설비 마스터 관리")
                     df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
@@ -1559,8 +1514,6 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_EQUIPMENT)
                             st.success("저장 완료")
-                            # [수정] 리런 트리거
-                            safe_rerun()
                 with t3:
                     st.markdown("#### 일일점검 항목 관리 (Master)")
                     st.caption("여기서 수정한 내용은 '일일점검관리' -> '점검 입력'에 반영됩니다.")
@@ -1570,18 +1523,16 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_CHECK_MASTER)
                             st.success("저장 완료")
-                            # [수정] 리런 트리거
-                            safe_rerun()
             except Exception as e: st.error(f"기준정보 관리 로딩 오류: {e}")
         else: st.error("🚫 접근 권한이 없습니다. (관리자 전용)")
 
 # ------------------------------------------------------------------
 # 1. 메인 실행 (White Screen 방지를 위한 패턴 적용)
 # ------------------------------------------------------------------
-if check_password():
-    run_app()
+# [핵심] 로그인 여부 먼저 확인 -> 아니면 로그인 페이지 -> 강제 중단
+if not st.session_state.get("logged_in", False):
+    check_password()
+    st.stop()  # 로그인 안됐으면 여기서 실행 끝! 밑에 코드 실행 안 함.
 
-# [핵심] 모든 로직 처리 후 마지막에 안전하게 리런 실행
-if st.session_state.get("need_rerun"):
-    st.session_state.need_rerun = False
-    st.rerun()
+# [핵심] 로그인 통과했을 때만 실행됨 (동시 실행 방지)
+run_app()
