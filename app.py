@@ -49,14 +49,15 @@ st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_si
 
 def init_session():
     """앱 시작 시 필수 세션 상태를 모두 초기화합니다."""
-    # [수정] 복잡한 상태 제어 변수(need_rerun, main_tab) 제거 및 필수값만 유지
+    # [수정] need_rerun 플래그를 포함하여 초기화
     defaults = {
         "logged_in": False,
         "user_info": {},
         "prod_qty": 100,
         "code_in": "",
         "name_in": "",
-        "maint_parts": []
+        "maint_parts": [],
+        "need_rerun": False
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -573,8 +574,8 @@ USERS = {
 
 def check_password():
     """
-    [수정] 로그인 페이지만 렌더링하고, 로그인 성공 시에만 rerun을 발생시킵니다.
-    메인 앱이 실행되지 않도록 호출부에서 st.stop() 처리할 예정입니다.
+    [수정] 로그인 성공 시에는 예외적으로 리런 플래그만 설정하고 함수를 종료합니다.
+    실제 리런은 함수 종료 후 메인 로직에서 제어합니다.
     """
     col1, col2, col3 = st.columns([3, 4, 3])
     with col2:
@@ -593,15 +594,15 @@ def check_password():
                 st.session_state.user_info = USERS[id]
                 st.session_state.user_info['id'] = id
                 st.success("로그인 성공!")
-                # [핵심] 로그인은 앱의 상태가 완전히 바뀌는 유일한 시점이므로 즉시 rerun 허용
-                st.rerun()
+                # [핵심] 리런은 플래그 설정 후 지연 실행
+                st.session_state.need_rerun = True
             else:
                 st.error("로그인 실패")
         
         if st.button("👀 게스트(뷰어)로 입장", use_container_width=True):
             st.session_state.logged_in = True
             st.session_state.user_info = {"name": "게스트", "role": "viewer", "id": "guest"}
-            st.rerun()
+            st.session_state.need_rerun = True
 
 # ------------------------------------------------------------------
 # [신규] 자연어 처리 및 데이터 조회 아키텍처 (업그레이드)
@@ -656,19 +657,26 @@ def detect_drop(df_filtered):
 def run_app():
     tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"]
     
-    # [수정] 사이드바는 로그인 상태가 보장된 여기서 실행
-    with st.sidebar:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", width=180)
-        st.title("SMT")
-        u = st.session_state.get('user_info', {})
-        role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
-        st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
-        if st.button("로그아웃", use_container_width=True): 
-            for key in st.session_state.keys():
-                del st.session_state[key]
-            init_session() 
-            st.rerun() # 로그아웃은 즉시 리런
+    # [수정] 사이드바 로그아웃 안전 처리
+    logout_clicked = False
+    if st.session_state.get("logged_in"):
+        with st.sidebar:
+            if os.path.exists("logo.png"):
+                st.image("logo.png", width=180)
+            st.title("SMT")
+            u = st.session_state.get('user_info', {})
+            role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
+            st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
+            if st.button("로그아웃", use_container_width=True): 
+                logout_clicked = True
+    
+    # [핵심] 로그아웃 로직을 렌더링 컨텍스트 밖으로 분리 (Safe Logout)
+    if logout_clicked:
+        for key in st.session_state.keys():
+            del st.session_state[key]
+        init_session() 
+        st.session_state.need_rerun = True
+        return # 더 이상 렌더링하지 않고 리턴
 
     # [수정] Session State로 탭 인덱스 제어하던 로직(on_change 등) 제거
     # Streamlit 자체 위젯 State에 맡겨서 안정성 확보
@@ -1529,10 +1537,19 @@ def run_app():
 # ------------------------------------------------------------------
 # 1. 메인 실행 (White Screen 방지를 위한 패턴 적용)
 # ------------------------------------------------------------------
-# [핵심] 로그인 여부 먼저 확인 -> 아니면 로그인 페이지 -> 강제 중단
+# [핵심] 로그인 체크 및 리런 처리
 if not st.session_state.get("logged_in", False):
     check_password()
-    st.stop()  # 로그인 안됐으면 여기서 실행 끝! 밑에 코드 실행 안 함.
+    # 로그인 성공 직후 need_rerun 플래그가 True면 리런
+    if st.session_state.get("need_rerun"):
+        st.session_state.need_rerun = False
+        st.rerun()
+    st.stop()  # 로그인 안됐으면 여기서 실행 중단
 
-# [핵심] 로그인 통과했을 때만 실행됨 (동시 실행 방지)
+# [핵심] 메인 앱 실행 (로그인 통과 시에만 도달)
 run_app()
+
+# [핵심] 로그아웃 등 전체 리런이 필요한 경우 마지막에 처리
+if st.session_state.get("need_rerun"):
+    st.session_state.need_rerun = False
+    st.rerun()
