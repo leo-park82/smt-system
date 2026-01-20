@@ -794,9 +794,7 @@ def run_app():
                                                     update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                                 
                                                 # [핵심] 리런 없음! 성공 메시지만 표시하여 멈춤 방지
-                                                st.success("✅ 저장되었습니다!")
-                                                st.session_state.code_in = "" 
-                                                st.session_state.name_in = ""
+                                                st.success("✅ 저장되었습니다! (입력값은 그대로 유지됩니다)")
                                             else:
                                                 st.error("저장 실패: 네트워크 오류")
                                         except Exception as e:
