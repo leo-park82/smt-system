@@ -590,22 +590,22 @@ def check_password():
             st.image("logo.png", use_container_width=True)
         st.title("SMT")
         
-        # [중요] 폼 내부 구조 단순화 (st.form 안에는 위젯만)
+        # [수정] 폼 내부 로직 분리 (White Screen 방지)
         with st.form("login_form"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
             submitted = st.form_submit_button("로그인", use_container_width=True)
             
-            if submitted:
-                if id in USERS and make_hash(pw) == USERS[id]["password_hash"]:
-                    st.session_state.logged_in = True
-                    st.session_state.user_info = USERS[id]
-                    st.session_state.user_info['id'] = id
-                    st.success("로그인 성공!")
-                    # [수정] 로그인 성공 시에는 예외적으로 즉시 리런해야 메인 화면으로 전환됨
-                    st.rerun()
-                else:
-                    st.error("로그인 실패")
+        # 폼 로직을 밖으로 빼서 처리 (중요)
+        if submitted:
+            if id in USERS and make_hash(pw) == USERS[id]["password_hash"]:
+                st.session_state.logged_in = True
+                st.session_state.user_info = USERS[id]
+                st.session_state.user_info['id'] = id
+                st.success("로그인 성공!")
+                st.rerun()
+            else:
+                st.error("로그인 실패")
         
         if st.button("👀 게스트(뷰어)로 입장", use_container_width=True):
             st.session_state.logged_in = True
@@ -673,18 +673,20 @@ def run_app():
     if not isinstance(current_tab, int) or current_tab < 0 or current_tab >= len(tab_names):
         st.session_state.main_tab = 0
 
-    with st.sidebar:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", width=180)
-        st.title("SMT")
-        u = st.session_state.get('user_info', {})
-        role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
-        st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
-        if st.button("로그아웃", use_container_width=True): 
-            for key in st.session_state.keys():
-                del st.session_state[key]
-            init_session() # 초기화 후 리런
-            st.rerun()
+    # [수정] 사이드바 렌더링을 로그인 상태에서만 실행 (KeyError 방지)
+    if st.session_state.get("logged_in"):
+        with st.sidebar:
+            if os.path.exists("logo.png"):
+                st.image("logo.png", width=180)
+            st.title("SMT")
+            u = st.session_state.get('user_info', {})
+            role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
+            st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
+            if st.button("로그아웃", use_container_width=True): 
+                for key in st.session_state.keys():
+                    del st.session_state[key]
+                init_session() # 초기화 후 리런
+                st.rerun()
 
     def update_tab_state():
         selection = st.session_state.main_tab_radio
@@ -777,12 +779,27 @@ def run_app():
                             qty = st.number_input("생산 수량", min_value=1, key="prod_qty")
                             auto_deduct = st.checkbox("재고 차감 적용", value=True) if cat in ["후공정", "후공정 외주"] else False
                             
-                            # [수정] 안전한 저장 로직
-                            if st.button("실적 저장", type="primary", use_container_width=True):
-                                c_code = st.session_state.code_in.upper().strip()
-                                c_name = st.session_state.name_in
-                                c_qty = st.session_state.prod_qty
-                                
+                            # [수정] 안전한 저장 로직 (st.form 도입 및 상태 검증)
+                            with st.form("save_form"):
+                                submitted = st.form_submit_button("실적 저장", type="primary", use_container_width=True)
+                            
+                            if submitted:
+                                # 폼 제출 시 session_state에서 안전하게 값 가져오기
+                                c_code = st.session_state.get("code_in", "").upper().strip()
+                                c_name = st.session_state.get("name_in", "")
+                                c_qty = st.session_state.get("prod_qty", 0)
+
+                                if not c_code:
+                                    st.error("품목 코드를 입력해주세요.")
+                                elif not c_name:
+                                    # 이름이 비어있으면 맵에서 다시 찾아보기 (방어 로직)
+                                    if c_code in item_map:
+                                        c_name = item_map[c_code]
+                                        st.session_state.name_in = c_name
+                                    else:
+                                        st.error("제품명을 입력해주세요.")
+                                        c_name = None # 저장 방지
+
                                 if c_name:
                                     with st.spinner("저장 중입니다..."):
                                         try:
@@ -801,12 +818,10 @@ def run_app():
                                                 
                                                 st.success("✅ 저장되었습니다!")
                                                 st.toast("저장이 완료되었습니다. 다음 항목을 입력하세요.", icon="💾")
-                                                # safe_rerun()  <-- 제거
                                             else:
                                                 st.error("저장 실패: 네트워크 오류")
                                         except Exception as e:
                                             st.error(f"저장 중 오류 발생: {e}")
-                                else: st.toast("제품명을 입력하세요.", icon="⚠️")
 
                     else: st.info("🔒 뷰어 모드입니다.")
                 with c2:
