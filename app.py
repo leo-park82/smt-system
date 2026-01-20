@@ -12,11 +12,10 @@ import re
 from fpdf import FPDF
 import streamlit.components.v1 as components
 
-# [수정] Matplotlib 백엔드 설정 및 라이브러리 로드 (안전하게 감싸기)
+# [안전 장치] Matplotlib 백엔드 설정 (GUI 충돌 방지)
 HAS_MATPLOTLIB = False
 try:
     import matplotlib
-    # 서버 환경(Headless)에서 GUI 창이 뜨지 않도록 설정
     matplotlib.use('Agg') 
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
@@ -36,7 +35,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from gspread_dataframe import set_with_dataframe, get_as_dataframe
 
-# [안전 장치] 시각화 라이브러리 로드
+# [안전 장치] Altair 로드
 try:
     import altair as alt
     HAS_ALTAIR = True
@@ -44,10 +43,36 @@ except Exception as e:
     HAS_ALTAIR = False
 
 # ------------------------------------------------------------------
-# 1. 기본 설정 및 데이터 스키마
+# 0. 초기화 및 세션 관리 (가장 중요 - White Screen 방지)
 # ------------------------------------------------------------------
 st.set_page_config(page_title="SMT", page_icon="🏭", layout="wide", initial_sidebar_state="expanded")
 
+def init_session():
+    """앱 시작 시 필수 세션 상태를 모두 초기화합니다."""
+    defaults = {
+        "logged_in": False,
+        "user_info": None,
+        "main_tab": 0,           # 메인 탭 인덱스
+        "need_rerun": False,     # 안전한 리런을 위한 플래그
+        "prod_qty": 100,         # 생산 수량 기본값
+        "code_in": "",
+        "name_in": "",
+        "maint_parts": []        # 정비 부품 리스트
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+# 앱 시작 시 무조건 호출
+init_session()
+
+def safe_rerun():
+    """플래그를 이용한 안전한 리런 트리거"""
+    st.session_state.need_rerun = True
+
+# ------------------------------------------------------------------
+# 1. 스타일 및 기본 설정
+# ------------------------------------------------------------------
 st.markdown("""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -80,6 +105,10 @@ st.markdown("""
     div.row-widget.stRadio > div > label:hover { 
         background-color: #f1f5f9; 
         color: #3b82f6;
+    }
+    /* 선택된 항목 스타일 (Streamlit DOM 구조에 따라 제한적 적용) */
+    div.row-widget.stRadio > div > label[data-baseweb="radio"] {
+        /* 선택 시 스타일 */
     }
     </style>
 """, unsafe_allow_html=True)
@@ -552,23 +581,6 @@ USERS = {
     "김명숙": {"name": "김명숙", "password_hash": make_hash("8943"), "role": "worker"}
 }
 def check_password():
-    if "logged_in" not in st.session_state: 
-        st.session_state.logged_in = False
-    
-    if not st.session_state.logged_in:
-        try:
-            qp = st.query_params
-            if "session" in qp:
-                saved_id = qp["session"]
-                if saved_id in USERS:
-                    st.session_state.logged_in = True
-                    st.session_state.user_info = USERS[saved_id]
-                    st.session_state.user_info['id'] = saved_id
-                elif saved_id == "guest":
-                    st.session_state.logged_in = True
-                    st.session_state.user_info = {"name": "게스트", "role": "viewer", "id": "guest"}
-        except: pass
-
     if st.session_state.logged_in: return True
     
     col1, col2, col3 = st.columns([3, 4, 3])
@@ -576,30 +588,28 @@ def check_password():
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         st.title("SMT")
-        with st.form("login"):
+        
+        # [중요] 폼 내부 구조 단순화 (st.form 안에는 위젯만)
+        with st.form("login_form"):
             id = st.text_input("ID")
             pw = st.text_input("PW", type="password")
             submitted = st.form_submit_button("로그인", use_container_width=True)
             
-            # [수정] 로그인 로직 안정화 (즉시 rerun 방지)
             if submitted:
                 if id in USERS and make_hash(pw) == USERS[id]["password_hash"]:
                     st.session_state.logged_in = True
                     st.session_state.user_info = USERS[id]
                     st.session_state.user_info['id'] = id
-                    try: st.query_params["session"] = id
-                    except: pass
-                    st.success("로그인 성공! 이동 중...")
-                    time.sleep(0.5) # 세션 저장 시간 확보
-                    st.rerun()
-                else: st.error("로그인 실패")
+                    st.success("로그인 성공!")
+                    # 여기서 즉시 rerun 하지 않고 플래그 설정
+                    st.session_state.need_rerun = True
+                else:
+                    st.error("로그인 실패")
         
         if st.button("👀 게스트(뷰어)로 입장", use_container_width=True):
             st.session_state.logged_in = True
             st.session_state.user_info = {"name": "게스트", "role": "viewer", "id": "guest"}
-            try: st.query_params["session"] = "guest"
-            except: pass
-            st.rerun()
+            st.session_state.need_rerun = True
             
     return False
 
@@ -654,27 +664,32 @@ def detect_drop(df_filtered):
 # 5. 메인 앱 실행 함수 (run_app)
 # ------------------------------------------------------------------
 def run_app():
-    if "main_tab" not in st.session_state:
+    # [방어 코드] 탭 인덱스 유효성 검사
+    tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"]
+    
+    current_tab = st.session_state.get("main_tab", 0)
+    if not isinstance(current_tab, int) or current_tab < 0 or current_tab >= len(tab_names):
         st.session_state.main_tab = 0
 
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", width=180)
         st.title("SMT")
-        u = st.session_state.user_info
-        role_badge = "👑 Admin" if u["role"] == "admin" else "👤 User"
-        st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u['name']}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
+        u = st.session_state.get('user_info', {})
+        role_badge = "👑 Admin" if u.get("role") == "admin" else "👤 User"
+        st.markdown(f"<div style='padding:10px; background:#f1f5f9; border-radius:8px; margin-bottom:10px;'><b>{u.get('name', 'User')}</b>님 ({role_badge})</div>", unsafe_allow_html=True)
         if st.button("로그아웃", use_container_width=True): 
-            st.session_state.logged_in = False
-            try: st.query_params.clear()
-            except: pass
+            for key in st.session_state.keys():
+                del st.session_state[key]
+            init_session() # 초기화 후 리런
             st.rerun()
 
-    tab_names = ["📊 대시보드", "🏭 생산관리", "🛠 설비보전", "✅ 일일점검", "⚙ 기준정보"]
-    
     def update_tab_state():
         selection = st.session_state.main_tab_radio
-        st.session_state.main_tab = tab_names.index(selection)
+        try:
+            st.session_state.main_tab = tab_names.index(selection)
+        except ValueError:
+            st.session_state.main_tab = 0
 
     selected_tab = st.radio(
         "메인 메뉴", 
@@ -739,11 +754,12 @@ def run_app():
                     if st.session_state.user_info['role'] in ['admin', 'worker']:
                         with st.container(border=True):
                             st.markdown("#### ✏️ 신규 생산 등록")
-                            with st.spinner("로딩 중..."):
-                                item_df = load_data(SHEET_ITEMS, COLS_ITEMS)
+                            item_df = load_data(SHEET_ITEMS, COLS_ITEMS)
                             
-                            if "prod_qty" not in st.session_state:
-                                st.session_state.prod_qty = 100
+                            # Session State 초기화 방어 코드
+                            if "prod_qty" not in st.session_state: st.session_state.prod_qty = 100
+                            if "code_in" not in st.session_state: st.session_state.code_in = ""
+                            if "name_in" not in st.session_state: st.session_state.name_in = ""
                             
                             date_input = st.date_input("작업 일자", value=get_now())
                             cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"])
@@ -759,14 +775,14 @@ def run_app():
                             qty = st.number_input("생산 수량", min_value=1, key="prod_qty")
                             auto_deduct = st.checkbox("재고 차감 적용", value=True) if cat in ["후공정", "후공정 외주"] else False
                             
-                            # [수정] 버튼 클릭 시 로직 처리 (on_click 제거 및 spinner 사용)
+                            # [수정] 안전한 저장 로직
                             if st.button("실적 저장", type="primary", use_container_width=True):
                                 c_code = st.session_state.code_in.upper().strip()
                                 c_name = st.session_state.name_in
                                 c_qty = st.session_state.prod_qty
                                 
                                 if c_name:
-                                    with st.spinner("저장 중입니다... (잠시만 기다려주세요)"):
+                                    with st.spinner("저장 중입니다..."):
                                         try:
                                             rec = {"날짜":str(date_input), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":get_now().strftime("%Y-%m-%d %H:%M"), "작성자": st.session_state.user_info['id']}
                                             if append_data(rec, SHEET_RECORDS):
@@ -777,12 +793,11 @@ def run_app():
                                                 else: 
                                                     update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                                 
+                                                # 입력 폼 초기화는 rerun 시 반영되도록
                                                 st.session_state.code_in = "" 
                                                 st.session_state.name_in = ""
-                                                
                                                 st.success("저장되었습니다.")
-                                                time.sleep(0.5)
-                                                st.rerun()
+                                                safe_rerun()
                                             else:
                                                 st.error("저장 실패: 네트워크 오류")
                                         except Exception as e:
@@ -843,9 +858,8 @@ def run_app():
                                             
                                             save_data(all_records, SHEET_RECORDS)
                                             st.success("삭제 완료")
-                                            time.sleep(0.5)
                                             st.session_state.main_tab = 1
-                                            st.rerun()
+                                            safe_rerun()
                                     except Exception as e: st.error(f"삭제 실패: {e}")
                         else: 
                             df_user = recent_df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
@@ -893,7 +907,7 @@ def run_app():
                                         save_data(all_inv, SHEET_INVENTORY)
                                         st.success("삭제 완료")
                                         st.session_state.main_tab = 1
-                                        st.rerun()
+                                        safe_rerun()
                                 except Exception as e: st.error(f"오류: {e}")
                     else: st.dataframe(df_inv, use_container_width=True)
                 else: st.info("재고 데이터가 없습니다.")
@@ -1247,13 +1261,13 @@ def run_app():
                                 st.dataframe(pd.DataFrame(st.session_state.maint_parts), use_container_width=True, hide_index=True)
                                 if st.button("목록 초기화", type="secondary"):
                                     st.session_state.maint_parts = []
-                                    st.rerun()
+                                    safe_rerun()
 
                             calc_cost = sum([p['금액'] for p in st.session_state.maint_parts])
                             f_cost = st.number_input("총 정비 비용", value=calc_cost, step=1000)
                             f_down = st.number_input("비가동(분)", step=10)
                             
-                            # [수정] 버튼 클릭 방식 변경
+                            # [수정] 안전한 저장 로직
                             if st.button("저장", type="primary"):
                                 with st.spinner("저장 중..."):
                                     parts_text = ", ".join([f"{item['부품명']}({item['금액']:,})" for item in st.session_state.maint_parts])
@@ -1267,8 +1281,7 @@ def run_app():
                                     if append_data(rec, SHEET_MAINTENANCE):
                                         st.session_state.maint_parts = []
                                         st.success("저장 완료")
-                                        time.sleep(0.5)
-                                        st.rerun()
+                                        safe_rerun()
                                     else:
                                         st.error("저장 실패")
 
@@ -1299,7 +1312,7 @@ def run_app():
                                                 save_data(all_data, SHEET_MAINTENANCE)
                                                 st.success(f"{len(to_delete)}건 삭제 완료")
                                                 st.session_state.main_tab = 2
-                                                st.rerun()
+                                                safe_rerun()
                                         except Exception as e: st.error(f"삭제 중 오류: {e}")
                             
                             with c_btn2:
@@ -1320,7 +1333,7 @@ def run_app():
                                             save_data(all_data, SHEET_MAINTENANCE)
                                             st.success("수정사항 저장 완료")
                                             st.session_state.main_tab = 2
-                                            st.rerun()
+                                            safe_rerun()
                                     except Exception as e: st.error(f"저장 중 오류: {e}")
                         else: st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
             
@@ -1480,8 +1493,7 @@ def run_app():
                                     append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                                     st.success("저장되었습니다.")
                                     st.session_state.main_tab = 3
-                                    time.sleep(0.5)
-                                    st.rerun()
+                                    safe_rerun()
                                 else: st.warning("저장할 내용이 없습니다.")
                     else: st.info("🔒 뷰어 모드입니다.")
 
@@ -1513,7 +1525,7 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_ITEMS)
                             st.session_state.main_tab = 4
-                            st.rerun()
+                            safe_rerun()
                 with t2:
                     st.markdown("#### 설비 마스터 관리")
                     df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
@@ -1522,7 +1534,7 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_EQUIPMENT)
                             st.session_state.main_tab = 4
-                            st.rerun()
+                            safe_rerun()
                 with t3:
                     st.markdown("#### 일일점검 항목 관리 (Master)")
                     st.caption("여기서 수정한 내용은 '일일점검관리' -> '점검 입력'에 반영됩니다.")
@@ -1532,12 +1544,18 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_CHECK_MASTER)
                             st.session_state.main_tab = 4
-                            st.rerun()
+                            safe_rerun()
             except Exception as e: st.error(f"기준정보 관리 로딩 오류: {e}")
         else: st.error("🚫 접근 권한이 없습니다. (관리자 전용)")
 
 # ------------------------------------------------------------------
-# 1. 메인 실행
+# 1. 메인 실행 (White Screen 방지를 위한 패턴 적용)
 # ------------------------------------------------------------------
 if check_password():
     run_app()
+
+# [핵심] 리런 로직을 앱의 가장 마지막에 배치하여
+# 모든 UI 렌더링 후 안전하게 리로드되도록 함
+if st.session_state.get("need_rerun"):
+    st.session_state.need_rerun = False
+    st.rerun()
