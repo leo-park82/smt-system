@@ -54,7 +54,7 @@ def init_session():
         "logged_in": False,
         "user_info": {},         # None 대신 빈 딕셔너리로 초기화 (KeyError 방지)
         "main_tab": 0,           # 메인 탭 인덱스
-        "need_rerun": False,     # 안전한 리런을 위한 플래그
+        "need_rerun": False,     # 안전한 리런을 위한 플래그 (지연 리런)
         "prod_qty": 100,         # 생산 수량 기본값
         "code_in": "",
         "name_in": "",
@@ -64,16 +64,15 @@ def init_session():
         if k not in st.session_state:
             st.session_state[k] = v
 
-# 앱 시작 시 무조건 호출
+# 앱 시작 시 무조건 호출 (최상단)
 init_session()
 
 def safe_rerun():
     """
-    [수정] 화면 멈춤(White Screen) 방지를 위해 리런 로직을 비활성화합니다.
-    데이터 저장 후 화면이 깜빡이거나 멈추는 현상을 막기 위함입니다.
+    [핵심] 즉시 st.rerun()을 호출하지 않고 플래그만 설정합니다.
+    앱의 실행 흐름이 끝난 후 마지막에 리런되도록 하여 UI 깨짐을 방지합니다.
     """
-    # st.session_state.need_rerun = True  # 임시 주석 처리
-    pass
+    st.session_state.need_rerun = True
 
 # ------------------------------------------------------------------
 # 1. 스타일 및 기본 설정
@@ -470,8 +469,7 @@ def generate_all_daily_check_pdf(date_str):
             with open(tmp_file.name, "rb") as f: pdf_bytes = f.read()
         os.unlink(tmp_file.name)
         return pdf_bytes
-    except Exception as e:
-        return None
+    except: return None
 
 def generate_production_report_pdf(df_prod, df_inv, date_str):
     try:
@@ -603,15 +601,16 @@ def check_password():
                 st.session_state.user_info = USERS[id]
                 st.session_state.user_info['id'] = id
                 st.success("로그인 성공!")
-                st.rerun()
+                # [수정] 바로 rerun하지 않고 safe_rerun (지연 리런) 사용
+                safe_rerun()
             else:
                 st.error("로그인 실패")
         
         if st.button("👀 게스트(뷰어)로 입장", use_container_width=True):
             st.session_state.logged_in = True
             st.session_state.user_info = {"name": "게스트", "role": "viewer", "id": "guest"}
-            # [수정] 게스트 로그인 시에도 즉시 리런
-            st.rerun()
+            # [수정] 게스트 로그인 시에도 safe_rerun 사용
+            safe_rerun()
             
     return False
 
@@ -812,12 +811,14 @@ def run_app():
                                                 else: 
                                                     update_inventory(c_code, c_name, c_qty, f"생산입고({cat})", st.session_state.user_info['id'])
                                                 
-                                                # [중요] 리런 제거: 값 초기화는 다음 상호작용 시 반영됨
+                                                # [중요] 값 초기화는 리런 시 반영됨
                                                 st.session_state.code_in = "" 
                                                 st.session_state.name_in = ""
                                                 
                                                 st.success("✅ 저장되었습니다!")
-                                                st.toast("저장이 완료되었습니다. 다음 항목을 입력하세요.", icon="💾")
+                                                st.toast("저장이 완료되었습니다.", icon="💾")
+                                                # [수정] 저장 후 안전하게 리런 트리거
+                                                safe_rerun()
                                             else:
                                                 st.error("저장 실패: 네트워크 오류")
                                         except Exception as e:
@@ -877,8 +878,8 @@ def run_app():
                                             
                                             save_data(all_records, SHEET_RECORDS)
                                             st.success("삭제 완료")
-                                            # st.session_state.main_tab = 1 <-- 제거 (탭 강제 이동 금지)
-                                            # safe_rerun() <-- 제거
+                                            # [수정] 삭제 후 리런 트리거
+                                            safe_rerun()
                                     except Exception as e: st.error(f"삭제 실패: {e}")
                         else: 
                             df_user = recent_df.head(50)[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간_표시', '작성자']]
@@ -925,8 +926,8 @@ def run_app():
                                         
                                         save_data(all_inv, SHEET_INVENTORY)
                                         st.success("삭제 완료")
-                                        # st.session_state.main_tab = 1 <-- 제거
-                                        # safe_rerun() <-- 제거
+                                        # [수정] 리런 트리거
+                                        safe_rerun()
                                 except Exception as e: st.error(f"오류: {e}")
                     else: st.dataframe(df_inv, use_container_width=True)
                 else: st.info("재고 데이터가 없습니다.")
@@ -1280,7 +1281,8 @@ def run_app():
                                 st.dataframe(pd.DataFrame(st.session_state.maint_parts), use_container_width=True, hide_index=True)
                                 if st.button("목록 초기화", type="secondary"):
                                     st.session_state.maint_parts = []
-                                    # safe_rerun()  <-- 제거
+                                    # [수정] 리런 트리거
+                                    safe_rerun()
                                     st.success("초기화됨")
 
                             calc_cost = sum([p['금액'] for p in st.session_state.maint_parts])
@@ -1302,7 +1304,8 @@ def run_app():
                                         st.session_state.maint_parts = []
                                         st.success("✅ 정비 이력이 저장되었습니다.")
                                         st.toast("저장 완료!", icon="🔧")
-                                        # safe_rerun() <-- 제거
+                                        # [수정] 리런 트리거
+                                        safe_rerun()
                                     else:
                                         st.error("저장 실패")
 
@@ -1332,8 +1335,8 @@ def run_app():
                                                 
                                                 save_data(all_data, SHEET_MAINTENANCE)
                                                 st.success(f"{len(to_delete)}건 삭제 완료")
-                                                # st.session_state.main_tab = 2 <-- 제거
-                                                # safe_rerun() <-- 제거
+                                                # [수정] 리런 트리거
+                                                safe_rerun()
                                         except Exception as e: st.error(f"삭제 중 오류: {e}")
                             
                             with c_btn2:
@@ -1353,8 +1356,8 @@ def run_app():
                                             
                                             save_data(all_data, SHEET_MAINTENANCE)
                                             st.success("수정사항 저장 완료")
-                                            # st.session_state.main_tab = 2 <-- 제거
-                                            # safe_rerun() <-- 제거
+                                            # [수정] 리런 트리거
+                                            safe_rerun()
                                     except Exception as e: st.error(f"저장 중 오류: {e}")
                         else: st.dataframe(df.sort_values("입력시간", ascending=False).head(20), hide_index=True, use_container_width=True)
             
@@ -1513,8 +1516,8 @@ def run_app():
                                 if rows_to_add:
                                     append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                                     st.success("✅ 저장이 완료되었습니다.")
-                                    # st.session_state.main_tab = 3 <-- 제거
-                                    # safe_rerun() <-- 제거
+                                    # [수정] 리런 트리거
+                                    safe_rerun()
                                 else: st.warning("저장할 내용이 없습니다.")
                     else: st.info("🔒 뷰어 모드입니다.")
 
@@ -1546,7 +1549,8 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_ITEMS)
                             st.success("저장 완료")
-                            # safe_rerun() <-- 제거
+                            # [수정] 리런 트리거
+                            safe_rerun()
                 with t2:
                     st.markdown("#### 설비 마스터 관리")
                     df = load_data(SHEET_EQUIPMENT, COLS_EQUIPMENT)
@@ -1555,7 +1559,8 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_EQUIPMENT)
                             st.success("저장 완료")
-                            # safe_rerun() <-- 제거
+                            # [수정] 리런 트리거
+                            safe_rerun()
                 with t3:
                     st.markdown("#### 일일점검 항목 관리 (Master)")
                     st.caption("여기서 수정한 내용은 '일일점검관리' -> '점검 입력'에 반영됩니다.")
@@ -1565,7 +1570,8 @@ def run_app():
                         with st.spinner("저장 중..."):
                             save_data(edited, SHEET_CHECK_MASTER)
                             st.success("저장 완료")
-                            # safe_rerun() <-- 제거
+                            # [수정] 리런 트리거
+                            safe_rerun()
             except Exception as e: st.error(f"기준정보 관리 로딩 오류: {e}")
         else: st.error("🚫 접근 권한이 없습니다. (관리자 전용)")
 
@@ -1575,7 +1581,7 @@ def run_app():
 if check_password():
     run_app()
 
-# [핵심] 리런 로직을 주석 처리하여 무한 리런 방지
-# if st.session_state.get("need_rerun"):
-#    st.session_state.need_rerun = False
-#    st.rerun()
+# [핵심] 모든 로직 처리 후 마지막에 안전하게 리런 실행
+if st.session_state.get("need_rerun"):
+    st.session_state.need_rerun = False
+    st.rerun()
