@@ -749,7 +749,8 @@ def run_app():
                             if "name_in" not in st.session_state: st.session_state.name_in = ""
                             
                             date_input = st.date_input("작업 일자", value=get_now())
-                            cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"])
+                            # [변경] 후공정만 작업 추가
+                            cat = st.selectbox("공정 구분", ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주", "후공정만 작업"])
                             item_map = dict(zip(item_df['품목코드'], item_df['제품명'])) if not item_df.empty else {}
                             
                             def on_code():
@@ -786,7 +787,8 @@ def run_app():
                                         try:
                                             rec = {"날짜":str(date_input), "구분":cat, "품목코드":c_code, "제품명":c_name, "수량":c_qty, "입력시간":get_now().strftime("%Y-%m-%d %H:%M"), "작성자": st.session_state.user_info['id']}
                                             if append_data(rec, SHEET_RECORDS):
-                                                if cat == "배전":
+                                                # [변경] 후공정만 작업은 재고 처리에서 제외
+                                                if cat in ["배전", "후공정만 작업"]:
                                                     pass
                                                 elif cat in ["후공정", "후공정 외주"] and auto_deduct: 
                                                     update_inventory(c_code, c_name, -c_qty, f"생산출고({cat})", st.session_state.user_info['id'])
@@ -808,7 +810,8 @@ def run_app():
                         recent_df = df[['날짜', '구분', '품목코드', '제품명', '수량', '입력시간', '작성자']].copy()
                         recent_df['날짜_dt'] = pd.to_datetime(recent_df['날짜'], errors='coerce').dt.date
 
-                        cat_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주"]
+                        # [변경] 정렬 순서에 '후공정만 작업' 추가
+                        cat_order = ["PC", "CM1", "CM3", "배전", "샘플", "후공정", "후공정 외주", "후공정만 작업"]
                         recent_df['구분'] = pd.Categorical(recent_df['구분'], categories=cat_order, ordered=True)
 
                         recent_df['입력시간_norm'] = recent_df['입력시간'].apply(normalize_korean_datetime)
@@ -1129,7 +1132,8 @@ def run_app():
                                         if cat == "PC": return "PC"
                                         elif cat in ["CM1", "CM3"]: return "PLC (CM1+CM3)"
                                         elif cat == "배전": return "배전"
-                                        elif cat == "후공정": return "후공정"
+                                        # [변경] 후공정만 작업도 후공정에 포함
+                                        elif cat in ["후공정", "후공정만 작업"]: return "후공정"
                                         elif cat == "샘플": return "샘플"
                                         return None 
 
