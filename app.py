@@ -1485,6 +1485,8 @@ def run_app():
                                 if rows_to_add:
                                     append_rows(rows_to_add, SHEET_CHECK_RESULT, COLS_CHECK_RESULT)
                                     st.success("✅ 저장이 완료되었습니다.")
+                                    # [핵심 수정] 저장 후 즉시 리런하여 점검 상태(0/10 -> 10/10) 반영
+                                    st.session_state.need_rerun = True
                                 else: st.warning("저장할 내용이 없습니다.")
                     else: st.info("🔒 뷰어 모드입니다.")
 
